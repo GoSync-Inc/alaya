@@ -1,7 +1,6 @@
 """Idempotent seed script — creates demo workspace, seeds types/predicates, creates bootstrap API key."""
+
 import asyncio
-import os
-import sys
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -35,7 +34,7 @@ async def seed(session: AsyncSession) -> None:
     bootstrap_exists = any(k.is_bootstrap for k in keys)
 
     if not bootstrap_exists:
-        api_key, raw_key = await create_api_key(
+        _api_key, raw_key = await create_api_key(
             session,
             workspace_id=workspace.id,
             name="Bootstrap Key",

@@ -1,13 +1,13 @@
 """Tests for all repositories using mocked AsyncSession."""
 
 import uuid
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from alayaos_core.models.api_key import APIKey
-from alayaos_core.models.entity import EntityExternalId, L1Entity
+from alayaos_core.models.entity import L1Entity
 from alayaos_core.models.entity_type import EntityTypeDefinition
 from alayaos_core.models.event import L0Event
 from alayaos_core.models.predicate import PredicateDefinition
@@ -141,7 +141,7 @@ class TestWorkspaceRepository:
     async def test_list_returns_items(self) -> None:
         from alayaos_core.repositories.workspace import WorkspaceRepository
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         ws1 = Workspace(id=uuid.uuid4(), name="A", slug="a", settings={})
         ws1.created_at = now
         ws2 = Workspace(id=uuid.uuid4(), name="B", slug="b", settings={})
@@ -159,7 +159,7 @@ class TestWorkspaceRepository:
         """list returns limit items + next_cursor when has_more."""
         from alayaos_core.repositories.workspace import WorkspaceRepository
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         # simulate fetch limit+1 = 4 items for limit=3
         workspaces = []
         for i in range(4):
@@ -390,9 +390,7 @@ class TestPredicateRepository:
         session = make_session()
         session.execute.return_value = make_result(original)
         repo = PredicateRepository(session)
-        result = await repo.upsert_core(
-            workspace_id=ws_id, slug="status", display_name="Custom", value_type="number"
-        )
+        result = await repo.upsert_core(workspace_id=ws_id, slug="status", display_name="Custom", value_type="number")
         assert result is original
         session.add.assert_not_called()
 
@@ -415,7 +413,7 @@ class TestPredicateRepository:
         from alayaos_core.repositories.predicate import PredicateRepository
 
         ws_id = uuid.uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         preds = []
         for slug in ["p1", "p2"]:
             p = PredicateDefinition(
@@ -637,7 +635,7 @@ class TestAPIKeyRepository:
         from alayaos_core.repositories.api_key import APIKeyRepository
 
         ws_id = uuid.uuid4()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         keys = []
         for i, prefix in enumerate(["ak_111111111111", "ak_222222222222"]):
             k = APIKey(

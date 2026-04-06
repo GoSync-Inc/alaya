@@ -1,7 +1,7 @@
 """Tests for workspace service — create_workspace seeds core types and predicates."""
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -19,21 +19,21 @@ class TestCreateWorkspace:
         session.flush = AsyncMock()
 
         with (
-            patch("alayaos_core.services.workspace.WorkspaceRepository") as MockWsRepo,
-            patch("alayaos_core.services.workspace.EntityTypeRepository") as MockEtRepo,
-            patch("alayaos_core.services.workspace.PredicateRepository") as MockPredRepo,
+            patch("alayaos_core.services.workspace.WorkspaceRepository") as mock_ws_repo_cls,
+            patch("alayaos_core.services.workspace.EntityTypeRepository") as mock_et_repo_cls,
+            patch("alayaos_core.services.workspace.PredicateRepository") as mock_pred_repo_cls,
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.create = AsyncMock(return_value=ws)
-            MockWsRepo.return_value = ws_repo_inst
+            mock_ws_repo_cls.return_value = ws_repo_inst
 
             et_repo_inst = AsyncMock()
             et_repo_inst.upsert_core = AsyncMock(return_value=MagicMock())
-            MockEtRepo.return_value = et_repo_inst
+            mock_et_repo_cls.return_value = et_repo_inst
 
             pred_repo_inst = AsyncMock()
             pred_repo_inst.upsert_core = AsyncMock(return_value=MagicMock())
-            MockPredRepo.return_value = pred_repo_inst
+            mock_pred_repo_cls.return_value = pred_repo_inst
 
             result = await create_workspace(session, name="Demo", slug="demo")
 
@@ -48,21 +48,21 @@ class TestCreateWorkspace:
         session.flush = AsyncMock()
 
         with (
-            patch("alayaos_core.services.workspace.WorkspaceRepository") as MockWsRepo,
-            patch("alayaos_core.services.workspace.EntityTypeRepository") as MockEtRepo,
-            patch("alayaos_core.services.workspace.PredicateRepository") as MockPredRepo,
+            patch("alayaos_core.services.workspace.WorkspaceRepository") as mock_ws_repo_cls,
+            patch("alayaos_core.services.workspace.EntityTypeRepository") as mock_et_repo_cls,
+            patch("alayaos_core.services.workspace.PredicateRepository") as mock_pred_repo_cls,
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.create = AsyncMock(return_value=ws)
-            MockWsRepo.return_value = ws_repo_inst
+            mock_ws_repo_cls.return_value = ws_repo_inst
 
             et_repo_inst = AsyncMock()
             et_repo_inst.upsert_core = AsyncMock(return_value=MagicMock())
-            MockEtRepo.return_value = et_repo_inst
+            mock_et_repo_cls.return_value = et_repo_inst
 
             pred_repo_inst = AsyncMock()
             pred_repo_inst.upsert_core = AsyncMock(return_value=MagicMock())
-            MockPredRepo.return_value = pred_repo_inst
+            mock_pred_repo_cls.return_value = pred_repo_inst
 
             await create_workspace(session, name="Demo", slug="demo", settings={"theme": "dark"})
 
@@ -77,21 +77,21 @@ class TestCreateWorkspace:
         session.flush = AsyncMock()
 
         with (
-            patch("alayaos_core.services.workspace.WorkspaceRepository") as MockWsRepo,
-            patch("alayaos_core.services.workspace.EntityTypeRepository") as MockEtRepo,
-            patch("alayaos_core.services.workspace.PredicateRepository") as MockPredRepo,
+            patch("alayaos_core.services.workspace.WorkspaceRepository") as mock_ws_repo_cls,
+            patch("alayaos_core.services.workspace.EntityTypeRepository") as mock_et_repo_cls,
+            patch("alayaos_core.services.workspace.PredicateRepository") as mock_pred_repo_cls,
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.create = AsyncMock(return_value=ws)
-            MockWsRepo.return_value = ws_repo_inst
+            mock_ws_repo_cls.return_value = ws_repo_inst
 
             et_repo_inst = AsyncMock()
             et_repo_inst.upsert_core = AsyncMock(return_value=MagicMock())
-            MockEtRepo.return_value = et_repo_inst
+            mock_et_repo_cls.return_value = et_repo_inst
 
             pred_repo_inst = AsyncMock()
             pred_repo_inst.upsert_core = AsyncMock(return_value=MagicMock())
-            MockPredRepo.return_value = pred_repo_inst
+            mock_pred_repo_cls.return_value = pred_repo_inst
 
             await create_workspace(session, name="Demo", slug="demo")
 
@@ -106,21 +106,21 @@ class TestCreateWorkspace:
         session.flush = AsyncMock()
 
         with (
-            patch("alayaos_core.services.workspace.WorkspaceRepository") as MockWsRepo,
-            patch("alayaos_core.services.workspace.EntityTypeRepository") as MockEtRepo,
-            patch("alayaos_core.services.workspace.PredicateRepository") as MockPredRepo,
+            patch("alayaos_core.services.workspace.WorkspaceRepository") as mock_ws_repo_cls,
+            patch("alayaos_core.services.workspace.EntityTypeRepository") as mock_et_repo_cls,
+            patch("alayaos_core.services.workspace.PredicateRepository") as mock_pred_repo_cls,
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.create = AsyncMock(return_value=ws)
-            MockWsRepo.return_value = ws_repo_inst
+            mock_ws_repo_cls.return_value = ws_repo_inst
 
             et_repo_inst = AsyncMock()
             et_repo_inst.upsert_core = AsyncMock(return_value=MagicMock())
-            MockEtRepo.return_value = et_repo_inst
+            mock_et_repo_cls.return_value = et_repo_inst
 
             pred_repo_inst = AsyncMock()
             pred_repo_inst.upsert_core = AsyncMock(return_value=MagicMock())
-            MockPredRepo.return_value = pred_repo_inst
+            mock_pred_repo_cls.return_value = pred_repo_inst
 
             await create_workspace(session, name="Demo", slug="demo")
 
@@ -135,21 +135,21 @@ class TestCreateWorkspace:
         session.flush = AsyncMock()
 
         with (
-            patch("alayaos_core.services.workspace.WorkspaceRepository") as MockWsRepo,
-            patch("alayaos_core.services.workspace.EntityTypeRepository") as MockEtRepo,
-            patch("alayaos_core.services.workspace.PredicateRepository") as MockPredRepo,
+            patch("alayaos_core.services.workspace.WorkspaceRepository") as mock_ws_repo_cls,
+            patch("alayaos_core.services.workspace.EntityTypeRepository") as mock_et_repo_cls,
+            patch("alayaos_core.services.workspace.PredicateRepository") as mock_pred_repo_cls,
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.create = AsyncMock(return_value=ws)
-            MockWsRepo.return_value = ws_repo_inst
+            mock_ws_repo_cls.return_value = ws_repo_inst
 
             et_repo_inst = AsyncMock()
             et_repo_inst.upsert_core = AsyncMock(return_value=MagicMock())
-            MockEtRepo.return_value = et_repo_inst
+            mock_et_repo_cls.return_value = et_repo_inst
 
             pred_repo_inst = AsyncMock()
             pred_repo_inst.upsert_core = AsyncMock(return_value=MagicMock())
-            MockPredRepo.return_value = pred_repo_inst
+            mock_pred_repo_cls.return_value = pred_repo_inst
 
             await create_workspace(session, name="Demo", slug="demo")
 

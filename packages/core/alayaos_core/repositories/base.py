@@ -12,7 +12,7 @@ class BaseRepository:
         self.session = session
 
     @staticmethod
-    def encode_cursor(created_at: datetime, id: uuid.UUID) -> str:
+    def encode_cursor(created_at: datetime, id: uuid.UUID) -> str:  # noqa: A002
         payload = {"created_at": created_at.isoformat(), "id": str(id)}
         return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
 
@@ -25,15 +25,12 @@ class BaseRepository:
             raise ValueError("Invalid cursor") from e
 
     @staticmethod
-    def apply_cursor_pagination(
-        stmt: Select, cursor: str | None, limit: int, created_at_col, id_col
-    ) -> Select:
+    def apply_cursor_pagination(stmt: Select, cursor: str | None, limit: int, created_at_col, id_col) -> Select:
         limit = min(max(limit, 1), 200)  # clamp
         stmt = stmt.order_by(desc(created_at_col), desc(id_col))
         if cursor:
             cursor_created_at, cursor_id = BaseRepository.decode_cursor(cursor)
             stmt = stmt.where(
-                (created_at_col < cursor_created_at)
-                | ((created_at_col == cursor_created_at) & (id_col < cursor_id))
+                (created_at_col < cursor_created_at) | ((created_at_col == cursor_created_at) & (id_col < cursor_id))
             )
         return stmt.limit(limit + 1)  # fetch one extra to detect has_more

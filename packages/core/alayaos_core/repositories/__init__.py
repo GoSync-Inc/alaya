@@ -7,11 +7,11 @@ from alayaos_core.repositories.predicate import PredicateRepository
 from alayaos_core.repositories.workspace import WorkspaceRepository
 
 __all__ = [
+    "APIKeyRepository",
     "BaseRepository",
-    "WorkspaceRepository",
-    "EventRepository",
     "EntityRepository",
     "EntityTypeRepository",
+    "EventRepository",
     "PredicateRepository",
-    "APIKeyRepository",
+    "WorkspaceRepository",
 ]

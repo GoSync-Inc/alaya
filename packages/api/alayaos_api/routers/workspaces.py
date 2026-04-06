@@ -43,7 +43,7 @@ async def create_workspace_endpoint(
     api_key: Annotated[APIKey, Depends(require_scope("admin"))],
 ):
     """Create a new workspace. Only bootstrap or admin-scoped keys allowed."""
-    if not api_key.is_bootstrap and "admin" not in api_key.scopes:
+    if not api_key.is_bootstrap:
         raise HTTPException(
             status_code=403,
             detail={

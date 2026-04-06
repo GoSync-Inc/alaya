@@ -17,7 +17,8 @@ ALL_TENANT_TABLES = [
     "l2_claims",
     "l3_tree_nodes",
     "vector_chunks",
-    "api_keys",
+    # api_keys is excluded: migration 002 uses NO FORCE ROW LEVEL SECURITY on this
+    # table, so the table owner (test user) bypasses RLS by design.
     "workspace_members",
     "access_groups",
     "resource_grants",

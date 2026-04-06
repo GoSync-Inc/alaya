@@ -23,7 +23,15 @@ def event_loop():
 @pytest_asyncio.fixture(scope="session")
 async def engine():
     settings = Settings()
-    eng = create_async_engine(settings.DATABASE_URL, echo=False)
+    db_url = settings.DATABASE_URL
+    # Safety: refuse to run against the default development database.
+    # Integration tests require ALAYA_DATABASE_URL pointing to a test database
+    # (name must contain 'test').
+    if "alaya_test" not in db_url and "test" not in db_url:
+        pytest.skip(
+            "Integration tests require ALAYA_DATABASE_URL pointing to a test database (must contain 'test' in name)"
+        )
+    eng = create_async_engine(db_url, echo=False)
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield eng

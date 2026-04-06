@@ -1,4 +1,5 @@
 import base64
+import binascii
 import json
 import uuid
 from datetime import datetime
@@ -21,7 +22,7 @@ class BaseRepository:
         try:
             payload = json.loads(base64.urlsafe_b64decode(cursor))
             return datetime.fromisoformat(payload["created_at"]), uuid.UUID(payload["id"])
-        except (json.JSONDecodeError, KeyError, ValueError) as e:
+        except (json.JSONDecodeError, KeyError, ValueError, binascii.Error) as e:
             raise ValueError("Invalid cursor") from e
 
     @staticmethod

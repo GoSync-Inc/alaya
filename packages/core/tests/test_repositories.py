@@ -615,7 +615,7 @@ class TestAPIKeyRepository:
         session = make_session()
         session.execute.return_value = make_result(api_key)
         repo = APIKeyRepository(session)
-        revoked = await repo.revoke("ak_revokeme1234")
+        revoked = await repo.revoke("ak_revokeme1234", ws_id)
         assert revoked is not None
         assert revoked.revoked_at is not None
         session.flush.assert_called_once()
@@ -627,7 +627,7 @@ class TestAPIKeyRepository:
         session = make_session()
         session.execute.return_value = make_result(None)
         repo = APIKeyRepository(session)
-        result = await repo.revoke("ak_nonexistent")
+        result = await repo.revoke("ak_nonexistent", uuid.uuid4())
         assert result is None
 
     @pytest.mark.asyncio

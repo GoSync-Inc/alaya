@@ -53,8 +53,10 @@ class APIKeyRepository(BaseRepository):
         next_cursor = self.encode_cursor(items[-1].created_at, items[-1].id) if has_more else None
         return items, next_cursor, has_more
 
-    async def revoke(self, key_prefix: str) -> APIKey | None:
-        api_key = await self.get_by_prefix(key_prefix)
+    async def revoke(self, key_prefix: str, workspace_id: uuid.UUID) -> APIKey | None:
+        stmt = select(APIKey).where(APIKey.key_prefix == key_prefix, APIKey.workspace_id == workspace_id)
+        result = await self.session.execute(stmt)
+        api_key = result.scalar_one_or_none()
         if api_key is None:
             return None
 

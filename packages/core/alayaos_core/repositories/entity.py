@@ -50,7 +50,7 @@ class EntityRepository(BaseRepository):
         limit: int = 50,
         type_slug: str | None = None,
     ) -> tuple[list[L1Entity], str | None, bool]:
-        stmt = select(L1Entity).where(L1Entity.is_deleted == False)  # noqa: E712
+        stmt = select(L1Entity).where(L1Entity.is_deleted == False).options(selectinload(L1Entity.external_ids))  # noqa: E712
         if type_slug is not None:
             stmt = stmt.join(EntityTypeDefinition, L1Entity.entity_type_id == EntityTypeDefinition.id).where(
                 EntityTypeDefinition.slug == type_slug

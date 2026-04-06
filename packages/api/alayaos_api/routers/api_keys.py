@@ -33,9 +33,14 @@ async def create_api_key_endpoint(
         scopes=body.scopes,
         expires_at=body.expires_at,
     )
-    response_data = APIKeyCreateResponse.model_validate(new_key)
     response_data = APIKeyCreateResponse(
-        **APIKeyRead.model_validate(new_key).model_dump(),
+        id=new_key.id,
+        workspace_id=new_key.workspace_id,
+        name=new_key.name,
+        key_prefix=new_key.key_prefix,
+        scopes=new_key.scopes,
+        expires_at=new_key.expires_at,
+        created_at=new_key.created_at,
         raw_key=raw_key,
     )
     return data_response(response_data)
@@ -66,7 +71,7 @@ async def revoke_api_key(
 ):
     """Revoke an API key by its prefix."""
     repo = APIKeyRepository(session)
-    revoked = await repo.revoke(prefix)
+    revoked = await repo.revoke(prefix, api_key.workspace_id)
     if revoked is None:
         raise HTTPException(
             status_code=404,

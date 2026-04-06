@@ -200,7 +200,7 @@ def upgrade() -> None:
         sa.Column("confidence", sa.Float(), nullable=False, server_default=sa.text("1.0")),
         sa.Column("valid_from", sa.DateTime(timezone=True), nullable=True),
         sa.Column("valid_to", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("source_event_id", UUID(as_uuid=True), sa.ForeignKey("l0_events.id"), nullable=True),
+        sa.Column("source_event_id", UUID(as_uuid=True), nullable=True),
         sa.Column("metadata", JSONB, nullable=False, server_default=sa.text("'{}'")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
@@ -214,6 +214,11 @@ def upgrade() -> None:
             ["workspace_id", "predicate_id"],
             ["predicate_definitions.workspace_id", "predicate_definitions.id"],
             name="fk_claim_predicate",
+        ),
+        sa.ForeignKeyConstraint(
+            ["workspace_id", "source_event_id"],
+            ["l0_events.workspace_id", "l0_events.id"],
+            name="fk_claim_source_event",
         ),
     )
 
@@ -233,12 +238,17 @@ def upgrade() -> None:
         sa.Column("workspace_id", UUID(as_uuid=True), sa.ForeignKey("workspaces.id"), nullable=False),
         sa.Column("path", sa.Text(), nullable=False),
         sa.Column("node_type", sa.Text(), nullable=False),
-        sa.Column("entity_id", UUID(as_uuid=True), sa.ForeignKey("l1_entities.id"), nullable=True),
+        sa.Column("entity_id", UUID(as_uuid=True), nullable=True),
         sa.Column("content", JSONB, nullable=False, server_default=sa.text("'{}'")),
         sa.Column("sort_order", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint("workspace_id", "path", name="uq_tree_node_ws_path"),
+        sa.ForeignKeyConstraint(
+            ["workspace_id", "entity_id"],
+            ["l1_entities.workspace_id", "l1_entities.id"],
+            name="fk_tree_node_entity",
+        ),
     )
 
     # 13. vector_chunks (FK → workspaces) — embedding added via ALTER TABLE
@@ -438,7 +448,4 @@ def downgrade() -> None:
     op.drop_table("entity_type_definitions")
     op.drop_table("workspaces")
 
-    # --------------------------------------------------------------------------
-    # Drop extensions
-    # --------------------------------------------------------------------------
-    op.execute("DROP EXTENSION IF EXISTS vector")
+    # Note: vector extension is NOT dropped — it may be shared with other schemas

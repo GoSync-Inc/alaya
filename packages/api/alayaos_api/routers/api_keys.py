@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from alayaos_api.deps import (
     data_response,
-    get_session,
+    get_workspace_session,
     paginated_response,
     require_scope,
 )
@@ -22,7 +22,7 @@ router = APIRouter()
 @router.post("/api-keys", status_code=201)
 async def create_api_key_endpoint(
     body: APIKeyCreate,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("admin"))],
 ):
     """Create a new API key. Returns raw key once — store it safely."""
@@ -43,7 +43,7 @@ async def create_api_key_endpoint(
 
 @router.get("/api-keys")
 async def list_api_keys(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("read"))],
     cursor: str | None = None,
     limit: int = 50,
@@ -61,7 +61,7 @@ async def list_api_keys(
 @router.delete("/api-keys/{prefix}", status_code=204)
 async def revoke_api_key(
     prefix: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("admin"))],
 ):
     """Revoke an API key by its prefix."""

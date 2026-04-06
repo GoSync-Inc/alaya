@@ -1,7 +1,5 @@
 """Tests for SQLAlchemy base and timestamp mixin."""
-import datetime
 
-import pytest
 from sqlalchemy import inspect
 from sqlalchemy.orm import Mapped, mapped_column
 

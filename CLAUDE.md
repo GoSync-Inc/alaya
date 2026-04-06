@@ -79,3 +79,5 @@ Provider-specific features are preserved — no lowest common denominator.
 - **SQL injection:** Always parameterized queries (SQLAlchemy handles this).
 - **SSRF:** Validate URLs in webhook/connector configs.
 - If you see a secret in code or logs — flag it immediately.
+
+<!-- updated-by-superflow:2026-04-07 -->

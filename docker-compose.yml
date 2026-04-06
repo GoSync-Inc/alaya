@@ -30,10 +30,13 @@ services:
     build: .
     command: >
       sh -c "alembic upgrade head && python docker/seed.py"
+    env_file:
+      - path: .env
+        required: false
     environment:
-      ALAYA_DATABASE_URL: postgresql+asyncpg://alaya:alaya@postgres:5432/alaya
-      ALAYA_REDIS_URL: redis://redis:6379/0
-      ALAYA_ENV: dev
+      ALAYA_DATABASE_URL: ${ALAYA_DATABASE_URL:-postgresql+asyncpg://alaya:alaya@postgres:5432/alaya}
+      ALAYA_REDIS_URL: ${ALAYA_REDIS_URL:-redis://redis:6379/0}
+      ALAYA_ENV: ${ALAYA_ENV:-dev}
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,10 +45,13 @@ services:
     build: .
     ports:
       - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
     environment:
-      ALAYA_DATABASE_URL: postgresql+asyncpg://alaya:alaya@postgres:5432/alaya
-      ALAYA_REDIS_URL: redis://redis:6379/0
-      ALAYA_ENV: dev
+      ALAYA_DATABASE_URL: ${ALAYA_DATABASE_URL:-postgresql+asyncpg://alaya:alaya@postgres:5432/alaya}
+      ALAYA_REDIS_URL: ${ALAYA_REDIS_URL:-redis://redis:6379/0}
+      ALAYA_ENV: ${ALAYA_ENV:-dev}
     depends_on:
       postgres:
         condition: service_healthy

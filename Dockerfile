@@ -8,18 +8,12 @@ ENV UV_LINK_MODE=copy
 
 WORKDIR /app
 
-# Install dependencies first (layer cache)
+# Install dependencies (workspace packages need at least __init__.py for uv to resolve)
 COPY pyproject.toml uv.lock ./
-COPY packages/core/pyproject.toml packages/core/pyproject.toml
-COPY packages/api/pyproject.toml packages/api/pyproject.toml
-COPY packages/cli/pyproject.toml packages/cli/pyproject.toml
-COPY packages/connectors/pyproject.toml packages/connectors/pyproject.toml
+COPY packages/ packages/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
-
-# Copy source code
-COPY packages/ packages/
 COPY alembic/ alembic/
 COPY alembic.ini .
 COPY docker/seed.py docker/seed.py

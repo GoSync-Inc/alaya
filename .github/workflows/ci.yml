@@ -47,4 +47,50 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --locked
-      - run: uv run pytest
+      - name: Run unit tests
+        run: uv run pytest -m "not integration" --tb=short
+
+  integration-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: alaya_test
+          POSTGRES_USER: alaya
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4 # 34e11487
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Run Alembic migrations
+        run: uv run alembic upgrade head
+        env:
+          ALAYA_DATABASE_URL: postgresql+asyncpg://alaya:test@localhost:5432/alaya_test
+          ALAYA_REDIS_URL: redis://localhost:6379/0
+          ALAYA_ENV: dev
+      - name: Check for migration drift
+        run: uv run alembic check
+        env:
+          ALAYA_DATABASE_URL: postgresql+asyncpg://alaya:test@localhost:5432/alaya_test
+          ALAYA_REDIS_URL: redis://localhost:6379/0
+          ALAYA_ENV: dev
+      - name: Run integration tests
+        run: uv run pytest -m integration --tb=short
+        env:
+          ALAYA_DATABASE_URL: postgresql+asyncpg://alaya:test@localhost:5432/alaya_test
+          ALAYA_REDIS_URL: redis://localhost:6379/0
+          ALAYA_ENV: dev

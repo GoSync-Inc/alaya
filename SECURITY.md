@@ -15,7 +15,9 @@ We will acknowledge your report within 48 hours and work on a fix.
 
 We recommend always using the latest version.
 
-## Security features
+## Security features (planned)
+
+These security measures are being implemented as part of the initial release:
 
 - All secrets managed via environment variables (never in code)
 - Encryption at rest for OAuth tokens and API keys (Fernet/AES)

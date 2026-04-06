@@ -18,6 +18,7 @@ select = [
 ]
 ignore = [
     "E501",   # line too long (handled by formatter)
+    "TC003",  # SQLAlchemy Mapped[] requires datetime at runtime, not just TYPE_CHECKING
 ]
 
 [lint.isort]

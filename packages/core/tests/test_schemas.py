@@ -1,28 +1,28 @@
 """Tests for Pydantic schemas (Task 5)."""
+
 import uuid
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
 
+from alayaos_core.schemas.api_key import APIKeyCreate, APIKeyCreateResponse, APIKeyRead
 from alayaos_core.schemas.common import (
     ErrorDetail,
     ErrorResponse,
-    PaginationInfo,
-    PaginatedResponse,
     HealthCheck,
     HealthResponse,
+    PaginatedResponse,
+    PaginationInfo,
 )
-from alayaos_core.schemas.workspace import WorkspaceCreate, WorkspaceRead, WorkspaceUpdate
-from alayaos_core.schemas.event import EventCreate, EventRead, EventUpdate
 from alayaos_core.schemas.entity import EntityCreate, EntityRead, EntityUpdate
-from alayaos_core.schemas.entity_type import EntityTypeCreate, EntityTypeRead, EntityTypeUpdate
+from alayaos_core.schemas.entity_type import EntityTypeCreate, EntityTypeRead
+from alayaos_core.schemas.event import EventCreate, EventRead
 from alayaos_core.schemas.predicate import PredicateCreate, PredicateRead
-from alayaos_core.schemas.api_key import APIKeyCreate, APIKeyRead, APIKeyCreateResponse
-
+from alayaos_core.schemas.workspace import WorkspaceCreate, WorkspaceRead, WorkspaceUpdate
 
 # ─── Common schemas ───────────────────────────────────────────────────────────
+
 
 def test_error_detail_fields() -> None:
     err = ErrorDetail(field="name", message="required")
@@ -62,6 +62,7 @@ def test_health_response_fields() -> None:
 
 # ─── Workspace schemas ────────────────────────────────────────────────────────
 
+
 def test_workspace_create_requires_name_and_slug() -> None:
     w = WorkspaceCreate(name="Acme", slug="acme")
     assert w.name == "Acme"
@@ -74,10 +75,14 @@ def test_workspace_create_missing_slug_fails() -> None:
 
 
 def test_workspace_read_has_id_and_timestamps() -> None:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     w = WorkspaceRead(
-        id=uuid.uuid4(), name="Acme", slug="acme",
-        settings={}, created_at=now, updated_at=now,
+        id=uuid.uuid4(),
+        name="Acme",
+        slug="acme",
+        settings={},
+        created_at=now,
+        updated_at=now,
     )
     assert isinstance(w.id, uuid.UUID)
 
@@ -85,6 +90,7 @@ def test_workspace_read_has_id_and_timestamps() -> None:
 def test_workspace_read_from_attributes() -> None:
     """WorkspaceRead must accept ORM objects via model_config from_attributes."""
     from alayaos_core.schemas.workspace import WorkspaceRead
+
     # from_attributes must be True
     assert WorkspaceRead.model_config.get("from_attributes") is True
 
@@ -97,6 +103,7 @@ def test_workspace_update_all_optional() -> None:
 
 # ─── Event schemas ────────────────────────────────────────────────────────────
 
+
 def test_event_create_required_fields() -> None:
     e = EventCreate(source_type="slack", source_id="C123", content={"text": "hi"})
     assert e.source_type == "slack"
@@ -108,7 +115,7 @@ def test_event_create_metadata_optional() -> None:
 
 
 def test_event_read_has_all_fields() -> None:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     e = EventRead(
         id=uuid.uuid4(),
         workspace_id=uuid.uuid4(),
@@ -123,6 +130,7 @@ def test_event_read_has_all_fields() -> None:
 
 # ─── Entity schemas ───────────────────────────────────────────────────────────
 
+
 def test_entity_create_required_fields() -> None:
     e = EntityCreate(entity_type_id=uuid.uuid4(), name="Alice")
     assert e.name == "Alice"
@@ -135,7 +143,7 @@ def test_entity_create_optional_fields() -> None:
 
 
 def test_entity_read_has_external_ids() -> None:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     e = EntityRead(
         id=uuid.uuid4(),
         workspace_id=uuid.uuid4(),
@@ -156,13 +164,14 @@ def test_entity_update_all_optional() -> None:
 
 # ─── EntityType schemas ───────────────────────────────────────────────────────
 
+
 def test_entity_type_create_required_fields() -> None:
     et = EntityTypeCreate(slug="person", display_name="Person")
     assert et.slug == "person"
 
 
 def test_entity_type_read_has_all_fields() -> None:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     et = EntityTypeRead(
         id=uuid.uuid4(),
         workspace_id=uuid.uuid4(),
@@ -179,8 +188,9 @@ def test_entity_type_read_has_all_fields() -> None:
 
 # ─── Predicate schemas ────────────────────────────────────────────────────────
 
+
 def test_predicate_read_has_all_fields() -> None:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     p = PredicateRead(
         id=uuid.uuid4(),
         workspace_id=uuid.uuid4(),
@@ -204,6 +214,7 @@ def test_predicate_create_required_fields() -> None:
 
 # ─── APIKey schemas ───────────────────────────────────────────────────────────
 
+
 def test_api_key_create_required_fields() -> None:
     k = APIKeyCreate(name="CI key")
     assert k.name == "CI key"
@@ -215,7 +226,7 @@ def test_api_key_create_scopes_optional() -> None:
 
 
 def test_api_key_read_no_raw_key() -> None:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     k = APIKeyRead(
         id=uuid.uuid4(),
         workspace_id=uuid.uuid4(),
@@ -232,7 +243,7 @@ def test_api_key_read_no_raw_key() -> None:
 
 
 def test_api_key_create_response_has_raw_key() -> None:
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     r = APIKeyCreateResponse(
         id=uuid.uuid4(),
         workspace_id=uuid.uuid4(),
@@ -249,13 +260,21 @@ def test_api_key_create_response_has_raw_key() -> None:
 
 # ─── __init__.py ─────────────────────────────────────────────────────────────
 
+
 def test_schemas_init_exports_main_classes() -> None:
     from alayaos_core import schemas
+
     expected = [
-        "WorkspaceCreate", "WorkspaceRead", "WorkspaceUpdate",
-        "EventCreate", "EventRead",
-        "EntityCreate", "EntityRead",
-        "APIKeyCreate", "APIKeyRead", "APIKeyCreateResponse",
+        "WorkspaceCreate",
+        "WorkspaceRead",
+        "WorkspaceUpdate",
+        "EventCreate",
+        "EventRead",
+        "EntityCreate",
+        "EntityRead",
+        "APIKeyCreate",
+        "APIKeyRead",
+        "APIKeyCreateResponse",
     ]
     for name in expected:
         assert hasattr(schemas, name), f"schemas.__init__ missing: {name}"

@@ -1,5 +1,4 @@
 """Tests for Settings config module (Task 6)."""
-import pytest
 
 from alayaos_core.config import Settings
 
@@ -21,6 +20,7 @@ def test_settings_env_default() -> None:
 
 def test_settings_secret_key_is_secret_str() -> None:
     from pydantic import SecretStr
+
     s = Settings()
     assert isinstance(s.SECRET_KEY, SecretStr)
 

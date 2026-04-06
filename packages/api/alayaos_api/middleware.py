@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -19,6 +19,28 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 def register_error_handlers(app: FastAPI) -> None:
     app.add_middleware(RequestIDMiddleware)
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        request_id = getattr(request.state, "request_id", None)
+        detail = exc.detail
+        # If detail is a dict with "error" key, inject request_id and return directly
+        if isinstance(detail, dict) and "error" in detail:
+            detail["error"]["request_id"] = request_id
+            return JSONResponse(status_code=exc.status_code, content=detail)
+        # Fallback for plain string detail
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": "server.internal_error",
+                    "message": str(detail),
+                    "hint": None,
+                    "docs": None,
+                    "request_id": request_id,
+                }
+            },
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):

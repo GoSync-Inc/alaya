@@ -106,7 +106,7 @@ class TestWorkspacesRouter:
             response = client.get(f"/api/v1/workspaces/{uuid.uuid4()}", headers={"X-Api-Key": RAW_KEY})
 
         assert response.status_code == 404
-        assert response.json()["detail"]["error"]["code"] == "resource.not_found"
+        assert response.json()["error"]["code"] == "resource.not_found"
 
     def test_get_workspace_returns_200(self) -> None:
         api_key = make_api_key(is_bootstrap=True)
@@ -199,7 +199,7 @@ class TestEntitiesRouter:
             response = client.get(f"/api/v1/entities/{uuid.uuid4()}", headers={"X-Api-Key": RAW_KEY})
 
         assert response.status_code == 404
-        assert response.json()["detail"]["error"]["code"] == "resource.not_found"
+        assert response.json()["error"]["code"] == "resource.not_found"
 
     def test_get_entity_returns_200(self) -> None:
         api_key = make_api_key()
@@ -240,7 +240,7 @@ class TestEntitiesRouter:
         client = TestClient(app)
         response = client.get("/api/v1/entities?cursor=not_valid_cursor", headers={"X-Api-Key": RAW_KEY})
         assert response.status_code == 400
-        assert response.json()["detail"]["error"]["code"] == "validation.invalid_cursor"
+        assert response.json()["error"]["code"] == "validation.invalid_cursor"
 
 
 # ─── Events ───────────────────────────────────────────────────────────────────
@@ -312,7 +312,7 @@ class TestEventsRouter:
             response = client.get(f"/api/v1/events/{uuid.uuid4()}", headers={"X-Api-Key": RAW_KEY})
 
         assert response.status_code == 404
-        assert response.json()["detail"]["error"]["code"] == "resource.not_found"
+        assert response.json()["error"]["code"] == "resource.not_found"
 
 
 # ─── API Keys ─────────────────────────────────────────────────────────────────
@@ -369,7 +369,7 @@ class TestAPIKeysRouter:
             response = client.delete("/api/v1/api-keys/ak_notexist", headers={"X-Api-Key": RAW_KEY})
 
         assert response.status_code == 404
-        assert response.json()["detail"]["error"]["code"] == "resource.not_found"
+        assert response.json()["error"]["code"] == "resource.not_found"
 
 
 # ─── Predicates ───────────────────────────────────────────────────────────────
@@ -425,4 +425,4 @@ class TestPredicatesRouter:
             response = client.get(f"/api/v1/predicates/{uuid.uuid4()}", headers={"X-Api-Key": RAW_KEY})
 
         assert response.status_code == 404
-        assert response.json()["detail"]["error"]["code"] == "resource.not_found"
+        assert response.json()["error"]["code"] == "resource.not_found"

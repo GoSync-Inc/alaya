@@ -37,7 +37,7 @@ async def health_ready(session: Annotated[AsyncSession, Depends(get_session)]):
 
     # Seeds
     try:
-        result = await session.execute(text("SELECT COUNT(*) FROM entity_type_definitions WHERE is_core = true"))
+        result = await session.execute(text("SELECT check_core_seeds()"))
         count = result.scalar_one()
         checks["seeds"] = "ok" if count > 0 else "missing"
     except Exception:
@@ -48,12 +48,13 @@ async def health_ready(session: Annotated[AsyncSession, Depends(get_session)]):
 
     # First run check
     try:
-        result = await session.execute(text("SELECT COUNT(*) FROM api_keys WHERE is_bootstrap = false"))
+        result = await session.execute(text("SELECT check_user_api_keys()"))
         user_keys = result.scalar_one()
         first_run = user_keys == 0
     except Exception:
         first_run = True
 
-    overall = "ok" if all(v == "ok" for v in checks.values() if v != "unavailable") else "degraded"
+    ok_checks = [v for v in checks.values() if v != "unavailable"]
+    overall = "ok" if ok_checks and all(v == "ok" for v in ok_checks) else "degraded"
 
     return {"status": overall, "checks": checks, "first_run": first_run}

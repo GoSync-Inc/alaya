@@ -1,0 +1,10 @@
+{
+    "pythonVersion": "3.13",
+    "typeCheckingMode": "strict",
+    "venvPath": ".",
+    "venv": ".venv",
+    "include": ["packages/*/alayaos_*"],
+    "exclude": ["**/__pycache__", ".worktrees"],
+    "reportMissingImports": true,
+    "reportMissingTypeStubs": false
+}

@@ -1,0 +1,18 @@
+[project]
+name = "alayaos"
+version = "0.1.0"
+description = "Corporate memory platform"
+requires-python = ">=3.13"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+alayaos-core = { workspace = true }
+alayaos-api = { workspace = true }
+alayaos-cli = { workspace = true }
+alayaos-connectors = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

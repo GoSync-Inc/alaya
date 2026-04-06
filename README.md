@@ -32,7 +32,7 @@ Under active development. First release coming soon.
 
 ## Stack
 
-Python 3.13 / FastAPI / PostgreSQL + pgvector / Redis / TaskIQ / Anthropic SDK / LiteLLM
+Python 3.13 / FastAPI / SQLAlchemy 2.0 + Pydantic / PostgreSQL + pgvector / Redis / TaskIQ / Anthropic SDK / Typer
 
 ## License
 

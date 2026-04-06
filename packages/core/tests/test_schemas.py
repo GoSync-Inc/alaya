@@ -10,7 +10,6 @@ from alayaos_core.schemas.api_key import APIKeyCreate, APIKeyCreateResponse, API
 from alayaos_core.schemas.common import (
     ErrorDetail,
     ErrorResponse,
-    HealthCheck,
     HealthResponse,
     PaginatedResponse,
     PaginationInfo,
@@ -25,39 +24,45 @@ from alayaos_core.schemas.workspace import WorkspaceCreate, WorkspaceRead, Works
 
 
 def test_error_detail_fields() -> None:
-    err = ErrorDetail(field="name", message="required")
-    assert err.field == "name"
-    assert err.message == "required"
+    err = ErrorDetail(code="not_found", message="resource not found")
+    assert err.code == "not_found"
+    assert err.message == "resource not found"
+    assert err.hint is None
+    assert err.request_id is None
 
 
 def test_error_response_fields() -> None:
-    resp = ErrorResponse(error="bad_request", message="Something went wrong")
-    assert resp.error == "bad_request"
+    resp = ErrorResponse(error=ErrorDetail(code="bad_request", message="Something went wrong"))
+    assert resp.error.code == "bad_request"
 
 
 def test_pagination_info_fields() -> None:
-    p = PaginationInfo(total=100, page=1, page_size=20, pages=5)
-    assert p.total == 100
-    assert p.pages == 5
+    p = PaginationInfo(next_cursor="abc", has_more=True, count=20)
+    assert p.next_cursor == "abc"
+    assert p.has_more is True
+    assert p.count == 20
+
+
+def test_pagination_info_defaults() -> None:
+    p = PaginationInfo()
+    assert p.next_cursor is None
+    assert p.has_more is False
+    assert p.count == 0
 
 
 def test_paginated_response_generic() -> None:
     p: PaginatedResponse[str] = PaginatedResponse(
-        items=["a", "b"],
-        pagination=PaginationInfo(total=2, page=1, page_size=10, pages=1),
+        data=["a", "b"],
+        pagination=PaginationInfo(count=2),
     )
-    assert len(p.items) == 2
-
-
-def test_health_check_fields() -> None:
-    h = HealthCheck(name="database", status="ok")
-    assert h.name == "database"
-    assert h.status == "ok"
+    assert len(p.data) == 2
 
 
 def test_health_response_fields() -> None:
-    r = HealthResponse(status="ok", checks=[])
+    r = HealthResponse(status="ok", checks={"database": "ok"})
     assert r.status == "ok"
+    assert r.checks["database"] == "ok"
+    assert r.first_run is False
 
 
 # ─── Workspace schemas ────────────────────────────────────────────────────────

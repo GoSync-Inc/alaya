@@ -187,17 +187,18 @@ def test_l1_entity_columns() -> None:
 def test_l1_entity_workspace_fk() -> None:
     mapper = inspect(L1Entity)
     col = mapper.columns["workspace_id"]
-    fks = list(col.foreign_keys)
-    assert len(fks) == 1
-    assert "workspaces.id" in str(fks[0])
+    fk_targets = {fk.target_fullname for fk in col.foreign_keys}
+    assert "workspaces.id" in fk_targets
 
 
 def test_l1_entity_type_fk() -> None:
-    mapper = inspect(L1Entity)
-    col = mapper.columns["entity_type_id"]
-    fks = list(col.foreign_keys)
-    assert len(fks) == 1
-    assert "entity_type_definitions.id" in str(fks[0])
+    """Composite FK (workspace_id, entity_type_id) -> entity_type_definitions."""
+    from sqlalchemy import ForeignKeyConstraint
+
+    table = L1Entity.__table__
+    composite_fks = [c for c in table.constraints if isinstance(c, ForeignKeyConstraint)]
+    fk_targets = {str(e) for c in composite_fks for e in c.elements}
+    assert any("entity_type_definitions" in t for t in fk_targets)
 
 
 def test_entity_external_id_tablename() -> None:

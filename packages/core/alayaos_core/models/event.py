@@ -10,7 +10,10 @@ from alayaos_core.models.base import Base, TimestampMixin
 
 class L0Event(Base, TimestampMixin):
     __tablename__ = "l0_events"
-    __table_args__ = (UniqueConstraint("workspace_id", "source_type", "source_id", name="uq_l0_events_ws_src"),)
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_l0_events_ws_id"),
+        UniqueConstraint("workspace_id", "source_type", "source_id", name="uq_l0_events_ws_src"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)

@@ -2,7 +2,7 @@
 
 import hashlib
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,23 +10,22 @@ import pytest
 from alayaos_core.models.api_key import APIKey
 from alayaos_core.services.api_key import generate_raw_key
 
-
 # ─── generate_raw_key ─────────────────────────────────────────────────────────
 
 
 def test_generate_raw_key_starts_with_ak() -> None:
-    raw, prefix, key_hash = generate_raw_key()
+    raw, _prefix, _key_hash = generate_raw_key()
     assert raw.startswith("ak_")
 
 
 def test_generate_raw_key_prefix_is_first_12_chars() -> None:
-    raw, prefix, key_hash = generate_raw_key()
+    raw, prefix, _key_hash = generate_raw_key()
     assert prefix == raw[:12]
     assert len(prefix) == 12
 
 
 def test_generate_raw_key_hash_matches_sha256() -> None:
-    raw, prefix, key_hash = generate_raw_key()
+    raw, _prefix, key_hash = generate_raw_key()
     expected = hashlib.sha256(raw.encode()).hexdigest()
     assert key_hash == expected
 
@@ -48,7 +47,7 @@ class TestCreateApiKey:
         ws_id = uuid.uuid4()
         session = AsyncMock()
 
-        with patch("alayaos_core.services.api_key.APIKeyRepository") as MockRepo:
+        with patch("alayaos_core.services.api_key.APIKeyRepository") as mock_repo_cls:
             repo_inst = AsyncMock()
             api_key_obj = APIKey(
                 id=uuid.uuid4(),
@@ -59,7 +58,7 @@ class TestCreateApiKey:
                 scopes=["read", "write"],
             )
             repo_inst.create = AsyncMock(return_value=api_key_obj)
-            MockRepo.return_value = repo_inst
+            mock_repo_cls.return_value = repo_inst
 
             result_key, raw_key = await create_api_key(session, workspace_id=ws_id, name="Test Key")
 
@@ -74,10 +73,10 @@ class TestCreateApiKey:
         ws_id = uuid.uuid4()
         session = AsyncMock()
 
-        with patch("alayaos_core.services.api_key.APIKeyRepository") as MockRepo:
+        with patch("alayaos_core.services.api_key.APIKeyRepository") as mock_repo_cls:
             repo_inst = AsyncMock()
             repo_inst.create = AsyncMock(return_value=MagicMock())
-            MockRepo.return_value = repo_inst
+            mock_repo_cls.return_value = repo_inst
 
             await create_api_key(session, workspace_id=ws_id, name="Key")
 
@@ -91,10 +90,10 @@ class TestCreateApiKey:
         ws_id = uuid.uuid4()
         session = AsyncMock()
 
-        with patch("alayaos_core.services.api_key.APIKeyRepository") as MockRepo:
+        with patch("alayaos_core.services.api_key.APIKeyRepository") as mock_repo_cls:
             repo_inst = AsyncMock()
             repo_inst.create = AsyncMock(return_value=MagicMock())
-            MockRepo.return_value = repo_inst
+            mock_repo_cls.return_value = repo_inst
 
             await create_api_key(session, workspace_id=ws_id, name="Key", scopes=["read", "admin"])
 
@@ -108,10 +107,10 @@ class TestCreateApiKey:
         ws_id = uuid.uuid4()
         session = AsyncMock()
 
-        with patch("alayaos_core.services.api_key.APIKeyRepository") as MockRepo:
+        with patch("alayaos_core.services.api_key.APIKeyRepository") as mock_repo_cls:
             repo_inst = AsyncMock()
             repo_inst.create = AsyncMock(return_value=MagicMock())
-            MockRepo.return_value = repo_inst
+            mock_repo_cls.return_value = repo_inst
 
             await create_api_key(session, workspace_id=ws_id, name="Bootstrap", is_bootstrap=True)
 
@@ -144,10 +143,10 @@ class TestVerifyApiKey:
         from alayaos_core.services.api_key import verify_api_key
 
         session = AsyncMock()
-        with patch("alayaos_core.services.api_key.APIKeyRepository") as MockRepo:
+        with patch("alayaos_core.services.api_key.APIKeyRepository") as mock_repo_cls:
             repo_inst = AsyncMock()
             repo_inst.get_by_prefix = AsyncMock(return_value=None)
-            MockRepo.return_value = repo_inst
+            mock_repo_cls.return_value = repo_inst
 
             result = await verify_api_key(session, "ak_validprefix12345678")
 
@@ -169,10 +168,10 @@ class TestVerifyApiKey:
             expires_at=None,
         )
         session = AsyncMock()
-        with patch("alayaos_core.services.api_key.APIKeyRepository") as MockRepo:
+        with patch("alayaos_core.services.api_key.APIKeyRepository") as mock_repo_cls:
             repo_inst = AsyncMock()
             repo_inst.get_by_prefix = AsyncMock(return_value=wrong_hash_key)
-            MockRepo.return_value = repo_inst
+            mock_repo_cls.return_value = repo_inst
 
             result = await verify_api_key(session, raw_key)
 
@@ -191,14 +190,14 @@ class TestVerifyApiKey:
             key_prefix=raw_key[:12],
             key_hash=correct_hash,
             scopes=["read"],
-            revoked_at=datetime.now(timezone.utc),
+            revoked_at=datetime.now(UTC),
             expires_at=None,
         )
         session = AsyncMock()
-        with patch("alayaos_core.services.api_key.APIKeyRepository") as MockRepo:
+        with patch("alayaos_core.services.api_key.APIKeyRepository") as mock_repo_cls:
             repo_inst = AsyncMock()
             repo_inst.get_by_prefix = AsyncMock(return_value=revoked_key)
-            MockRepo.return_value = repo_inst
+            mock_repo_cls.return_value = repo_inst
 
             result = await verify_api_key(session, raw_key)
 
@@ -218,13 +217,13 @@ class TestVerifyApiKey:
             key_hash=correct_hash,
             scopes=["read"],
             revoked_at=None,
-            expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            expires_at=datetime.now(UTC) - timedelta(hours=1),
         )
         session = AsyncMock()
-        with patch("alayaos_core.services.api_key.APIKeyRepository") as MockRepo:
+        with patch("alayaos_core.services.api_key.APIKeyRepository") as mock_repo_cls:
             repo_inst = AsyncMock()
             repo_inst.get_by_prefix = AsyncMock(return_value=expired_key)
-            MockRepo.return_value = repo_inst
+            mock_repo_cls.return_value = repo_inst
 
             result = await verify_api_key(session, raw_key)
 
@@ -247,10 +246,10 @@ class TestVerifyApiKey:
             expires_at=None,
         )
         session = AsyncMock()
-        with patch("alayaos_core.services.api_key.APIKeyRepository") as MockRepo:
+        with patch("alayaos_core.services.api_key.APIKeyRepository") as mock_repo_cls:
             repo_inst = AsyncMock()
             repo_inst.get_by_prefix = AsyncMock(return_value=valid_key)
-            MockRepo.return_value = repo_inst
+            mock_repo_cls.return_value = repo_inst
 
             result = await verify_api_key(session, raw_key)
 
@@ -262,7 +261,7 @@ class TestVerifyApiKey:
 
         raw_key = "ak_validprefix12345678901234567890"
         correct_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-        future_expiry = datetime.now(timezone.utc) + timedelta(days=30)
+        future_expiry = datetime.now(UTC) + timedelta(days=30)
         valid_key = APIKey(
             id=uuid.uuid4(),
             workspace_id=uuid.uuid4(),
@@ -274,10 +273,10 @@ class TestVerifyApiKey:
             expires_at=future_expiry,
         )
         session = AsyncMock()
-        with patch("alayaos_core.services.api_key.APIKeyRepository") as MockRepo:
+        with patch("alayaos_core.services.api_key.APIKeyRepository") as mock_repo_cls:
             repo_inst = AsyncMock()
             repo_inst.get_by_prefix = AsyncMock(return_value=valid_key)
-            MockRepo.return_value = repo_inst
+            mock_repo_cls.return_value = repo_inst
 
             result = await verify_api_key(session, raw_key)
 

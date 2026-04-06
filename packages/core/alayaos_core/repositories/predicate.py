@@ -26,9 +26,7 @@ class PredicateRepository(BaseRepository):
         limit: int = 50,
     ) -> tuple[list[PredicateDefinition], str | None, bool]:
         stmt = select(PredicateDefinition)
-        stmt = self.apply_cursor_pagination(
-            stmt, cursor, limit, PredicateDefinition.created_at, PredicateDefinition.id
-        )
+        stmt = self.apply_cursor_pagination(stmt, cursor, limit, PredicateDefinition.created_at, PredicateDefinition.id)
         result = await self.session.execute(stmt)
         items = list(result.scalars().all())
         actual_limit = min(max(limit, 1), 200)

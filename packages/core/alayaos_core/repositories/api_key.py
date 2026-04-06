@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
@@ -57,8 +57,7 @@ class APIKeyRepository(BaseRepository):
         api_key = await self.get_by_prefix(key_prefix)
         if api_key is None:
             return None
-        from datetime import timezone
 
-        api_key.revoked_at = datetime.now(timezone.utc)
+        api_key.revoked_at = datetime.now(UTC)
         await self.session.flush()
         return api_key

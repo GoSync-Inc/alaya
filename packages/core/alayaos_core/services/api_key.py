@@ -1,5 +1,6 @@
 import hashlib
 import secrets
+from datetime import UTC
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,9 +58,9 @@ async def verify_api_key(session: AsyncSession, raw_key: str) -> APIKey | None:
     if api_key.revoked_at is not None:
         return None
     if api_key.expires_at is not None:
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        if api_key.expires_at < datetime.now(timezone.utc):
+        if api_key.expires_at < datetime.now(UTC):
             return None
 
     return api_key

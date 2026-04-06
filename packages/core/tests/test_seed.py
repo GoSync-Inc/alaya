@@ -4,14 +4,14 @@ import importlib.util
 import os
 import sys
 import uuid
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from alayaos_core.models.api_key import APIKey
+from alayaos_core.models.workspace import Workspace
+
 # Load seed module from docker/seed.py using importlib to avoid name conflict with 'docker' package
-_SEED_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../..", "docker", "seed.py"))
-# Resolve to worktree root: tests/ is in packages/core/tests/
 _WORKTREE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 _SEED_PATH = os.path.join(_WORKTREE_ROOT, "docker", "seed.py")
 _spec = importlib.util.spec_from_file_location("docker_seed", _SEED_PATH)
@@ -21,9 +21,6 @@ sys.modules["docker_seed"] = _seed_module
 assert _spec.loader is not None
 _spec.loader.exec_module(_seed_module)  # type: ignore[union-attr]
 seed = _seed_module.seed
-
-from alayaos_core.models.api_key import APIKey
-from alayaos_core.models.workspace import Workspace
 
 _MODULE = "docker_seed"
 
@@ -38,15 +35,15 @@ class TestSeedFunction:
         session.commit = AsyncMock()
 
         with (
-            patch(f"{_MODULE}.WorkspaceRepository") as MockWsRepo,
-            patch(f"{_MODULE}.APIKeyRepository") as MockApiKeyRepo,
+            patch(f"{_MODULE}.WorkspaceRepository") as mock_ws_repo_cls,
+            patch(f"{_MODULE}.APIKeyRepository") as mock_api_key_repo_cls,
             patch(f"{_MODULE}.create_workspace") as mock_create_ws,
             patch(f"{_MODULE}.create_api_key") as mock_create_key,
-            patch(f"{_MODULE}.Settings") as MockSettings,
+            patch(f"{_MODULE}.Settings") as mock_settings_cls,
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.get_by_slug = AsyncMock(return_value=None)
-            MockWsRepo.return_value = ws_repo_inst
+            mock_ws_repo_cls.return_value = ws_repo_inst
 
             mock_create_ws.return_value = ws
 
@@ -61,13 +58,13 @@ class TestSeedFunction:
                 is_bootstrap=True,
             )
             api_key_repo_inst.list = AsyncMock(return_value=([], None, False))
-            MockApiKeyRepo.return_value = api_key_repo_inst
+            mock_api_key_repo_cls.return_value = api_key_repo_inst
 
             mock_create_key.return_value = (mock_api_key, "ak_rawkeyvalue")
 
             settings_inst = MagicMock()
             settings_inst.ENV = "dev"
-            MockSettings.return_value = settings_inst
+            mock_settings_cls.return_value = settings_inst
 
             await seed(session)
 
@@ -82,25 +79,25 @@ class TestSeedFunction:
         session.commit = AsyncMock()
 
         with (
-            patch(f"{_MODULE}.WorkspaceRepository") as MockWsRepo,
-            patch(f"{_MODULE}.APIKeyRepository") as MockApiKeyRepo,
+            patch(f"{_MODULE}.WorkspaceRepository") as mock_ws_repo_cls,
+            patch(f"{_MODULE}.APIKeyRepository") as mock_api_key_repo_cls,
             patch(f"{_MODULE}.create_workspace") as mock_create_ws,
             patch(f"{_MODULE}.create_api_key") as mock_create_key,
-            patch(f"{_MODULE}.Settings") as MockSettings,
+            patch(f"{_MODULE}.Settings") as mock_settings_cls,
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.get_by_slug = AsyncMock(return_value=ws)
-            MockWsRepo.return_value = ws_repo_inst
+            mock_ws_repo_cls.return_value = ws_repo_inst
 
             api_key_repo_inst = AsyncMock()
             api_key_repo_inst.list = AsyncMock(return_value=([], None, False))
-            MockApiKeyRepo.return_value = api_key_repo_inst
+            mock_api_key_repo_cls.return_value = api_key_repo_inst
 
             mock_create_key.return_value = (MagicMock(), "ak_raw")
 
             settings_inst = MagicMock()
             settings_inst.ENV = "dev"
-            MockSettings.return_value = settings_inst
+            mock_settings_cls.return_value = settings_inst
 
             await seed(session)
 
@@ -115,27 +112,27 @@ class TestSeedFunction:
         session.commit = AsyncMock()
 
         with (
-            patch(f"{_MODULE}.WorkspaceRepository") as MockWsRepo,
-            patch(f"{_MODULE}.APIKeyRepository") as MockApiKeyRepo,
+            patch(f"{_MODULE}.WorkspaceRepository") as mock_ws_repo_cls,
+            patch(f"{_MODULE}.APIKeyRepository") as mock_api_key_repo_cls,
             patch(f"{_MODULE}.create_workspace") as mock_create_ws,
             patch(f"{_MODULE}.create_api_key") as mock_create_key,
-            patch(f"{_MODULE}.Settings") as MockSettings,
+            patch(f"{_MODULE}.Settings") as mock_settings_cls,
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.get_by_slug = AsyncMock(return_value=None)
-            MockWsRepo.return_value = ws_repo_inst
+            mock_ws_repo_cls.return_value = ws_repo_inst
             mock_create_ws.return_value = ws
 
             api_key_repo_inst = AsyncMock()
             api_key_repo_inst.list = AsyncMock(return_value=([], None, False))
-            MockApiKeyRepo.return_value = api_key_repo_inst
+            mock_api_key_repo_cls.return_value = api_key_repo_inst
 
             mock_api_key = MagicMock()
             mock_create_key.return_value = (mock_api_key, "ak_bootstrap_raw_key")
 
             settings_inst = MagicMock()
             settings_inst.ENV = "dev"
-            MockSettings.return_value = settings_inst
+            mock_settings_cls.return_value = settings_inst
 
             await seed(session)
 
@@ -161,23 +158,23 @@ class TestSeedFunction:
         session.commit = AsyncMock()
 
         with (
-            patch(f"{_MODULE}.WorkspaceRepository") as MockWsRepo,
-            patch(f"{_MODULE}.APIKeyRepository") as MockApiKeyRepo,
-            patch(f"{_MODULE}.create_workspace") as mock_create_ws,
+            patch(f"{_MODULE}.WorkspaceRepository") as mock_ws_repo_cls,
+            patch(f"{_MODULE}.APIKeyRepository") as mock_api_key_repo_cls,
+            patch(f"{_MODULE}.create_workspace"),
             patch(f"{_MODULE}.create_api_key") as mock_create_key,
-            patch(f"{_MODULE}.Settings") as MockSettings,
+            patch(f"{_MODULE}.Settings") as mock_settings_cls,
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.get_by_slug = AsyncMock(return_value=ws)
-            MockWsRepo.return_value = ws_repo_inst
+            mock_ws_repo_cls.return_value = ws_repo_inst
 
             api_key_repo_inst = AsyncMock()
             api_key_repo_inst.list = AsyncMock(return_value=([existing_bootstrap], None, False))
-            MockApiKeyRepo.return_value = api_key_repo_inst
+            mock_api_key_repo_cls.return_value = api_key_repo_inst
 
             settings_inst = MagicMock()
             settings_inst.ENV = "dev"
-            MockSettings.return_value = settings_inst
+            mock_settings_cls.return_value = settings_inst
 
             await seed(session)
 
@@ -192,22 +189,22 @@ class TestSeedFunction:
         session.commit = AsyncMock()
 
         with (
-            patch(f"{_MODULE}.WorkspaceRepository") as MockWsRepo,
-            patch(f"{_MODULE}.APIKeyRepository") as MockApiKeyRepo,
-            patch(f"{_MODULE}.create_workspace") as mock_create_ws,
+            patch(f"{_MODULE}.WorkspaceRepository") as mock_ws_repo_cls,
+            patch(f"{_MODULE}.APIKeyRepository") as mock_api_key_repo_cls,
+            patch(f"{_MODULE}.create_workspace"),
             patch(f"{_MODULE}.create_api_key") as mock_create_key,
-            patch(f"{_MODULE}.Settings") as MockSettings,
+            patch(f"{_MODULE}.Settings") as mock_settings_cls,
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.get_by_slug = AsyncMock(return_value=ws)
-            MockWsRepo.return_value = ws_repo_inst
+            mock_ws_repo_cls.return_value = ws_repo_inst
 
             api_key_repo_inst = AsyncMock()
-            MockApiKeyRepo.return_value = api_key_repo_inst
+            mock_api_key_repo_cls.return_value = api_key_repo_inst
 
             settings_inst = MagicMock()
             settings_inst.ENV = "production"
-            MockSettings.return_value = settings_inst
+            mock_settings_cls.return_value = settings_inst
 
             await seed(session)
 

@@ -29,11 +29,7 @@ class EntityRepository(BaseRepository):
         return entity
 
     async def get_by_id(self, entity_id: uuid.UUID) -> L1Entity | None:
-        stmt = (
-            select(L1Entity)
-            .where(L1Entity.id == entity_id)
-            .options(selectinload(L1Entity.external_ids))
-        )
+        stmt = select(L1Entity).where(L1Entity.id == entity_id).options(selectinload(L1Entity.external_ids))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 

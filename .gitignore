@@ -1,0 +1,39 @@
+# Superflow artifacts (internal planning, not public)
+docs/superflow/
+
+# Environment
+.env
+.env.*
+!.env.example
+production.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code
+.claude/
+.superflow-state.json
+.par-evidence.json
+.worktrees/
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db

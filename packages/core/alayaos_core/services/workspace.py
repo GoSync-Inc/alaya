@@ -1,3 +1,4 @@
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from alayaos_core.models.workspace import Workspace
@@ -51,6 +52,9 @@ async def create_workspace(session: AsyncSession, name: str, slug: str, settings
     workspace = await ws_repo.create(name=name, slug=slug, settings=settings)
     await session.flush()  # ensure workspace.id is available
 
+    # SET LOCAL for RLS — seeded tables are workspace-scoped
+    await session.execute(text("SET LOCAL app.workspace_id = :wid"), {"wid": str(workspace.id)})
+
     for et in CORE_ENTITY_TYPES:
         await et_repo.upsert_core(workspace_id=workspace.id, **et)
 
@@ -58,3 +62,17 @@ async def create_workspace(session: AsyncSession, name: str, slug: str, settings
         await pred_repo.upsert_core(workspace_id=workspace.id, is_core=True, **pred)
 
     return workspace
+
+
+async def seed_core_metadata(session: AsyncSession, workspace: Workspace) -> None:
+    """Re-run core entity type and predicate upserts for an existing workspace."""
+    et_repo = EntityTypeRepository(session)
+    pred_repo = PredicateRepository(session)
+
+    await session.execute(text("SET LOCAL app.workspace_id = :wid"), {"wid": str(workspace.id)})
+
+    for et in CORE_ENTITY_TYPES:
+        await et_repo.upsert_core(workspace_id=workspace.id, **et)
+
+    for pred in CORE_PREDICATES:
+        await pred_repo.upsert_core(workspace_id=workspace.id, is_core=True, **pred)

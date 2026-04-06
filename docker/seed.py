@@ -8,7 +8,7 @@ from alayaos_core.config import Settings
 from alayaos_core.repositories.api_key import APIKeyRepository
 from alayaos_core.repositories.workspace import WorkspaceRepository
 from alayaos_core.services.api_key import create_api_key
-from alayaos_core.services.workspace import create_workspace
+from alayaos_core.services.workspace import create_workspace, seed_core_metadata
 
 
 async def seed(session: AsyncSession) -> None:
@@ -20,11 +20,14 @@ async def seed(session: AsyncSession) -> None:
         await session.flush()
         print("Created demo workspace")
     else:
-        print("Demo workspace already exists")
+        # Re-run upserts for core metadata (idempotent — handles incomplete previous runs)
+        await seed_core_metadata(session, workspace)
+        print("Demo workspace already exists — core metadata refreshed")
 
     # 2. Bootstrap API key (idempotent)
     settings = Settings()
     if settings.ENV == "production":
+        await session.commit()
         print("Production mode — skipping bootstrap API key")
         return
 

@@ -1,12 +1,12 @@
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alayaos_core.config import Settings
 from alayaos_core.models import Base
+from alembic import context
 
 config = context.config
 

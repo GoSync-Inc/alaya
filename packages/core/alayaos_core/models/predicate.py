@@ -9,7 +9,10 @@ from alayaos_core.models.base import Base, TimestampMixin
 
 class PredicateDefinition(Base, TimestampMixin):
     __tablename__ = "predicate_definitions"
-    __table_args__ = (UniqueConstraint("workspace_id", "slug", name="uq_predicate_ws_slug"),)
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_predicate_ws_id"),
+        UniqueConstraint("workspace_id", "slug", name="uq_predicate_ws_slug"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)

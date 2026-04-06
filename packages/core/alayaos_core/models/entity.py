@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -14,12 +14,18 @@ if TYPE_CHECKING:
 
 class L1Entity(Base, TimestampMixin):
     __tablename__ = "l1_entities"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "id", name="uq_l1_entities_ws_id"),
+        ForeignKeyConstraint(
+            ["workspace_id", "entity_type_id"],
+            ["entity_type_definitions.workspace_id", "entity_type_definitions.id"],
+            name="fk_entities_type",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)
-    entity_type_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("entity_type_definitions.id"), nullable=False
-    )
+    entity_type_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     properties: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
@@ -43,13 +49,18 @@ class EntityExternalId(Base):
             "external_id",
             name="uq_entity_ext_id",
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "entity_id"],
+            ["l1_entities.workspace_id", "l1_entities.id"],
+            name="fk_ext_id_entity",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)
-    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("l1_entities.id"), nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     source_type: Mapped[str] = mapped_column(Text, nullable=False)
     external_id: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     entity: Mapped["L1Entity"] = relationship("L1Entity", back_populates="external_ids")

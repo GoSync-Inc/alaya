@@ -2,7 +2,6 @@ from alayaos_core.schemas.api_key import APIKeyCreate, APIKeyCreateResponse, API
 from alayaos_core.schemas.common import (
     ErrorDetail,
     ErrorResponse,
-    HealthCheck,
     HealthResponse,
     PaginatedResponse,
     PaginationInfo,
@@ -29,7 +28,6 @@ __all__ = [
     "EventRead",
     "EventUpdate",
     "ExternalIdRead",
-    "HealthCheck",
     "HealthResponse",
     "PaginatedResponse",
     "PaginationInfo",

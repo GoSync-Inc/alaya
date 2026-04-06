@@ -20,7 +20,7 @@ class EventRead(BaseModel):
     source_id: str
     content: dict
     content_hash: str | None = None
-    metadata: dict | None = None
+    event_metadata: dict = {}
     processed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

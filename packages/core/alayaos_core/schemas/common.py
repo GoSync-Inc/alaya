@@ -2,34 +2,29 @@ from pydantic import BaseModel
 
 
 class ErrorDetail(BaseModel):
-    field: str | None = None
+    code: str
     message: str
+    hint: str | None = None
+    docs: str | None = None
+    request_id: str | None = None
 
 
 class ErrorResponse(BaseModel):
-    error: str
-    message: str
-    details: list[ErrorDetail] | None = None
+    error: ErrorDetail
 
 
 class PaginationInfo(BaseModel):
-    total: int
-    page: int
-    page_size: int
-    pages: int
+    next_cursor: str | None = None
+    has_more: bool = False
+    count: int = 0
 
 
 class PaginatedResponse[T](BaseModel):
-    items: list[T]
+    data: list[T]
     pagination: PaginationInfo
 
 
-class HealthCheck(BaseModel):
-    name: str
-    status: str
-    message: str | None = None
-
-
 class HealthResponse(BaseModel):
-    status: str
-    checks: list[HealthCheck]
+    status: str  # "ok" or "degraded"
+    checks: dict[str, str] = {}  # {"database": "ok", "migrations": "ok", ...}
+    first_run: bool = False

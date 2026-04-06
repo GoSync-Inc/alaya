@@ -16,6 +16,12 @@ alayaos-connectors = { workspace = true }
 [tool.hatch.build.targets.wheel]
 packages = []
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "integration: requires real PostgreSQL and Redis",
+]
+
 [dependency-groups]
 dev = [
     "pyright>=1.1.408",

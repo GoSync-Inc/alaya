@@ -13,6 +13,7 @@ from alayaos_api.deps import (
     require_scope,
 )
 from alayaos_core.models.api_key import APIKey
+from alayaos_core.repositories.base import BaseRepository
 from alayaos_core.repositories.event import EventRepository
 from alayaos_core.schemas.event import EventCreate, EventRead
 
@@ -58,6 +59,23 @@ async def list_events(
     cursor: str | None = None,
     limit: int = 50,
 ):
+    if cursor is not None:
+        try:
+            BaseRepository.decode_cursor(cursor)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "validation.invalid_cursor",
+                        "message": "Invalid pagination cursor.",
+                        "hint": None,
+                        "docs": None,
+                        "request_id": None,
+                    }
+                },
+            ) from e
+
     repo = EventRepository(session)
     items, next_cursor, has_more = await repo.list(cursor=cursor, limit=limit)
     return paginated_response(items, EventRead, next_cursor, has_more)

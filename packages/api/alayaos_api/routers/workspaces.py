@@ -14,6 +14,7 @@ from alayaos_api.deps import (
     require_scope,
 )
 from alayaos_core.models.api_key import APIKey
+from alayaos_core.repositories.base import BaseRepository
 from alayaos_core.repositories.workspace import WorkspaceRepository
 from alayaos_core.schemas.workspace import WorkspaceCreate, WorkspaceRead, WorkspaceUpdate
 from alayaos_core.services.workspace import create_workspace
@@ -81,6 +82,23 @@ async def list_workspaces(
     cursor: str | None = None,
     limit: int = 50,
 ):
+    if cursor is not None:
+        try:
+            BaseRepository.decode_cursor(cursor)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "validation.invalid_cursor",
+                        "message": "Invalid pagination cursor.",
+                        "hint": None,
+                        "docs": None,
+                        "request_id": None,
+                    }
+                },
+            ) from e
+
     repo = WorkspaceRepository(session)
 
     if api_key.is_bootstrap:

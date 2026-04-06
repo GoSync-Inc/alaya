@@ -13,6 +13,7 @@ from alayaos_api.deps import (
 )
 from alayaos_core.models.api_key import APIKey
 from alayaos_core.repositories.api_key import APIKeyRepository
+from alayaos_core.repositories.base import BaseRepository
 from alayaos_core.schemas.api_key import APIKeyCreate, APIKeyCreateResponse, APIKeyRead
 from alayaos_core.services.api_key import create_api_key
 
@@ -54,6 +55,23 @@ async def list_api_keys(
     limit: int = 50,
 ):
     """List API keys. Never returns raw keys."""
+    if cursor is not None:
+        try:
+            BaseRepository.decode_cursor(cursor)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "validation.invalid_cursor",
+                        "message": "Invalid pagination cursor.",
+                        "hint": None,
+                        "docs": None,
+                        "request_id": None,
+                    }
+                },
+            ) from e
+
     repo = APIKeyRepository(session)
     items, next_cursor, has_more = await repo.list(
         workspace_id=api_key.workspace_id,

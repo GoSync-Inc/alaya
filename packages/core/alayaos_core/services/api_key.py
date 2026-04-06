@@ -1,6 +1,5 @@
 import hashlib
 import secrets
-from datetime import UTC
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,29 +37,3 @@ async def create_api_key(
         expires_at=expires_at,
     )
     return api_key, raw_key
-
-
-async def verify_api_key(session: AsyncSession, raw_key: str) -> APIKey | None:
-    """Verify API key: prefix lookup -> hash verify -> expiry/revoked check."""
-    if not raw_key.startswith("ak_") or len(raw_key) < 12:
-        return None
-
-    prefix = raw_key[:12]
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-
-    repo = APIKeyRepository(session)
-    api_key = await repo.get_by_prefix(prefix)
-
-    if api_key is None:
-        return None
-    if api_key.key_hash != key_hash:
-        return None
-    if api_key.revoked_at is not None:
-        return None
-    if api_key.expires_at is not None:
-        from datetime import datetime
-
-        if api_key.expires_at < datetime.now(UTC):
-            return None
-
-    return api_key

@@ -1,0 +1,13 @@
+# Dev overlay: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["uvicorn", "alayaos_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./packages:/app/packages
+      - ./alembic:/app/alembic
+      - ./docker:/app/docker
+    environment:
+      ALAYA_ENV: dev

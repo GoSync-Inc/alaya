@@ -1,0 +1,8 @@
+{
+    # For local dev, use HTTP
+    auto_https off
+}
+
+:80 {
+    reverse_proxy api:8000
+}

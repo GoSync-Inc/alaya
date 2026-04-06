@@ -6,6 +6,8 @@ docs/superflow/
 .env.*
 !.env.example
 production.env
+.envrc
+.direnv/
 
 # Python
 __pycache__/
@@ -23,6 +25,11 @@ htmlcov/
 *.egg-info/
 dist/
 build/
+venv/
+.pytest_cache/
+.coverage.*
+coverage.xml
+*.log
 
 # IDE
 .idea/

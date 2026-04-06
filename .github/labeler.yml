@@ -1,0 +1,40 @@
+# Auto-label PRs based on changed files
+# Used by .github/workflows/auto-label.yml
+
+core:
+  - changed-files:
+    - any-glob-to-any-file: 'packages/core/**'
+
+api:
+  - changed-files:
+    - any-glob-to-any-file: 'packages/api/**'
+
+cli:
+  - changed-files:
+    - any-glob-to-any-file: 'packages/cli/**'
+
+connectors:
+  - changed-files:
+    - any-glob-to-any-file: 'packages/connectors/**'
+
+web:
+  - changed-files:
+    - any-glob-to-any-file: 'packages/web/**'
+
+documentation:
+  - changed-files:
+    - any-glob-to-any-file: '**/*.md'
+
+ci:
+  - changed-files:
+    - any-glob-to-any-file: '.github/**'
+
+docker:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'Dockerfile'
+      - 'docker-compose*.yml'
+
+tests:
+  - changed-files:
+    - any-glob-to-any-file: '**/tests/**'

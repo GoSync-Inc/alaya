@@ -26,7 +26,8 @@ class EntityRepository(BaseRepository):
         )
         self.session.add(entity)
         await self.session.flush()
-        return entity
+        # Re-fetch with external_ids loaded to avoid MissingGreenlet in async
+        return await self.get_by_id(entity.id)  # type: ignore[return-value]
 
     async def get_by_id(self, entity_id: uuid.UUID) -> L1Entity | None:
         stmt = select(L1Entity).where(L1Entity.id == entity_id).options(selectinload(L1Entity.external_ids))
@@ -42,7 +43,8 @@ class EntityRepository(BaseRepository):
             if key in allowed:
                 setattr(entity, key, value)
         await self.session.flush()
-        return entity
+        # Re-fetch to get server-updated fields (updated_at) and eager-loaded relationships
+        return await self.get_by_id(entity_id)
 
     async def list(
         self,

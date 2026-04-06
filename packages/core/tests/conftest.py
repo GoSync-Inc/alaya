@@ -62,7 +62,7 @@ async def session_ws_a(engine) -> AsyncGenerator[AsyncSession]:
             text("INSERT INTO workspaces (id, name, slug) VALUES (:id, :name, :slug) ON CONFLICT (slug) DO NOTHING"),
             {"id": WS_A_ID, "name": "Workspace A", "slug": "ws-a"},
         )
-        await sess.execute(text("SET LOCAL app.workspace_id = :wid"), {"wid": str(WS_A_ID)})
+        await sess.execute(text(f"SET LOCAL app.workspace_id = '{WS_A_ID}'"))
         yield sess
         await sess.rollback()
 
@@ -76,6 +76,6 @@ async def session_ws_b(engine) -> AsyncGenerator[AsyncSession]:
             text("INSERT INTO workspaces (id, name, slug) VALUES (:id, :name, :slug) ON CONFLICT (slug) DO NOTHING"),
             {"id": WS_B_ID, "name": "Workspace B", "slug": "ws-b"},
         )
-        await sess.execute(text("SET LOCAL app.workspace_id = :wid"), {"wid": str(WS_B_ID)})
+        await sess.execute(text(f"SET LOCAL app.workspace_id = '{WS_B_ID}'"))
         yield sess
         await sess.rollback()

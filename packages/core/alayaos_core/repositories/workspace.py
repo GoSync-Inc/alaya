@@ -39,7 +39,7 @@ class WorkspaceRepository(BaseRepository):
         for key, value in kwargs.items():
             setattr(workspace, key, value)
         await self.session.flush()
-        return workspace
+        return await self.get_by_id(workspace_id)
 
     async def list(
         self,

@@ -34,17 +34,13 @@ async def create_api_key_endpoint(
         scopes=body.scopes,
         expires_at=body.expires_at,
     )
-    response_data = APIKeyCreateResponse(
-        id=new_key.id,
-        workspace_id=new_key.workspace_id,
-        name=new_key.name,
-        key_prefix=new_key.key_prefix,
-        scopes=new_key.scopes,
-        expires_at=new_key.expires_at,
-        created_at=new_key.created_at,
-        raw_key=raw_key,
-    )
-    return data_response(response_data)
+    # Re-fetch to get server-generated timestamps
+    await session.flush()
+    repo = APIKeyRepository(session)
+    refreshed = await repo.get_by_prefix(new_key.key_prefix)
+    base_data = APIKeyRead.model_validate(refreshed).model_dump()
+    base_data["raw_key"] = raw_key
+    return data_response(APIKeyCreateResponse(**base_data))
 
 
 @router.get("/api-keys")

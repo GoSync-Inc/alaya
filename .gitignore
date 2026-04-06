@@ -15,6 +15,11 @@ __pycache__/
 .mypy_cache/
 .pyright/
 .ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+htmlcov/
 *.egg-info/
 dist/
 build/

@@ -1,0 +1,17 @@
+[project]
+name = "alayaos-cli"
+version = "0.1.0"
+description = "AlayaOS CLI tool"
+requires-python = ">=3.13"
+dependencies = [
+    "alayaos-core",
+    "typer>=0.12",
+    "rich>=13.0",
+]
+
+[tool.uv.sources]
+alayaos-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

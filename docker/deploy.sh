@@ -41,7 +41,7 @@ docker run -d \
     "${IMAGE}"
 
 # Run migrations
-if ! docker exec "${STANDBY}" uv run alembic upgrade head; then
+if ! docker exec "${STANDBY}" alembic upgrade head; then
     echo "ERROR: Migration failed. Removing standby container."
     docker rm -f "${STANDBY}"
     exit 1

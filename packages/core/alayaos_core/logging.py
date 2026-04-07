@@ -19,6 +19,7 @@ def setup_logging(json_output: bool = True, log_level: str = "INFO", db_echo: bo
         structlog.stdlib.add_logger_name,
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
     ]
 
     renderer = structlog.processors.JSONRenderer() if json_output else structlog.dev.ConsoleRenderer()

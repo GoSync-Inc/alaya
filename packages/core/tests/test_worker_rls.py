@@ -89,7 +89,12 @@ async def test_job_extract_calls_rls_context():
             patch("alayaos_core.extraction.pipeline.run_extraction", new_callable=AsyncMock, return_value=None),
             patch(
                 "alayaos_core.worker.tasks.Settings",
-                MagicMock(return_value=MagicMock(ANTHROPIC_API_KEY=MagicMock(get_secret_value=lambda: ""))),
+                MagicMock(
+                    return_value=MagicMock(
+                        ANTHROPIC_API_KEY=MagicMock(get_secret_value=lambda: ""),
+                        FEATURE_FLAG_USE_CORTEX=False,
+                    )
+                ),
             ),
         ):
             await worker_tasks.job_extract.original_func(event_id, extraction_run_id, workspace_id)

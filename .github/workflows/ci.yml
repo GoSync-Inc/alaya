@@ -89,7 +89,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Lowercase image name
         run: echo "IMAGE_NAME=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
-      - uses: aquasecurity/trivy-action@18f2510ee396bbf400402947e7b4b01e007f0986 # v0.29.0
+      - uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
           image-ref: ghcr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: sarif

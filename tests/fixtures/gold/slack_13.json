@@ -1,0 +1,15 @@
+{
+    "input": "DM from Olivia Grant to Sam Lee: 'Hey, just checking — are you still the DRI for the onboarding flow redesign? I heard they might be reassigning it to the Growth team after Viktor left.'",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Olivia Grant", "entity_type": "person"},
+        {"name": "Sam Lee", "entity_type": "person"},
+        {"name": "Viktor", "entity_type": "person"},
+        {"name": "onboarding flow redesign", "entity_type": "project"},
+        {"name": "Growth", "entity_type": "team"}
+    ],
+    "expected_claims": [],
+    "expected_relations": [
+        {"source_entity": "Sam Lee", "target_entity": "onboarding flow redesign", "relation_type": "member_of"}
+    ]
+}

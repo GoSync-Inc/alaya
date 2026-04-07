@@ -1,0 +1,17 @@
+{
+    "input": "Thread in #product-feedback: Kevin Wu: 'Customer Acme Corp escalated — they're hitting rate limits on our API. Priority: P0. We need a fix by Monday.' Raj Patel: 'I can take this. Will investigate the rate limiter config.'",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Kevin Wu", "entity_type": "person"},
+        {"name": "Raj Patel", "entity_type": "person"},
+        {"name": "Acme Corp", "entity_type": "person"},
+        {"name": "API rate limiter", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "API rate limiter", "predicate": "status", "value": "P0", "value_type": "text"},
+        {"entity": "API rate limiter", "predicate": "owner", "value": "Raj Patel", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Raj Patel", "target_entity": "API rate limiter", "relation_type": "member_of"}
+    ]
+}

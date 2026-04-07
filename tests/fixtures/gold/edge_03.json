@@ -1,0 +1,20 @@
+{
+    "input": "Bob was the owner of Project Delta (completed Q4 2025). He is now the owner of Project Epsilon (starting Q1 2026). Bob reports to VP Eng Sarah.",
+    "source_type": "manual",
+    "edge_case": "temporal_claim_change",
+    "description": "Entity with multiple temporal ownership claims — first claim should be superseded by later.",
+    "expected_entities": [
+        {"name": "Bob", "entity_type": "person"},
+        {"name": "Sarah", "entity_type": "person"},
+        {"name": "Project Delta", "entity_type": "project"},
+        {"name": "Project Epsilon", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "Project Delta", "predicate": "status", "value": "completed", "value_type": "text"},
+        {"entity": "Project Epsilon", "predicate": "owner", "value": "Bob", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Bob", "target_entity": "Project Epsilon", "relation_type": "member_of"},
+        {"source_entity": "Bob", "target_entity": "Sarah", "relation_type": "reports_to"}
+    ]
+}

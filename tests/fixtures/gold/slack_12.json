@@ -1,0 +1,17 @@
+{
+    "input": "#releases: v2.1.0 shipped today. Release owner: Fatima Al-Hassan. Main features: improved search indexing, connector health dashboard. Known issues: latency regression in search, tracked in issue #512.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Fatima Al-Hassan", "entity_type": "person"},
+        {"name": "v2.1.0", "entity_type": "document"},
+        {"name": "search indexing", "entity_type": "project"},
+        {"name": "connector health dashboard", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "v2.1.0", "predicate": "status", "value": "shipped", "value_type": "text"},
+        {"entity": "v2.1.0", "predicate": "owner", "value": "Fatima Al-Hassan", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Fatima Al-Hassan", "target_entity": "v2.1.0", "relation_type": "member_of"}
+    ]
+}

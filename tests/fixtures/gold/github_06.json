@@ -1,0 +1,16 @@
+{
+    "input": "Title: Add pagination support to /entities endpoint\nAuthor: Priya Sharma\nAssignee: Priya Sharma\nLabels: enhancement, api\nMilestone: v1.0.0\n\nBody:\nCurrently the /entities endpoint returns all entities at once. With large workspaces this causes timeouts (>30s observed by customer Globex Corp). We need cursor-based pagination, max 200 per page.\n\nAcceptance criteria:\n- cursor param accepted on GET /entities\n- Response includes next_cursor and has_more\n- Default limit: 50, max: 200",
+    "source_type": "github",
+    "expected_entities": [
+        {"name": "Priya Sharma", "entity_type": "person"},
+        {"name": "Globex Corp", "entity_type": "person"},
+        {"name": "/entities endpoint", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "/entities endpoint", "predicate": "status", "value": "enhancement", "value_type": "text"},
+        {"entity": "Priya Sharma", "predicate": "owner", "value": "/entities endpoint", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Priya Sharma", "target_entity": "/entities endpoint", "relation_type": "member_of"}
+    ]
+}

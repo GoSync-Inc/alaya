@@ -1,0 +1,18 @@
+{
+    "input": "Title: Security: rotate API key hashes from SHA-1 to SHA-256\nAuthor: Ivan Petrov\nAssignee: Ivan Petrov\nReviewer: Security Team\nLabels: security, breaking-change\nMilestone: v0.9.0\n\nBody:\nWe're currently using SHA-1 for API key hashing. This must be migrated to SHA-256 before GA.\n\nMigration plan:\n1. Add sha256_hash column to api_keys\n2. Dual-write during transition period (30 days)\n3. Remove sha1_hash column\n\nBreaking: clients must re-generate keys. Coordinating with Andrea Fano from Customer Success.",
+    "source_type": "github",
+    "expected_entities": [
+        {"name": "Ivan Petrov", "entity_type": "person"},
+        {"name": "Andrea Fano", "entity_type": "person"},
+        {"name": "Security Team", "entity_type": "team"},
+        {"name": "API key hash migration", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "API key hash migration", "predicate": "status", "value": "security", "value_type": "text"},
+        {"entity": "Ivan Petrov", "predicate": "owner", "value": "API key hash migration", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Ivan Petrov", "target_entity": "API key hash migration", "relation_type": "member_of"},
+        {"source_entity": "Security Team", "target_entity": "API key hash migration", "relation_type": "member_of"}
+    ]
+}

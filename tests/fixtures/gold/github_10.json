@@ -1,0 +1,17 @@
+{
+    "input": "Title: Bug: Slack connector drops messages when rate limit is hit\nAuthor: Aiko Yamamoto\nAssignee: Aiko Yamamoto\nLabels: bug, connector, P1\nMilestone: v0.8.1\n\nBody:\nWhen the Slack API returns 429 Too Many Requests, the connector silently drops the message instead of retrying. Observed in production workspace 'Fintech Startup Inc'.\n\nExpected: exponential backoff with 3 retries.\nActual: message dropped, no retry log.\n\nFix: implement retry logic in SlackConnector.process_event(). Reviewer: Marcus Stern.",
+    "source_type": "github",
+    "expected_entities": [
+        {"name": "Aiko Yamamoto", "entity_type": "person"},
+        {"name": "Marcus Stern", "entity_type": "person"},
+        {"name": "Fintech Startup Inc", "entity_type": "person"},
+        {"name": "Slack connector", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "Slack connector", "predicate": "status", "value": "bug", "value_type": "text"},
+        {"entity": "Aiko Yamamoto", "predicate": "owner", "value": "Slack connector", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Aiko Yamamoto", "target_entity": "Slack connector", "relation_type": "member_of"}
+    ]
+}

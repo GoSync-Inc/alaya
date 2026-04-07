@@ -1,0 +1,22 @@
+{
+    "input": "Incident Post-Mortem — April 18, 2026\nIncident Commander: Yusuf Adeyemi\nAttendees: Yusuf Adeyemi, Maria Santos, Felix Braun, Ivan Petrov\n\nSummary: 47-minute outage on April 17. Root cause: Postgres connection pool exhausted due to long-running analytics query by Felix's reporting job.\nTimeline: 14:03 outage started, 14:50 resolved by Ivan (killed blocking query, restarted pool).\nAction items:\n- Add query timeout (30s). Owner: Ivan. Due: April 22.\n- Add alerting for connection pool saturation. Owner: Yusuf. Due: April 25.\n- Felix to review reporting job query plan. Due: April 20.",
+    "source_type": "meeting",
+    "expected_entities": [
+        {"name": "Yusuf Adeyemi", "entity_type": "person"},
+        {"name": "Maria Santos", "entity_type": "person"},
+        {"name": "Felix Braun", "entity_type": "person"},
+        {"name": "Ivan Petrov", "entity_type": "person"},
+        {"name": "query timeout fix", "entity_type": "project"},
+        {"name": "connection pool alerting", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "query timeout fix", "predicate": "deadline", "value": "2026-04-22", "value_type": "date"},
+        {"entity": "query timeout fix", "predicate": "owner", "value": "Ivan Petrov", "value_type": "entity_ref"},
+        {"entity": "connection pool alerting", "predicate": "deadline", "value": "2026-04-25", "value_type": "date"},
+        {"entity": "connection pool alerting", "predicate": "owner", "value": "Yusuf Adeyemi", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Ivan Petrov", "target_entity": "query timeout fix", "relation_type": "member_of"},
+        {"source_entity": "Yusuf Adeyemi", "target_entity": "connection pool alerting", "relation_type": "member_of"}
+    ]
+}

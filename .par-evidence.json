@@ -1,13 +1,17 @@
 {
-  "sprint": 4,
+  "sprint": 5,
   "claude_product": "ACCEPTED",
   "technical_review": "APPROVE",
   "provider": "codex",
   "fixes_applied": [
-    "paginate all entities in resolve_batch (not just first 200)",
-    "LLM rejection recorded as tier=llm, action=rejected",
-    "persist external IDs when creating new entities"
+    "lock failure raises for TaskIQ retry",
+    "date normalization preserves time component",
+    "supersede all existing active claims",
+    "LLM model from config",
+    "worker uses root Dockerfile",
+    "entity_ref lookup with case-insensitive fallback",
+    "enrich stub returns to completed"
   ],
-  "test_evidence": "347 passed, 18 skipped, 1 warning in 3.17s",
-  "ts": "2026-04-07T18:25:00Z"
+  "test_evidence": "369 passed, 18 skipped, 1 warning in 3.51s",
+  "ts": "2026-04-07T18:50:00Z"
 }

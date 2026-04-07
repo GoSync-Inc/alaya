@@ -25,6 +25,7 @@ class CrystallizerVerifier:
         Returns (verified_result, changed, usage).
         """
         user_text = (
+            f"Original text:\n{chunk_text}\n\n"
             f"You previously extracted:\n{initial_result.model_dump_json(indent=2)}\n\n"
             "Review the original text and correct any:\n"
             "- False entities (not actually mentioned)\n"

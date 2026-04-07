@@ -236,8 +236,15 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
         crystal_chunks = await chunk_repo.list_crystal(uuid.UUID(event_id))
         crystal_chunk_ids = [str(c.id) for c in crystal_chunks]
 
-    for chunk_id in crystal_chunk_ids:
-        await job_crystallize.kiq(chunk_id, extraction_run_id, workspace_id)
+    if crystal_chunk_ids:
+        for chunk_id in crystal_chunk_ids:
+            await job_crystallize.kiq(chunk_id, extraction_run_id, workspace_id)
+    else:
+        # No crystal chunks — complete the run (nothing to extract)
+        async with factory() as session, session.begin():
+            await _set_workspace_context(session, workspace_id)
+            run_repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
+            await run_repo.update_status(uuid.UUID(extraction_run_id), "completed")
 
     return {
         "event_id": event_id,
@@ -255,7 +262,6 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
     from alayaos_core.extraction.crystallizer.verifier import CrystallizerVerifier
     from alayaos_core.llm.fake import FakeLLMAdapter
     from alayaos_core.repositories.chunk import ChunkRepository
-    from alayaos_core.repositories.extraction_run import ExtractionRunRepository
     from alayaos_core.repositories.pipeline_trace import PipelineTraceRepository
     from alayaos_core.services.entity_cache import EntityCacheService
     from alayaos_core.services.workspace import CORE_ENTITY_TYPES, CORE_PREDICATES
@@ -281,7 +287,6 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
         await _set_workspace_context(session, workspace_id)
 
         chunk_repo = ChunkRepository(session, uuid.UUID(workspace_id))
-        run_repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
         trace_repo = PipelineTraceRepository(session, uuid.UUID(workspace_id))
 
         chunk = await chunk_repo.get_by_id(uuid.UUID(chunk_id))
@@ -292,7 +297,14 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
         if chunk.processing_stage != "classified":
             return {"status": "skipped", "reason": f"stage={chunk.processing_stage}"}
 
-        run = await run_repo.get_by_id(uuid.UUID(extraction_run_id))
+        # Lock extraction run row to serialize concurrent chunk tasks
+        from sqlalchemy import select as sa_select
+
+        from alayaos_core.models.extraction_run import ExtractionRun
+
+        stmt = sa_select(ExtractionRun).where(ExtractionRun.id == uuid.UUID(extraction_run_id)).with_for_update()
+        result = await session.execute(stmt)
+        run = result.scalar_one_or_none()
         if run is None:
             return {"status": "skipped", "reason": "run not found"}
 
@@ -326,19 +338,15 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
             low=settings.CRYSTALLIZER_CONFIDENCE_LOW,
         )
 
-        # Merge chunk result into extraction_run.raw_extraction
-        # Append: existing list of chunk results or initialize
-        existing = run.raw_extraction or {"chunks": []}
-        if "chunks" not in existing:
-            existing = {"chunks": []}
-        existing["chunks"].append(
-            {
-                "chunk_id": chunk_id,
-                "result": final_result.model_dump(),
-                "verification_changed": verification_changed,
-            }
-        )
-        run.raw_extraction = existing
+        # Merge chunk result into extraction_run.raw_extraction as a proper
+        # ExtractionResult (entities/relations/claims lists). The FOR UPDATE
+        # lock on the run row serializes concurrent chunk tasks.
+        existing_raw = run.raw_extraction or {"entities": [], "relations": [], "claims": []}
+        chunk_data = final_result.model_dump()
+        existing_raw.setdefault("entities", []).extend(chunk_data.get("entities", []))
+        existing_raw.setdefault("relations", []).extend(chunk_data.get("relations", []))
+        existing_raw.setdefault("claims", []).extend(chunk_data.get("claims", []))
+        run.raw_extraction = existing_raw
 
         # Update chunk to 'extracted'
         await chunk_repo.update_processing_stage(chunk.id, "extracted")
@@ -369,13 +377,18 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
         run.crystallizer_cost_usd = float(run.crystallizer_cost_usd or 0) + total_cost
 
         await session.flush()
+        event_id_for_check = chunk.event_id
 
-        # Check if all chunks for this event are extracted — if so enqueue job_write
-        all_chunks = await chunk_repo.list_by_event(chunk.event_id)
+    # Check AFTER commit — read committed state from a separate transaction
+    all_extracted = False
+    async with factory() as session2, session2.begin():
+        await _set_workspace_context(session2, workspace_id)
+        chunk_repo2 = ChunkRepository(session2, uuid.UUID(workspace_id))
+        all_chunks = await chunk_repo2.list_by_event(event_id_for_check)
         crystal_chunks = [c for c in all_chunks if c.is_crystal]
-        all_extracted = all(c.processing_stage == "extracted" for c in crystal_chunks)
+        all_extracted = bool(crystal_chunks) and all(c.processing_stage == "extracted" for c in crystal_chunks)
 
-    if all_extracted and crystal_chunks:
+    if all_extracted:
         await job_write.kiq(extraction_run_id, workspace_id)
 
     return {

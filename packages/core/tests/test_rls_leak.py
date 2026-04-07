@@ -9,9 +9,7 @@ async def test_set_local_does_not_persist_across_transactions(engine):
     """SET LOCAL must not persist across transactions on same pooled connection."""
     async with engine.connect() as conn:
         async with conn.begin():
-            await conn.execute(
-                text("SET LOCAL app.workspace_id = '00000000-0000-0000-0000-000000000001'")
-            )
+            await conn.execute(text("SET LOCAL app.workspace_id = '00000000-0000-0000-0000-000000000001'"))
         # Transaction ended, SET LOCAL should be gone
 
         async with conn.begin():

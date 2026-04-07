@@ -9,8 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class BaseRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, workspace_id: uuid.UUID | None = None) -> None:
         self.session = session
+        self.workspace_id = workspace_id
+
+    def _ws_filter(self, model_class):
+        """Defense-in-depth: add workspace_id WHERE clause if set."""
+        if self.workspace_id is not None:
+            return model_class.workspace_id == self.workspace_id
+        return True  # no-op filter (SQLAlchemy handles `where(True)` as no-op)
 
     @staticmethod
     def encode_cursor(created_at: datetime, id: uuid.UUID) -> str:  # noqa: A002

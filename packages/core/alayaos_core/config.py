@@ -60,4 +60,4 @@ class Settings(BaseSettings):
     INTEGRATOR_DEDUP_AMBIGUOUS_LOW: float = 0.70
 
     # Feature flags
-    FEATURE_FLAG_USE_CORTEX: bool = True  # Enabled: Cortex pipeline is now the default
+    FEATURE_FLAG_USE_CORTEX: bool = False  # Opt-in: requires ANTHROPIC_API_KEY for Cortex classification

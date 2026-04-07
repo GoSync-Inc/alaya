@@ -1,5 +1,6 @@
 """TaskIQ task definitions for the three-job extraction pipeline."""
 
+import contextlib
 import uuid
 
 from sqlalchemy import text
@@ -87,6 +88,13 @@ async def job_write(extraction_run_id: str, workspace_id: str) -> dict:
     else:
         llm = FakeLLMAdapter()
 
+    # Connect to Redis for dirty-set push + entity cache invalidation
+    import redis.asyncio as aioredis
+
+    redis_client = None
+    with contextlib.suppress(Exception):
+        redis_client = aioredis.from_url(settings.REDIS_URL)
+
     factory = _session_factory()
     async with factory() as session, session.begin():
         await _set_workspace_context(session, workspace_id)
@@ -94,7 +102,11 @@ async def job_write(extraction_run_id: str, workspace_id: str) -> dict:
             run_id=uuid.UUID(extraction_run_id),
             session=session,
             llm=llm,
+            redis=redis_client,
         )
+
+    if redis_client:
+        await redis_client.aclose()
 
     if counters:
         await job_enrich.kiq(extraction_run_id, workspace_id)

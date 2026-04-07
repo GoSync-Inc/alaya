@@ -151,7 +151,7 @@ async def run_write(
 
     try:
         await run_repo.update_status(run.id, "writing")
-        counters = await atomic_write(extraction_result, event, run, session, llm)
+        counters = await atomic_write(extraction_result, event, run, session, llm, redis=redis)
         await run_repo.update_status(run.id, "completed")
         return counters
     except Exception as e:

@@ -102,17 +102,23 @@ async def resolve_entity(
     if len(normalized) >= 4:
         translit_normalized = transliterate_name(extracted.name)
         for name, eid in entity_index.items():
-            score = JaroWinkler.normalized_similarity(normalized, name)
-            # Also compare transliterated form for cross-script matching
-            translit_score = JaroWinkler.normalized_similarity(translit_normalized, name)
-            score = max(score, translit_score)
+            # Compare both directions: extracted→indexed and indexed→extracted
+            name_translit = transliterate_name(name) if name != normalized else name
+            score = max(
+                JaroWinkler.normalized_similarity(normalized, name),
+                JaroWinkler.normalized_similarity(translit_normalized, name),
+                JaroWinkler.normalized_similarity(normalized, name_translit),
+            )
             if score > best_score:
                 best_score, best_id = score, eid
         # Also check aliases
         for alias, eid in alias_index.items():
-            score = JaroWinkler.normalized_similarity(normalized, alias)
-            translit_score = JaroWinkler.normalized_similarity(translit_normalized, alias)
-            score = max(score, translit_score)
+            alias_translit = transliterate_name(alias) if alias != normalized else alias
+            score = max(
+                JaroWinkler.normalized_similarity(normalized, alias),
+                JaroWinkler.normalized_similarity(translit_normalized, alias),
+                JaroWinkler.normalized_similarity(normalized, alias_translit),
+            )
             if score > best_score:
                 best_score, best_id = score, eid
 

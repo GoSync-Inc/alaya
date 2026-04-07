@@ -12,9 +12,7 @@ from alayaos_core.models.base import Base
 
 class IntegratorRun(Base):
     __tablename__ = "integrator_runs"
-    __table_args__ = (
-        UniqueConstraint("workspace_id", "id", name="uq_integrator_runs_ws_id"),
-    )
+    __table_args__ = (UniqueConstraint("workspace_id", "id", name="uq_integrator_runs_ws_id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
@@ -32,7 +30,5 @@ class IntegratorRun(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, server_default="0")
     status: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="running")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

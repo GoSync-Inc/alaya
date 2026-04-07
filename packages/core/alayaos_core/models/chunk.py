@@ -46,6 +46,4 @@ class L0Chunk(Base):
     error_count: Mapped[int | None] = mapped_column(Integer, nullable=True, server_default="0")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     extraction_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -37,6 +37,4 @@ class PipelineTrace(Base):
     tokens_used: Mapped[int | None] = mapped_column(Integer, nullable=True, server_default="0")
     cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True, server_default="0.0")
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, server_default="0")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

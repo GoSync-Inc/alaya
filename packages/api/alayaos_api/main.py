@@ -6,12 +6,25 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from alayaos_core.config import Settings
+from alayaos_core.logging import setup_logging
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = Settings()
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
+    setup_logging(
+        json_output=settings.ENV == "production",
+        log_level=settings.LOG_LEVEL,
+    )
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=settings.DB_ECHO,
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
+        pool_recycle=settings.DB_POOL_RECYCLE,
+        pool_timeout=settings.DB_POOL_TIMEOUT,
+        pool_pre_ping=True,
+    )
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
     yield
     await engine.dispose()

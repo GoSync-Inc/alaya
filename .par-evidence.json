@@ -1,12 +1,14 @@
 {
-  "sprint": 2,
+  "sprint": 3,
   "claude_product": "ACCEPTED",
   "technical_review": "APPROVE",
   "provider": "codex",
-  "ts": "2026-04-08T01:00:00Z",
+  "ts": "2026-04-08T02:00:00Z",
   "fixes_applied": [
-    "added should_extract() access-level gate to job_cortex",
-    "set run.status = cortex_complete after successful processing",
-    "pushed chunk filters into DB query for correct cursor pagination"
+    "merged ExtractionResult format (not per-chunk dicts) for run_write compat",
+    "include chunk source text in verification prompt",
+    "SELECT FOR UPDATE to serialize concurrent chunk tasks",
+    "complete run when zero crystal chunks",
+    "check all_extracted after commit to prevent race"
   ]
 }

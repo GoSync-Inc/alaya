@@ -1,0 +1,18 @@
+{
+    "input": "Title: Add OpenAI adapter to LLM service\nAuthor: Sam Wilson\nAssignee: Priya Patel\nLabels: feature, llm\nMilestone: Run 2\n\nBody:\nThe current implementation only supports Anthropic. We need an OpenAI adapter following the LLMServiceInterface protocol.\n\nTasks:\n1. Implement OpenAIAdapter in packages/core/alayaos_core/llm/openai.py\n2. Add ALAYA_EXTRACTION_LLM_PROVIDER=openai support to config\n3. Unit tests with FakeLLMAdapter\n\nSpec doc: https://docs.internal/llm-adapters\nDue: Sprint 5 end (May 20, 2026)",
+    "source_type": "github",
+    "expected_entities": [
+        {"name": "Sam Wilson", "entity_type": "person"},
+        {"name": "Priya Patel", "entity_type": "person"},
+        {"name": "OpenAI adapter", "entity_type": "project"},
+        {"name": "LLMServiceInterface", "entity_type": "document"}
+    ],
+    "expected_claims": [
+        {"entity": "OpenAI adapter", "predicate": "deadline", "value": "2026-05-20", "value_type": "date"},
+        {"entity": "Priya Patel", "predicate": "owner", "value": "OpenAI adapter", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Priya Patel", "target_entity": "OpenAI adapter", "relation_type": "member_of"},
+        {"source_entity": "Sam Wilson", "target_entity": "OpenAI adapter", "relation_type": "member_of"}
+    ]
+}

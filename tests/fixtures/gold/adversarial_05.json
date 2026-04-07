@@ -1,0 +1,17 @@
+{
+    "input": "hel\u200blo wor\u200cld. Ze\u200dro-width chars injected. Bob\ufeff owns Project\u200b Z.",
+    "source_type": "slack",
+    "adversarial_type": "zero_width_chars",
+    "expected_behavior": "zero_width_stripped_before_llm",
+    "note": "Zero-width spaces/joiners/non-joiners and BOM should be removed",
+    "expected_entities": [
+        {"name": "Bob", "entity_type": "person"},
+        {"name": "Project Z", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "Project Z", "predicate": "owner", "value": "Bob", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Bob", "target_entity": "Project Z", "relation_type": "member_of"}
+    ]
+}

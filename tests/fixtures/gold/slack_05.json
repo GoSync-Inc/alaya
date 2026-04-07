@@ -1,0 +1,16 @@
+{
+    "input": "#design-reviews\nNora: Shared new Figma mockups for the dashboard redesign (v3). Link: figma.com/file/xKz9. The nav bar is now sticky and the color palette matches brand guidelines.\nJake: Looks solid. One concern: mobile breakpoint at 768px feels tight.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Nora", "entity_type": "person"},
+        {"name": "Jake", "entity_type": "person"},
+        {"name": "dashboard redesign", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "dashboard redesign", "predicate": "status", "value": "v3 mockups shared", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Nora", "target_entity": "dashboard redesign", "relation_type": "member_of"},
+        {"source_entity": "Jake", "target_entity": "dashboard redesign", "relation_type": "member_of"}
+    ]
+}

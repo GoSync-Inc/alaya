@@ -1,0 +1,21 @@
+{
+    "input": "#retrospective\nScrum Master Theo: Last sprint velocity was 42 story points. We completed the payment integration and user profile features. Blocked: the notification service (depends on Infrastructure team's Kafka setup, owner: Ivan). Next sprint goal: search functionality, target velocity 45.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Theo", "entity_type": "person"},
+        {"name": "Ivan", "entity_type": "person"},
+        {"name": "Infrastructure team", "entity_type": "team"},
+        {"name": "payment integration", "entity_type": "project"},
+        {"name": "notification service", "entity_type": "project"},
+        {"name": "search functionality", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "notification service", "predicate": "status", "value": "blocked", "value_type": "text"},
+        {"entity": "notification service", "predicate": "owner", "value": "Ivan", "value_type": "entity_ref"},
+        {"entity": "payment integration", "predicate": "status", "value": "completed", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "notification service", "target_entity": "Infrastructure team", "relation_type": "member_of"},
+        {"source_entity": "Ivan", "target_entity": "Infrastructure team", "relation_type": "member_of"}
+    ]
+}

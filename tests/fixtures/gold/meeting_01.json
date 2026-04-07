@@ -1,0 +1,29 @@
+{
+    "input": "Q2 Planning Meeting — April 7, 2026\nAttendees: CEO Sarah Chen, CTO James Park, VP Engineering Ravi Kumar, Product Lead Priya Patel\n\nSarah: Our Q2 goal is 10,000 active workspaces by June 30.\nJames: We need to ship the connector marketplace by May 15 to enable that. Felix is leading.\nRavi: The infrastructure migration to GCP needs to complete by April 30. Owner: DevOps (Ivan).\nPriya: Three features in scope: (1) Connector Marketplace, (2) Analytics Dashboard, (3) Mobile App. Analytics Dashboard deprioritized to Q3.",
+    "source_type": "meeting",
+    "expected_entities": [
+        {"name": "Sarah Chen", "entity_type": "person"},
+        {"name": "James Park", "entity_type": "person"},
+        {"name": "Ravi Kumar", "entity_type": "person"},
+        {"name": "Priya Patel", "entity_type": "person"},
+        {"name": "Felix", "entity_type": "person"},
+        {"name": "Ivan", "entity_type": "person"},
+        {"name": "Connector Marketplace", "entity_type": "project"},
+        {"name": "Analytics Dashboard", "entity_type": "project"},
+        {"name": "Mobile App", "entity_type": "project"},
+        {"name": "DevOps", "entity_type": "team"}
+    ],
+    "expected_claims": [
+        {"entity": "Sarah Chen", "predicate": "role", "value": "CEO", "value_type": "text"},
+        {"entity": "James Park", "predicate": "role", "value": "CTO", "value_type": "text"},
+        {"entity": "Ravi Kumar", "predicate": "role", "value": "VP Engineering", "value_type": "text"},
+        {"entity": "Connector Marketplace", "predicate": "deadline", "value": "2026-05-15", "value_type": "date"},
+        {"entity": "Connector Marketplace", "predicate": "owner", "value": "Felix", "value_type": "entity_ref"},
+        {"entity": "Analytics Dashboard", "predicate": "status", "value": "deprioritized to Q3", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Felix", "target_entity": "Connector Marketplace", "relation_type": "member_of"},
+        {"source_entity": "Ivan", "target_entity": "DevOps", "relation_type": "member_of"},
+        {"source_entity": "Priya Patel", "target_entity": "Connector Marketplace", "relation_type": "member_of"}
+    ]
+}

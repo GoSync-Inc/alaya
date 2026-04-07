@@ -1,0 +1,19 @@
+{
+    "input": "Title: Deprecate v1 API by end of Q2\nAuthor: API Governance\nAssignee: Tech Lead Fatima Al-Hassan\nLabels: deprecation, breaking-change\nMilestone: Q2 2026\n\nBody:\nThe v1 API (endpoints under /api/v1/) will be removed on June 30, 2026. All clients must migrate to /api/v2/ before then.\n\nMigration guide: https://docs.internal/v2-migration\nClient notification owner: Developer Relations team (lead: Tom S.)\nFatima is responsible for updating the deprecation headers and publishing the sunset date.",
+    "source_type": "github",
+    "expected_entities": [
+        {"name": "Fatima Al-Hassan", "entity_type": "person"},
+        {"name": "Tom S.", "entity_type": "person"},
+        {"name": "Developer Relations team", "entity_type": "team"},
+        {"name": "v1 API", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "v1 API", "predicate": "deadline", "value": "2026-06-30", "value_type": "date"},
+        {"entity": "v1 API", "predicate": "status", "value": "deprecated", "value_type": "text"},
+        {"entity": "Fatima Al-Hassan", "predicate": "role", "value": "Tech Lead", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Fatima Al-Hassan", "target_entity": "v1 API", "relation_type": "member_of"},
+        {"source_entity": "Tom S.", "target_entity": "Developer Relations team", "relation_type": "member_of"}
+    ]
+}

@@ -1,0 +1,15 @@
+{
+    "input": "#ops\nKira: The production database is down since 14:23 UTC. PagerDuty alert #P-1892 triggered.\nLeo: On it. Root cause appears to be disk space. ETA for fix: 30 minutes.\nKira: Thanks Leo. Customers notified via status page.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Kira", "entity_type": "person"},
+        {"name": "Leo", "entity_type": "person"},
+        {"name": "P-1892", "entity_type": "document"}
+    ],
+    "expected_claims": [
+        {"entity": "P-1892", "predicate": "status", "value": "triggered", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Leo", "target_entity": "P-1892", "relation_type": "member_of"}
+    ]
+}

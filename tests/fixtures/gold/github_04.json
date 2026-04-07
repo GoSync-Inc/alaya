@@ -1,0 +1,19 @@
+{
+    "input": "Title: Security: Rotate all API keys after potential exposure\nAuthor: Security Bot\nAssignee: CISO Lin Wei\nLabels: security, critical\nPriority: P0\n\nBody:\nDuring a routine audit on 2026-03-15, analyst Hana Park discovered that the staging .env file was briefly exposed in a public GitHub Actions log. Affected keys: ANTHROPIC_API_KEY, STRIPE_SECRET_KEY.\n\nRequired actions:\n1. Rotate ANTHROPIC_API_KEY immediately - owner: DevOps team\n2. Rotate STRIPE_SECRET_KEY immediately - owner: Payments team (lead: Oscar B.)\n3. Add secret scanning CI check - owner: Lin Wei, deadline 2026-04-01\n4. Post-mortem: April 5, 2026",
+    "source_type": "github",
+    "expected_entities": [
+        {"name": "Lin Wei", "entity_type": "person"},
+        {"name": "Hana Park", "entity_type": "person"},
+        {"name": "Oscar B.", "entity_type": "person"},
+        {"name": "DevOps team", "entity_type": "team"},
+        {"name": "Payments team", "entity_type": "team"}
+    ],
+    "expected_claims": [
+        {"entity": "Lin Wei", "predicate": "role", "value": "CISO", "value_type": "text"},
+        {"entity": "Lin Wei", "predicate": "deadline", "value": "2026-04-01", "value_type": "date"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Lin Wei", "target_entity": "Payments team", "relation_type": "member_of"},
+        {"source_entity": "Oscar B.", "target_entity": "Payments team", "relation_type": "member_of"}
+    ]
+}

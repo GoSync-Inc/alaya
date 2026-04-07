@@ -1,0 +1,25 @@
+{
+    "input": "#roadmap\nProduct Lead Priya: Q3 roadmap is now finalized. Key projects: (1) Connector Marketplace - owned by Felix, due July 31. (2) Mobile App v2 - owned by Mei, due August 15. (3) Enterprise SSO - owned by the Security team, due September 30.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Priya", "entity_type": "person"},
+        {"name": "Felix", "entity_type": "person"},
+        {"name": "Mei", "entity_type": "person"},
+        {"name": "Connector Marketplace", "entity_type": "project"},
+        {"name": "Mobile App v2", "entity_type": "project"},
+        {"name": "Enterprise SSO", "entity_type": "project"},
+        {"name": "Security team", "entity_type": "team"}
+    ],
+    "expected_claims": [
+        {"entity": "Connector Marketplace", "predicate": "owner", "value": "Felix", "value_type": "entity_ref"},
+        {"entity": "Connector Marketplace", "predicate": "deadline", "value": "2026-07-31", "value_type": "date"},
+        {"entity": "Mobile App v2", "predicate": "owner", "value": "Mei", "value_type": "entity_ref"},
+        {"entity": "Mobile App v2", "predicate": "deadline", "value": "2026-08-15", "value_type": "date"},
+        {"entity": "Enterprise SSO", "predicate": "deadline", "value": "2026-09-30", "value_type": "date"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Felix", "target_entity": "Connector Marketplace", "relation_type": "member_of"},
+        {"source_entity": "Mei", "target_entity": "Mobile App v2", "relation_type": "member_of"},
+        {"source_entity": "Security team", "target_entity": "Enterprise SSO", "relation_type": "member_of"}
+    ]
+}

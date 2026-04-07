@@ -1,0 +1,20 @@
+{
+    "input": "Design Review — Dashboard Redesign — April 4, 2026\nPresenter: Designer Nora Kim\nReviewers: Jake Torres (Frontend), Priya Patel (Product)\n\nNora presented three mockup variants for the Analytics Dashboard.\n\nDecisions:\n1. Variant B selected (clean minimal layout). Decision maker: Priya.\n2. Mobile-first approach adopted. Breakpoint: 768px.\n3. Color palette: use existing brand tokens from design system v2.3.\n4. Accessibility target: WCAG 2.1 AA.\n5. Handoff to Jake by April 11 for implementation sprint starting April 14.\n\nOpen items:\n- Dark mode: deferred to v2 (owner: Nora, after June 1)",
+    "source_type": "meeting",
+    "expected_entities": [
+        {"name": "Nora Kim", "entity_type": "person"},
+        {"name": "Jake Torres", "entity_type": "person"},
+        {"name": "Priya Patel", "entity_type": "person"},
+        {"name": "Analytics Dashboard", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "Analytics Dashboard", "predicate": "deadline", "value": "2026-04-11", "value_type": "date"},
+        {"entity": "Analytics Dashboard", "predicate": "status", "value": "Variant B selected", "value_type": "text"},
+        {"entity": "Nora Kim", "predicate": "role", "value": "Designer", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Nora Kim", "target_entity": "Analytics Dashboard", "relation_type": "member_of"},
+        {"source_entity": "Jake Torres", "target_entity": "Analytics Dashboard", "relation_type": "member_of"},
+        {"source_entity": "Priya Patel", "target_entity": "Analytics Dashboard", "relation_type": "member_of"}
+    ]
+}

@@ -1,0 +1,17 @@
+{
+    "input": "#hiring\nHR Director Rachel: We're extending an offer to Omar Al-Farsi for the Senior Backend Engineer role. Start date: May 1st. He'll report to CTO James Park.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Rachel", "entity_type": "person"},
+        {"name": "Omar Al-Farsi", "entity_type": "person"},
+        {"name": "James Park", "entity_type": "person"}
+    ],
+    "expected_claims": [
+        {"entity": "Omar Al-Farsi", "predicate": "role", "value": "Senior Backend Engineer", "value_type": "text"},
+        {"entity": "Omar Al-Farsi", "predicate": "deadline", "value": "2026-05-01", "value_type": "date"},
+        {"entity": "James Park", "predicate": "role", "value": "CTO", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Omar Al-Farsi", "target_entity": "James Park", "relation_type": "reports_to"}
+    ]
+}

@@ -143,6 +143,8 @@ async def resolve_entity(
                 entity_index[normalized] = new_entity.id
                 for alias in extracted.aliases:
                     alias_index[normalize_name(alias)] = new_entity.id
+                for source_type, ext_id in extracted.external_ids.items():
+                    await entity_repo.create_external_id(workspace_id, new_entity.id, source_type, ext_id)
                 return (
                     new_entity.id,
                     True,
@@ -167,6 +169,10 @@ async def resolve_entity(
     entity_index[normalized] = new_entity.id
     for alias in extracted.aliases:
         alias_index[normalize_name(alias)] = new_entity.id
+
+    # Persist external IDs if any
+    for source_type, ext_id in extracted.external_ids.items():
+        await entity_repo.create_external_id(workspace_id, new_entity.id, source_type, ext_id)
 
     return new_entity.id, True, {"tier": "none", "action": "created", "score": 0.0}
 

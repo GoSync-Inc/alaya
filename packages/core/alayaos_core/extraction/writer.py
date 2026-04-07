@@ -227,11 +227,19 @@ async def atomic_write(
             pipeline.set(created_at_key, datetime.now(UTC).isoformat(), nx=True, ex=48 * 3600)
             await pipeline.execute()
 
-        # Invalidate entity cache for written entities
+        # Invalidate entity cache by canonical names (not raw mentions).
+        # entity_name_to_id keys are raw mentions; look up canonical names from DB.
+        canonical_names = set()
+        for eid in entity_ids:
+            entity = await entity_repo.get_by_id(eid)
+            if entity:
+                canonical_names.add(entity.name)
+        # Also invalidate raw mention names (covers exact-match entries)
+        canonical_names.update(entity_name_to_id.keys())
         from alayaos_core.services.entity_cache import EntityCacheService
 
         cache = EntityCacheService(redis)
-        await cache.invalidate_batch(event.workspace_id, list(entity_name_to_id.keys()))
+        await cache.invalidate_batch(event.workspace_id, list(canonical_names))
 
     return counters
 

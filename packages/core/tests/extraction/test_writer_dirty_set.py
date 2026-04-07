@@ -75,8 +75,13 @@ async def test_entity_ids_pushed_to_dirty_set() -> None:
     mock_cache = AsyncMock()
     mock_cache.invalidate_batch = AsyncMock()
 
+    entity_repo_mock = AsyncMock()
+    entity_obj = MagicMock()
+    entity_obj.name = "Alice"
+    entity_repo_mock.get_by_id = AsyncMock(return_value=entity_obj)
+
     with (
-        patch("alayaos_core.extraction.writer.EntityRepository"),
+        patch("alayaos_core.extraction.writer.EntityRepository", return_value=entity_repo_mock),
         patch("alayaos_core.extraction.writer.ClaimRepository"),
         patch("alayaos_core.extraction.writer.RelationRepository"),
         patch("alayaos_core.extraction.writer.PredicateRepository"),
@@ -121,8 +126,13 @@ async def test_dirty_set_ttl_48h() -> None:
     mock_cache = AsyncMock()
     mock_cache.invalidate_batch = AsyncMock()
 
+    entity_repo_mock = AsyncMock()
+    entity_obj = MagicMock()
+    entity_obj.name = "Alice"
+    entity_repo_mock.get_by_id = AsyncMock(return_value=entity_obj)
+
     with (
-        patch("alayaos_core.extraction.writer.EntityRepository"),
+        patch("alayaos_core.extraction.writer.EntityRepository", return_value=entity_repo_mock),
         patch("alayaos_core.extraction.writer.ClaimRepository"),
         patch("alayaos_core.extraction.writer.RelationRepository"),
         patch("alayaos_core.extraction.writer.PredicateRepository"),
@@ -167,8 +177,13 @@ async def test_created_at_key_set_with_nx() -> None:
     mock_cache = AsyncMock()
     mock_cache.invalidate_batch = AsyncMock()
 
+    entity_repo_mock = AsyncMock()
+    entity_obj = MagicMock()
+    entity_obj.name = "Alice"
+    entity_repo_mock.get_by_id = AsyncMock(return_value=entity_obj)
+
     with (
-        patch("alayaos_core.extraction.writer.EntityRepository"),
+        patch("alayaos_core.extraction.writer.EntityRepository", return_value=entity_repo_mock),
         patch("alayaos_core.extraction.writer.ClaimRepository"),
         patch("alayaos_core.extraction.writer.RelationRepository"),
         patch("alayaos_core.extraction.writer.PredicateRepository"),
@@ -218,8 +233,13 @@ async def test_entity_cache_invalidated_after_write() -> None:
     mock_cache = AsyncMock()
     mock_cache.invalidate_batch = AsyncMock()
 
+    entity_repo_mock = AsyncMock()
+    entity_obj = MagicMock()
+    entity_obj.name = "Alice"
+    entity_repo_mock.get_by_id = AsyncMock(return_value=entity_obj)
+
     with (
-        patch("alayaos_core.extraction.writer.EntityRepository"),
+        patch("alayaos_core.extraction.writer.EntityRepository", return_value=entity_repo_mock),
         patch("alayaos_core.extraction.writer.ClaimRepository"),
         patch("alayaos_core.extraction.writer.RelationRepository"),
         patch("alayaos_core.extraction.writer.PredicateRepository"),
@@ -306,8 +326,13 @@ async def test_no_entity_ids_no_dirty_set_push() -> None:
     mock_cache = AsyncMock()
     mock_cache.invalidate_batch = AsyncMock()
 
+    entity_repo_mock = AsyncMock()
+    entity_obj = MagicMock()
+    entity_obj.name = "Alice"
+    entity_repo_mock.get_by_id = AsyncMock(return_value=entity_obj)
+
     with (
-        patch("alayaos_core.extraction.writer.EntityRepository"),
+        patch("alayaos_core.extraction.writer.EntityRepository", return_value=entity_repo_mock),
         patch("alayaos_core.extraction.writer.ClaimRepository"),
         patch("alayaos_core.extraction.writer.RelationRepository"),
         patch("alayaos_core.extraction.writer.PredicateRepository"),

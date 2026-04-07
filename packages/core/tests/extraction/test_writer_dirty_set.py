@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 
@@ -96,9 +95,7 @@ async def test_entity_ids_pushed_to_dirty_set() -> None:
         )
 
     # Verify sadd was called with the entity ID
-    pipeline_mock.sadd.assert_called_once_with(
-        f"dirty_set:{ws_id}", str(entity_id)
-    )
+    pipeline_mock.sadd.assert_called_once_with(f"dirty_set:{ws_id}", str(entity_id))
 
 
 @pytest.mark.asyncio
@@ -210,7 +207,7 @@ async def test_entity_cache_invalidated_after_write() -> None:
 
     event = _make_event(ws_id)
     run = _make_run()
-    redis_mock, pipeline_mock = _make_redis_mock()
+    redis_mock, _pipeline_mock = _make_redis_mock()
 
     session = AsyncMock()
     session.flush = AsyncMock()
@@ -298,7 +295,7 @@ async def test_no_entity_ids_no_dirty_set_push() -> None:
 
     event = _make_event(ws_id)
     run = _make_run()
-    redis_mock, pipeline_mock = _make_redis_mock()
+    redis_mock, pipeline_mock = _make_redis_mock()  # pipeline_mock checked below
 
     session = AsyncMock()
     session.flush = AsyncMock()

@@ -31,6 +31,12 @@ class ExtractionRunListRead(BaseModel):
     parent_run_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    chunks_total: int = 0
+    chunks_crystal: int = 0
+    chunks_skipped: int = 0
+    cortex_cost_usd: float = 0.0
+    crystallizer_cost_usd: float = 0.0
+    verification_changes: int = 0
 
 
 class ExtractionRunRead(ExtractionRunListRead):

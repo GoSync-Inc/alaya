@@ -514,3 +514,42 @@ async def job_integrate(workspace_id: str) -> dict:
         "entities_scanned": result.entities_scanned,
         "entities_deduplicated": result.entities_deduplicated,
     }
+
+
+@broker.task(timeout=30)
+async def job_check_integrator() -> dict:
+    """Periodic task: check all dirty-sets and trigger job_integrate if thresholds met."""
+    from datetime import UTC, datetime
+
+    settings = Settings()
+    redis_client = aioredis.from_url(settings.REDIS_URL)
+    try:
+        cursor = 0
+        triggered: list[str] = []
+        while True:
+            cursor, keys = await redis_client.scan(cursor, match="dirty_set:*", count=100)
+            for key in keys:
+                key_str = key.decode() if isinstance(key, bytes) else key
+                # Skip companion keys and processing keys
+                if ":created_at" in key_str or ":processing" in key_str:
+                    continue
+                workspace_id = key_str.split(":")[1]
+                size = await redis_client.scard(key_str)
+                # Check age via companion key
+                created_at_key = f"dirty_set:{workspace_id}:created_at"
+                created_at_str = await redis_client.get(created_at_key)
+                age_exceeded = False
+                if created_at_str:
+                    created = datetime.fromisoformat(
+                        created_at_str.decode() if isinstance(created_at_str, bytes) else created_at_str
+                    )
+                    age = (datetime.now(UTC) - created).total_seconds()
+                    age_exceeded = age >= settings.INTEGRATOR_MAX_WAIT_SECONDS
+                if size >= settings.INTEGRATOR_DIRTY_SET_THRESHOLD or age_exceeded:
+                    await job_integrate.kiq(workspace_id)
+                    triggered.append(workspace_id)
+            if cursor == 0:
+                break
+        return {"triggered": triggered, "status": "checked"}
+    finally:
+        await redis_client.aclose()

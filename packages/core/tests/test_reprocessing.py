@@ -127,7 +127,6 @@ async def test_second_extraction_merges_existing_entity() -> None:
 
     event_id = uuid.uuid4()
     workspace_id = uuid.uuid4()
-    run_id_1 = uuid.uuid4()
     run_id_2 = uuid.uuid4()
 
     event = _make_event(event_id=event_id, workspace_id=workspace_id)
@@ -275,6 +274,4 @@ async def test_reprocessing_claims_supersede_properly() -> None:
 
     assert counters["claims_created"] == 1
     # Old claim was superseded by new claim
-    mock_claim_repo.mark_superseded.assert_called_once_with(
-        old_claim_id, new_claim_id, event2.occurred_at
-    )
+    mock_claim_repo.mark_superseded.assert_called_once_with(old_claim_id, new_claim_id, event2.occurred_at)

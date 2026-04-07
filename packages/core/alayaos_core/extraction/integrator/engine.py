@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import time
 import uuid
-from typing import TYPE_CHECKING
 
 import structlog
 
@@ -16,9 +16,6 @@ from alayaos_core.extraction.integrator.schemas import (
     IntegratorRunResult,
 )
 from alayaos_core.extraction.writer import acquire_workspace_lock, release_workspace_lock
-
-if TYPE_CHECKING:
-    pass
 
 log = structlog.get_logger()
 
@@ -94,10 +91,8 @@ class IntegratorEngine:
             await self.redis.delete(processing_key)
             for member in raw_members:
                 member_str = member.decode() if isinstance(member, bytes) else member
-                try:
+                with contextlib.suppress(ValueError):
                     dirty_entity_ids.add(uuid.UUID(member_str))
-                except ValueError:
-                    pass
         except Exception:
             # dirty-set may not exist (no entities processed yet) — that's fine
             pass
@@ -202,9 +197,7 @@ class IntegratorEngine:
             duration_ms=duration_ms,
         )
 
-    async def _apply_action(
-        self, action: EnrichmentAction, workspace_id: uuid.UUID, session
-    ) -> dict:
+    async def _apply_action(self, action: EnrichmentAction, workspace_id: uuid.UUID, session) -> dict:
         """Apply a single enrichment action. Returns counter increments."""
         counters: dict[str, int] = {}
         try:

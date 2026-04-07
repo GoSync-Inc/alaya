@@ -436,7 +436,7 @@ async def job_enrich(extraction_run_id: str, workspace_id: str) -> dict:
 
 @broker.task(timeout=300, retry_on_error=True, max_retries=2)
 async def job_integrate(workspace_id: str) -> dict:
-    """Integrator: process dirty_set ∪ 48h window for a workspace."""
+    """Integrator: process dirty_set union 48h window for a workspace."""
     settings = Settings()
 
     # Use real LLM adapter if key is available, else fake

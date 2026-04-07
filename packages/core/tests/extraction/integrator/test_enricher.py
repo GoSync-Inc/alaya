@@ -1,7 +1,6 @@
 """Tests for EntityEnricher."""
 
 import uuid
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -56,7 +55,6 @@ async def test_actions_are_enrichment_action_instances(enricher):
     # Add a mock response that returns an add_relation action
     prompt_entities = [_make_entity("Alice"), _make_entity("ProjectX", entity_type="project")]
     # Build the prompt to get the hash
-    import json
 
     from alayaos_core.extraction.integrator.enricher import _build_enrichment_prompt
 
@@ -86,7 +84,6 @@ async def test_batching_splits_large_list():
     from alayaos_core.llm.fake import FakeLLMAdapter
 
     call_count = 0
-    original_extract = FakeLLMAdapter.extract
 
     class CountingLLM(FakeLLMAdapter):
         async def extract(self, text, system_prompt, response_model, **kwargs):

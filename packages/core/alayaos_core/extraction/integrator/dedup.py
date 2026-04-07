@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import structlog
 
-from alayaos_core.extraction.resolver import transliterate_name
 from alayaos_core.extraction.integrator.schemas import DuplicatePair, EntityMatchResult, EntityWithContext
+from alayaos_core.extraction.resolver import transliterate_name
 
 log = structlog.get_logger()
 

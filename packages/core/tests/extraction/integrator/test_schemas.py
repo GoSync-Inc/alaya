@@ -2,8 +2,6 @@
 
 import uuid
 
-import pytest
-
 from alayaos_core.extraction.integrator.schemas import (
     DuplicatePair,
     EnrichmentAction,

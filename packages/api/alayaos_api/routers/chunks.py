@@ -62,14 +62,12 @@ async def list_chunks(
             ) from e
 
     repo = ChunkRepository(session, api_key.workspace_id)
-    items, next_cursor, has_more = await repo.list(cursor=cursor, limit=limit)
-
-    # Apply optional filters in Python (simple approach matching existing patterns)
-    if processing_stage is not None:
-        items = [c for c in items if c.processing_stage == processing_stage]
-    if is_crystal is not None:
-        items = [c for c in items if c.is_crystal == is_crystal]
-
+    items, next_cursor, has_more = await repo.list(
+        cursor=cursor,
+        limit=limit,
+        processing_stage=processing_stage,
+        is_crystal=is_crystal,
+    )
     return paginated_response(items, ChunkRead, next_cursor, has_more)
 
 

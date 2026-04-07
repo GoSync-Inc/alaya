@@ -145,6 +145,18 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
         if not event or not run:
             return {"status": "skipped", "reason": "event or run not found"}
 
+        # Idempotency
+        if run.status == "completed":
+            return {"status": "skipped", "reason": "already completed"}
+
+        # Access-level gating (same as existing should_extract in pipeline.py)
+        from alayaos_core.extraction.pipeline import should_extract
+
+        if not await should_extract(event, run, run_repo, session):
+            return {"status": "skipped", "reason": "access_level denied"}
+
+        await run_repo.update_status(run.id, "extracting")
+
         # Sanitize
         text = event.raw_text or event.content.get("text", "")
         text = sanitize(text)
@@ -205,12 +217,13 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
                 extraction_run_id=run.id,
             )
 
-        # Update extraction run counters
+        # Update extraction run counters and status
         run.chunks_total = len(raw_chunks)
         run.chunks_crystal = chunks_crystal
         run.chunks_skipped = chunks_skipped
         run.cortex_cost_usd = total_cortex_cost
         run.verification_changes = verification_changes
+        run.status = "cortex_complete"
         await session.flush()
 
     # Enqueue job_crystallize per crystal chunk (outside the session)

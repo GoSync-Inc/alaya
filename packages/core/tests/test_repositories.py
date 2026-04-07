@@ -423,11 +423,24 @@ class TestEntityRepository:
     async def test_create_entity(self) -> None:
         from alayaos_core.repositories.entity import EntityRepository
 
+        ws_id = uuid.uuid4()
+        et_id = uuid.uuid4()
+        expected = L1Entity(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            entity_type_id=et_id,
+            name="Alice",
+            properties={},
+            is_deleted=False,
+        )
+        expected.external_ids = []
         session = make_session()
+        # create() calls flush then get_by_id which calls session.execute
+        session.execute.return_value = make_result(expected)
         repo = EntityRepository(session)
         entity = await repo.create(
-            workspace_id=uuid.uuid4(),
-            entity_type_id=uuid.uuid4(),
+            workspace_id=ws_id,
+            entity_type_id=et_id,
             name="Alice",
         )
         session.add.assert_called_once()

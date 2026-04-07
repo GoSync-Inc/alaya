@@ -60,4 +60,4 @@ class Settings(BaseSettings):
     INTEGRATOR_DEDUP_AMBIGUOUS_LOW: float = 0.70
 
     # Feature flags
-    FEATURE_FLAG_USE_CORTEX: bool = False  # Off by default until Sprint 4
+    FEATURE_FLAG_USE_CORTEX: bool = True  # Enabled: Cortex pipeline is now the default

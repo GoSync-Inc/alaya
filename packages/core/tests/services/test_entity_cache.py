@@ -2,7 +2,7 @@
 
 import json
 import uuid
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -102,7 +102,7 @@ async def test_get_snapshot_with_types_filter() -> None:
 
 @pytest.mark.asyncio
 async def test_get_snapshot_empty_cache_returns_empty_list() -> None:
-    redis, pipeline = make_redis_mock()
+    redis, _pipeline = make_redis_mock()
     redis.zrevrange.return_value = []
 
     svc = EntityCacheService(redis)
@@ -153,14 +153,14 @@ async def test_invalidate_batch_empty_list_does_nothing() -> None:
 @pytest.mark.asyncio
 async def test_warm_with_datetime_last_seen_at() -> None:
     """warm() converts datetime.timestamp() to float score."""
-    from datetime import datetime, timezone
+    import datetime
 
     redis, pipeline = make_redis_mock()
     pipeline.execute.return_value = []
 
     svc = EntityCacheService(redis)
     ws = uuid.uuid4()
-    dt = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    dt = datetime.datetime(2024, 1, 1, tzinfo=datetime.UTC)
     entities = [{"name": "Alice", "entity_type": "person", "aliases": [], "last_seen_at": dt}]
     await svc.warm(ws, entities)
 

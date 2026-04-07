@@ -1,7 +1,5 @@
 """Schemas for the Crystallizer pipeline stage."""
 
-from __future__ import annotations
-
 from pydantic import BaseModel
 
 from alayaos_core.extraction.schemas import ExtractionResult

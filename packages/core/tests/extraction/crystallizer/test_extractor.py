@@ -7,10 +7,9 @@ import pytest
 
 from alayaos_core.extraction.crystallizer.extractor import CrystallizerExtractor, apply_confidence_tiers
 from alayaos_core.extraction.crystallizer.verifier import CrystallizerVerifier
-from alayaos_core.extraction.schemas import ExtractionResult, ExtractedClaim, ExtractedEntity, ExtractedRelation
+from alayaos_core.extraction.schemas import ExtractedEntity, ExtractionResult
 from alayaos_core.llm.fake import FakeLLMAdapter
 from alayaos_core.services.entity_cache import EntityCacheService
-
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -257,7 +256,7 @@ async def test_verifier_returns_changed_true_when_result_differs() -> None:
     )
 
     verifier = CrystallizerVerifier(llm=llm)
-    verified, changed, usage = await verifier.verify(
+    verified, changed, _usage = await verifier.verify(
         chunk_text="Alice leads the project.",
         system_prompt="system prompt",
         initial_result=initial,
@@ -273,7 +272,7 @@ async def test_verifier_returns_changed_false_when_result_matches() -> None:
     initial = ExtractionResult()  # empty — matches FakeLLMAdapter default
 
     verifier = CrystallizerVerifier(llm=llm)
-    verified, changed, usage = await verifier.verify(
+    _verified, changed, _usage = await verifier.verify(
         chunk_text="Some text.",
         system_prompt="system prompt",
         initial_result=initial,

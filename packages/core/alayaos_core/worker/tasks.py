@@ -344,7 +344,9 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
         await chunk_repo.update_processing_stage(chunk.id, "extracted")
 
         # Write pipeline trace
-        total_tokens = usage_extract.tokens_in + usage_extract.tokens_out + usage_verify.tokens_in + usage_verify.tokens_out
+        total_tokens = (
+            usage_extract.tokens_in + usage_extract.tokens_out + usage_verify.tokens_in + usage_verify.tokens_out
+        )
         total_cost = usage_extract.cost_usd + usage_verify.cost_usd
         await trace_repo.create(
             workspace_id=uuid.UUID(workspace_id),

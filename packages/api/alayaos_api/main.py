@@ -45,6 +45,7 @@ def create_app() -> FastAPI:
         extraction_runs,
         health,
         ingestion,
+        integrator_runs,
         pipeline_traces,
         predicates,
         relations,
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     app.include_router(ingestion.router, prefix="/api/v1", tags=["ingestion"])
     app.include_router(chunks.router, prefix="/api/v1", tags=["chunks"])
     app.include_router(pipeline_traces.router, prefix="/api/v1", tags=["pipeline-traces"])
+    app.include_router(integrator_runs.router, prefix="/api/v1", tags=["integrator-runs"])
 
     return app
 

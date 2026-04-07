@@ -60,6 +60,25 @@ services:
       redis:
         condition: service_started
 
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["taskiq", "worker", "alayaos_core.worker.tasks:broker"]
+    environment:
+      - ALAYA_DATABASE_URL=postgresql+asyncpg://alaya:alaya@postgres:5432/alaya
+      - ALAYA_REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    restart: unless-stopped
+
   caddy:
     image: caddy:2-alpine
     ports:

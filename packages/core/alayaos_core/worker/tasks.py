@@ -10,8 +10,14 @@ from alayaos_core.worker.broker import broker
 
 
 async def _set_workspace_context(session: AsyncSession, workspace_id: str) -> None:
-    """Set RLS workspace context for the current transaction."""
-    await session.execute(text("SET LOCAL app.workspace_id = :wid"), {"wid": workspace_id})
+    """Set RLS workspace context for the current transaction.
+
+    asyncpg executes parameterized queries as prepared statements, and
+    PostgreSQL rejects bind parameters inside SET commands.  We validate
+    via uuid.UUID() to prevent injection, then interpolate directly.
+    """
+    validated_wid = str(uuid.UUID(workspace_id))
+    await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
 
 
 def _session_factory():

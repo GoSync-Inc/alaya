@@ -6,8 +6,8 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_set_workspace_context_uses_parameterized_query():
-    """_set_workspace_context must use parameterized text() query, not interpolation."""
+async def test_set_workspace_context_uses_validated_uuid():
+    """_set_workspace_context must validate UUID and interpolate safely."""
     from alayaos_core.worker.tasks import _set_workspace_context
 
     session = AsyncMock()
@@ -17,13 +17,19 @@ async def test_set_workspace_context_uses_parameterized_query():
     assert session.execute.call_count == 1
     args, _ = session.execute.call_args
     sql_clause = args[0]
-    # Must be a SQLAlchemy text() clause, not raw string
     assert hasattr(sql_clause, "text"), "Expected sqlalchemy text() clause"
     assert "SET LOCAL app.workspace_id" in sql_clause.text
-    assert ":wid" in sql_clause.text
-    # Params passed separately (not interpolated)
-    params = args[1]
-    assert params == {"wid": workspace_id}
+    assert workspace_id in sql_clause.text
+
+
+@pytest.mark.asyncio
+async def test_set_workspace_context_rejects_invalid_uuid():
+    """_set_workspace_context must reject non-UUID workspace_id (injection prevention)."""
+    from alayaos_core.worker.tasks import _set_workspace_context
+
+    session = AsyncMock()
+    with pytest.raises(ValueError):
+        await _set_workspace_context(session, "not-a-uuid; DROP TABLE --")
 
 
 @pytest.mark.asyncio
@@ -37,8 +43,60 @@ async def test_set_workspace_context_is_called_for_different_workspaces():
     ]:
         session = AsyncMock()
         await _set_workspace_context(session, wid)
-        _, args, _ = session.execute.mock_calls[0]
-        assert args[1] == {"wid": wid}
+        args, _ = session.execute.call_args
+        assert wid in args[0].text
+
+
+def _make_mock_session_factory():
+    """Create mock session and factory for job tests."""
+    mock_session = AsyncMock()
+    mock_session.begin = MagicMock(
+        return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=None),
+            __aexit__=AsyncMock(return_value=False),
+        )
+    )
+    mock_factory_inst = AsyncMock(
+        __aenter__=AsyncMock(return_value=mock_session),
+        __aexit__=AsyncMock(return_value=False),
+    )
+    mock_factory = MagicMock(return_value=mock_factory_inst)
+    return mock_factory
+
+
+@pytest.mark.asyncio
+async def test_job_extract_calls_rls_context():
+    """job_extract must call _set_workspace_context with correct workspace_id."""
+    from alayaos_core.worker import tasks as worker_tasks
+
+    workspace_id = "33333333-3333-3333-3333-333333333333"
+    event_id = "44444444-4444-4444-4444-444444444444"
+    extraction_run_id = "55555555-5555-5555-5555-555555555555"
+
+    rls_calls: list[str] = []
+    original = worker_tasks._set_workspace_context
+
+    async def mock_rls(session, wid: str) -> None:
+        rls_calls.append(wid)
+
+    worker_tasks._set_workspace_context = mock_rls  # type: ignore[assignment]
+
+    mock_factory = _make_mock_session_factory()
+
+    try:
+        with (
+            patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
+            patch("alayaos_core.extraction.pipeline.run_extraction", new_callable=AsyncMock, return_value=None),
+            patch(
+                "alayaos_core.worker.tasks.Settings",
+                MagicMock(return_value=MagicMock(ANTHROPIC_API_KEY=MagicMock(get_secret_value=lambda: ""))),
+            ),
+        ):
+            await worker_tasks.job_extract.original_func(event_id, extraction_run_id, workspace_id)
+    finally:
+        worker_tasks._set_workspace_context = original  # type: ignore[assignment]
+
+    assert workspace_id in rls_calls
 
 
 @pytest.mark.asyncio
@@ -57,18 +115,7 @@ async def test_job_write_calls_rls_context():
 
     worker_tasks._set_workspace_context = mock_rls  # type: ignore[assignment]
 
-    mock_session = AsyncMock()
-    mock_session.begin = MagicMock(
-        return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=None),
-            __aexit__=AsyncMock(return_value=False),
-        )
-    )
-    mock_factory_inst = AsyncMock(
-        __aenter__=AsyncMock(return_value=mock_session),
-        __aexit__=AsyncMock(return_value=False),
-    )
-    mock_factory = MagicMock(return_value=mock_factory_inst)
+    mock_factory = _make_mock_session_factory()
 
     try:
         with (
@@ -102,18 +149,7 @@ async def test_job_enrich_calls_rls_context():
 
     worker_tasks._set_workspace_context = mock_rls  # type: ignore[assignment]
 
-    mock_session = AsyncMock()
-    mock_session.begin = MagicMock(
-        return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=None),
-            __aexit__=AsyncMock(return_value=False),
-        )
-    )
-    mock_factory_inst = AsyncMock(
-        __aenter__=AsyncMock(return_value=mock_session),
-        __aexit__=AsyncMock(return_value=False),
-    )
-    mock_factory = MagicMock(return_value=mock_factory_inst)
+    mock_factory = _make_mock_session_factory()
 
     try:
         with (

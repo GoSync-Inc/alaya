@@ -53,7 +53,10 @@ async def create_workspace(session: AsyncSession, name: str, slug: str, settings
     await session.flush()  # ensure workspace.id is available
 
     # SET LOCAL for RLS — seeded tables are workspace-scoped
-    await session.execute(text(f"SET LOCAL app.workspace_id = '{workspace.id}'"))
+    await session.execute(
+        text("SET LOCAL app.workspace_id = :wid"),
+        {"wid": str(workspace.id)},
+    )
 
     for et in CORE_ENTITY_TYPES:
         await et_repo.upsert_core(workspace_id=workspace.id, **et)
@@ -69,7 +72,10 @@ async def seed_core_metadata(session: AsyncSession, workspace: Workspace) -> Non
     et_repo = EntityTypeRepository(session)
     pred_repo = PredicateRepository(session)
 
-    await session.execute(text(f"SET LOCAL app.workspace_id = '{workspace.id}'"))
+    await session.execute(
+        text("SET LOCAL app.workspace_id = :wid"),
+        {"wid": str(workspace.id)},
+    )
 
     for et in CORE_ENTITY_TYPES:
         await et_repo.upsert_core(workspace_id=workspace.id, **et)

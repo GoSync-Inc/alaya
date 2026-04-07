@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import uuid as _uuid
+from typing import TYPE_CHECKING
 
 import structlog
 
 from alayaos_core.extraction.resolver import normalize_name
-from alayaos_core.extraction.schemas import ExtractedClaim, ExtractionResult
-from alayaos_core.models.claim import L2Claim
-from alayaos_core.models.event import L0Event
-from alayaos_core.models.extraction_run import ExtractionRun
 from alayaos_core.repositories.claim import ClaimRepository
 from alayaos_core.repositories.entity import EntityRepository
 from alayaos_core.repositories.extraction_run import ExtractionRunRepository
 from alayaos_core.repositories.predicate import PredicateRepository
 from alayaos_core.repositories.relation import RelationRepository
+
+if TYPE_CHECKING:
+    from alayaos_core.extraction.schemas import ExtractedClaim, ExtractionResult
+    from alayaos_core.models.claim import L2Claim
+    from alayaos_core.models.event import L0Event
+    from alayaos_core.models.extraction_run import ExtractionRun
 
 log = structlog.get_logger()
 
@@ -106,11 +109,7 @@ async def write_claim(
                 else:
                     await claim_repo.mark_superseded(new_claim.id, old.id, old_observed)
             elif strategy == "explicit_only":
-                if (
-                    claim.confidence >= 0.85
-                    and normalized_value != old.value
-                    and claim_observed_at >= old_observed
-                ):
+                if claim.confidence >= 0.85 and normalized_value != old.value and claim_observed_at >= old_observed:
                     await claim_repo.mark_superseded(old.id, new_claim.id, claim_observed_at)
                 elif normalized_value != old.value:
                     await claim_repo.update_status(new_claim.id, "disputed")

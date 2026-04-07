@@ -38,3 +38,26 @@ class Settings(BaseSettings):
     WORKER_WRITE_TIMEOUT: int = 60
     WORKER_ENRICH_TIMEOUT: int = 60
     WORKER_LOCK_TIMEOUT: int = 30
+
+    # Cortex
+    CORTEX_CLASSIFIER_MODEL: str = "claude-haiku-4-5-20251001"
+    CORTEX_MAX_CHUNK_TOKENS: int = 3000
+    CORTEX_CRYSTAL_THRESHOLD: float = 0.3
+    CORTEX_TRUNCATION_TOKENS: int = 800
+
+    # Crystallizer
+    CRYSTALLIZER_MODEL: str = "claude-sonnet-4-6-20250514"
+    CRYSTALLIZER_CONFIDENCE_HIGH: float = 0.9
+    CRYSTALLIZER_CONFIDENCE_LOW: float = 0.5
+
+    # Integrator
+    INTEGRATOR_MODEL: str = "claude-sonnet-4-6-20250514"
+    INTEGRATOR_BATCH_SIZE: int = 20
+    INTEGRATOR_DIRTY_SET_THRESHOLD: int = 10
+    INTEGRATOR_MAX_WAIT_SECONDS: int = 1800
+    INTEGRATOR_WINDOW_HOURS: int = 48
+    INTEGRATOR_DEDUP_THRESHOLD: float = 0.85
+    INTEGRATOR_DEDUP_AMBIGUOUS_LOW: float = 0.70
+
+    # Feature flags
+    FEATURE_FLAG_USE_CORTEX: bool = False  # Off by default until Sprint 4

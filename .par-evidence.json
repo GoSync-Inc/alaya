@@ -1,14 +1,13 @@
 {
-  "sprint": 3,
+  "sprint": 4,
   "claude_product": "ACCEPTED",
   "technical_review": "APPROVE",
   "provider": "codex",
   "fixes_applied": [
-    "gleaning includes original data + prior results",
-    "XML tag escape for entity names in prompts",
-    "oversized paragraph splitting by token boundary",
-    "PydanticUndefined handling in FakeLLMAdapter"
+    "paginate all entities in resolve_batch (not just first 200)",
+    "LLM rejection recorded as tier=llm, action=rejected",
+    "persist external IDs when creating new entities"
   ],
-  "test_evidence": "304 passed, 18 skipped, 1 warning in 1.82s",
-  "ts": "2026-04-07T17:55:00Z"
+  "test_evidence": "347 passed, 18 skipped, 1 warning in 3.17s",
+  "ts": "2026-04-07T18:25:00Z"
 }

@@ -1,17 +1,14 @@
 {
-  "sprint": 2,
+  "sprint": 3,
   "claude_product": "ACCEPTED",
   "technical_review": "APPROVE",
   "provider": "codex",
   "fixes_applied": [
-    "data_response wrapper for 202",
-    "typed ingestion fields to columns",
-    "idempotent re-ingest",
-    "ExtractionRunListRead without resolver_decisions",
-    "validation.text_too_long error code",
-    "claim transitions active<->retracted only",
-    "tokens_cached + prompt_version in schema"
+    "gleaning includes original data + prior results",
+    "XML tag escape for entity names in prompts",
+    "oversized paragraph splitting by token boundary",
+    "PydanticUndefined handling in FakeLLMAdapter"
   ],
-  "test_evidence": "271 passed, 18 skipped, 1 warning in 1.92s",
+  "test_evidence": "304 passed, 18 skipped, 1 warning in 1.82s",
   "ts": "2026-04-07T17:55:00Z"
 }

@@ -3,8 +3,6 @@
 import uuid
 from unittest.mock import AsyncMock
 
-import pytest
-
 from alayaos_core.repositories.base import BaseRepository
 
 

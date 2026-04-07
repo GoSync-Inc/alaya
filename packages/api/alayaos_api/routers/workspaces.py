@@ -142,7 +142,21 @@ async def update_workspace(
 
     repo = WorkspaceRepository(session)
     updates = body.model_dump(exclude_unset=True)
-    workspace = await repo.update(workspace_id, **updates)
+    try:
+        workspace = await repo.update(workspace_id, **updates)
+    except IntegrityError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "resource.constraint_violation",
+                    "message": "Invalid update: null value for non-nullable field.",
+                    "hint": str(e.orig),
+                    "docs": None,
+                    "request_id": None,
+                }
+            },
+        ) from e
     if workspace is None:
         raise _not_found(str(workspace_id))
     return data_response(WorkspaceRead.model_validate(workspace))

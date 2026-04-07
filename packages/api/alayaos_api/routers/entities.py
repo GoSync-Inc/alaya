@@ -119,7 +119,21 @@ async def update_entity(
 ):
     repo = EntityRepository(session, api_key.workspace_id)
     updates = body.model_dump(exclude_unset=True)
-    entity = await repo.update(entity_id, **updates)
+    try:
+        entity = await repo.update(entity_id, **updates)
+    except IntegrityError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "resource.constraint_violation",
+                    "message": "Invalid update: null value for non-nullable field.",
+                    "hint": str(e.orig),
+                    "docs": None,
+                    "request_id": None,
+                }
+            },
+        ) from e
     if entity is None:
         raise _not_found(str(entity_id))
     return data_response(EntityRead.model_validate(entity))

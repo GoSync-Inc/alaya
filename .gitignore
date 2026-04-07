@@ -44,6 +44,11 @@ CLAUDE.local.md
 .par-evidence.json
 .worktrees/
 
+# Real data (NEVER commit — corporate data, API keys, eval results)
+data/
+tests/fixtures/gold_real/
+scripts/eval_results/
+
 # Docker
 docker-compose.override.yml
 

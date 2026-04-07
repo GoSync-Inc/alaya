@@ -1,4 +1,6 @@
-"""Anthropic LLM adapter using messages.parse() for structured output."""
+"""Anthropic LLM adapter using tool-based structured output."""
+
+import json
 
 import anthropic
 
@@ -6,7 +8,7 @@ from alayaos_core.llm.interface import LLMUsage, T
 
 
 class AnthropicAdapter:
-    """Anthropic LLM adapter using messages.parse() for structured output."""
+    """Anthropic LLM adapter using tool use for structured output."""
 
     def __init__(self, api_key: str, model: str) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
@@ -21,7 +23,15 @@ class AnthropicAdapter:
         max_tokens: int = 4096,
         temperature: float = 0.0,
     ) -> tuple[T, LLMUsage]:
-        response = await self._client.messages.parse(
+        # Build tool definition from Pydantic schema
+        schema = response_model.model_json_schema()
+        tool = {
+            "name": "extract_result",
+            "description": "Extract structured data from the input",
+            "input_schema": schema,
+        }
+
+        response = await self._client.messages.create(
             model=self._model,
             max_tokens=max_tokens,
             temperature=temperature,
@@ -33,15 +43,28 @@ class AnthropicAdapter:
                 }
             ],
             messages=[{"role": "user", "content": text}],
-            response_model=response_model,
+            tools=[tool],
+            tool_choice={"type": "tool", "name": "extract_result"},
         )
+
+        # Parse tool use result
+        tool_input = None
+        for block in response.content:
+            if block.type == "tool_use":
+                tool_input = block.input
+                break
+
+        if tool_input is None:
+            raise ValueError("Model did not return tool use result")
+
+        result = response_model.model_validate(tool_input)
         usage = LLMUsage(
             tokens_in=response.usage.input_tokens,
             tokens_out=response.usage.output_tokens,
-            tokens_cached=getattr(response.usage, "cache_read_input_tokens", 0),
+            tokens_cached=getattr(response.usage, "cache_read_input_tokens", 0) or 0,
             cost_usd=self._calculate_cost(response.usage),
         )
-        return response.parsed, usage
+        return result, usage
 
     def _calculate_cost(self, usage: object) -> float:
         # Anthropic pricing per 1M tokens (Claude Sonnet 4)

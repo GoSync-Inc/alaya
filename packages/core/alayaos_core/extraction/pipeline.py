@@ -106,8 +106,11 @@ async def run_extraction(
     run.tokens_out = total_tokens_out
     run.tokens_cached = total_tokens_cached
     run.cost_usd = total_cost
-    run.llm_provider = "anthropic"  # from config
-    run.llm_model = "claude-sonnet-4-20250514"  # from config
+    from alayaos_core.config import Settings
+
+    settings = Settings()
+    run.llm_provider = settings.EXTRACTION_LLM_PROVIDER
+    run.llm_model = settings.ANTHROPIC_MODEL
     await session.flush()
 
     return merged
@@ -144,8 +147,7 @@ async def run_write(
     if redis:
         token = await acquire_workspace_lock(redis, str(event.workspace_id))
         if not token:
-            await run_repo.update_status(run.id, "failed", error_message="could not acquire workspace lock")
-            return None
+            raise RuntimeError(f"Could not acquire workspace lock for {event.workspace_id}")
 
     try:
         await run_repo.update_status(run.id, "writing")

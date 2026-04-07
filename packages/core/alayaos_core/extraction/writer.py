@@ -31,7 +31,8 @@ def normalize_claim_value(value: str, value_type: str, *, resolved_entity_id: st
     if value_type == "text":
         return {"text": value}
     elif value_type == "date":
-        return {"date": value, "iso": f"{value}T00:00:00Z"}
+        iso = value if "T" in value else f"{value}T00:00:00Z"
+        return {"date": value, "iso": iso}
     elif value_type == "number":
         try:
             num = float(value)
@@ -96,23 +97,25 @@ async def write_claim(
         status="active",
     )
 
-    # Supersession (non-accumulate)
+    # Supersession (non-accumulate) — process ALL existing active claims
     if strategy != "accumulate":
         existing_claims = await claim_repo.get_active_for_entity_predicate(entity_id, claim.predicate)
-        existing = [c for c in existing_claims if c.id != new_claim.id]
-        if existing:
-            old = existing[0]
+        for old in existing_claims:
+            if old.id == new_claim.id:
+                continue
             old_observed = old.observed_at or old.created_at
             if strategy == "latest_wins":
                 if claim_observed_at >= old_observed:
                     await claim_repo.mark_superseded(old.id, new_claim.id, claim_observed_at)
                 else:
                     await claim_repo.mark_superseded(new_claim.id, old.id, old_observed)
+                    break  # new claim superseded — stop processing
             elif strategy == "explicit_only":
                 if claim.confidence >= 0.85 and normalized_value != old.value and claim_observed_at >= old_observed:
                     await claim_repo.mark_superseded(old.id, new_claim.id, claim_observed_at)
                 elif normalized_value != old.value:
                     await claim_repo.update_status(new_claim.id, "disputed")
+                    break  # new claim disputed — stop processing
 
     return new_claim
 

@@ -1,17 +1,8 @@
 {
-  "sprint": 5,
+  "sprint": 6,
   "claude_product": "ACCEPTED",
-  "technical_review": "APPROVE",
+  "technical_review": "PENDING",
   "provider": "codex",
-  "fixes_applied": [
-    "lock failure raises for TaskIQ retry",
-    "date normalization preserves time component",
-    "supersede all existing active claims",
-    "LLM model from config",
-    "worker uses root Dockerfile",
-    "entity_ref lookup with case-insensitive fallback",
-    "enrich stub returns to completed"
-  ],
-  "test_evidence": "369 passed, 18 skipped, 1 warning in 3.51s",
-  "ts": "2026-04-07T18:50:00Z"
+  "test_evidence": "404 passed, 18 skipped, 1 warning in 4.06s",
+  "ts": "2026-04-07T19:15:00Z"
 }

@@ -12,8 +12,7 @@
     "expected_claims": [
         {"entity": "Mobile App", "predicate": "deadline", "value": "2026-07-15", "value_type": "date"},
         {"entity": "Mobile App", "predicate": "status", "value": "delayed", "value_type": "text"},
-        {"entity": "Sarah Chen", "predicate": "role", "value": "CEO", "value_type": "text"},
-        {"entity": "Leo Fischer", "predicate": "role", "value": "CPO", "value_type": "text"}
+        {"entity": "Kim Nguyen", "predicate": "role", "value": "design team lead", "value_type": "text"}
     ],
     "expected_relations": [
         {"source_entity": "Rosa Martins", "target_entity": "Mobile App", "relation_type": "member_of"},

@@ -145,10 +145,7 @@ def test_extraction_result_schema_matches_gold_format() -> None:
 
     fixture = json.loads((GOLD_DIR / "meeting_01.json").read_text())
     # Build ExtractionResult from gold expected data
-    entities = [
-        ExtractedEntity(name=e["name"], entity_type=e["entity_type"])
-        for e in fixture["expected_entities"]
-    ]
+    entities = [ExtractedEntity(name=e["name"], entity_type=e["entity_type"]) for e in fixture["expected_entities"]]
     claims = [
         ExtractedClaim(
             entity=c["entity"],

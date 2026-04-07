@@ -1,13 +1,13 @@
 {
-  "sprint": 7,
+  "sprint": 0,
   "claude_product": "ACCEPTED",
   "technical_review": "APPROVE",
   "provider": "codex",
+  "ts": "2026-04-08T00:15:00Z",
   "fixes_applied": [
-    "extraction. prefix on all monitoring events",
-    "injection_detected uses source_type per spec",
-    "low_confidence_batch threshold 0.6 per spec"
-  ],
-  "test_evidence": "431 passed, 18 skipped, 1 warning in 4.11s",
-  "ts": "2026-04-07T19:40:00Z"
+    "asyncpg SET LOCAL bind params → validated f-string",
+    "migration FLOAT → NUMERIC(12,6) for cost columns",
+    "CORTEX_CRYSTAL_THRESHOLD 0.3 → 0.1 (charter: max recall)",
+    "added job_extract RLS test + injection prevention test"
+  ]
 }

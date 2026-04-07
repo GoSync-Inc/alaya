@@ -6,6 +6,7 @@ from alayaos_core.models.claim import ClaimSource, L2Claim
 from alayaos_core.models.entity import EntityExternalId, L1Entity
 from alayaos_core.models.entity_type import EntityTypeDefinition
 from alayaos_core.models.event import L0Event
+from alayaos_core.models.extraction_run import ExtractionRun
 from alayaos_core.models.predicate import PredicateDefinition
 from alayaos_core.models.relation import L1Relation, RelationSource
 from alayaos_core.models.tree import L3TreeNode
@@ -21,6 +22,7 @@ __all__ = [
     "ClaimSource",
     "EntityExternalId",
     "EntityTypeDefinition",
+    "ExtractionRun",
     "L0Event",
     "L1Entity",
     "L1Relation",

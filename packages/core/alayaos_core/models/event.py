@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,3 +23,10 @@ class L0Event(Base, TimestampMixin):
     content_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     event_metadata: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default="{}")
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    access_level: Mapped[str] = mapped_column(Text, nullable=False, server_default="public")
+    access_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor_external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    event_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_extracted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

@@ -15,6 +15,7 @@ async def lifespan(app: FastAPI):
     setup_logging(
         json_output=settings.ENV == "production",
         log_level=settings.LOG_LEVEL,
+        db_echo=settings.DB_ECHO,
     )
     engine = create_async_engine(
         settings.DATABASE_URL,

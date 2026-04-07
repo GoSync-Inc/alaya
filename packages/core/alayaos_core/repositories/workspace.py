@@ -36,8 +36,10 @@ class WorkspaceRepository(BaseRepository):
         workspace = await self.get_by_id(workspace_id)
         if workspace is None:
             return None
+        allowed = {"name", "slug", "settings"}
         for key, value in kwargs.items():
-            setattr(workspace, key, value)
+            if key in allowed:
+                setattr(workspace, key, value)
         await self.session.flush()
         return await self.get_by_id(workspace_id)
 

@@ -1,1 +1,14 @@
-{"sprint":4,"claude_product":"SKIPPED","technical_review":"APPROVE","provider":"codex","governance":"standard","fixes_applied":["reusable smoke test","portable grep","selective compose up"],"ts":"2026-04-07T10:40:00Z"}
+{
+  "sprint": 1,
+  "claude_product": "ACCEPTED",
+  "technical_review": "APPROVE",
+  "provider": "codex",
+  "fixes_applied": [
+    "upsert_core updates supersession_strategy on existing core predicates",
+    "mock seed_core_metadata in seed tests",
+    "deduplicate external IDs before unique index",
+    "sync ORM UniqueConstraint with migration index"
+  ],
+  "test_evidence": "241 passed, 18 skipped, 1 warning in 1.92s",
+  "ts": "2026-04-07T17:25:00Z"
+}

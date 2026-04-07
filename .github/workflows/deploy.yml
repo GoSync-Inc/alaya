@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   deploy:
@@ -26,4 +27,4 @@ jobs:
           script: |
             export GHCR_TOKEN="${{ secrets.GITHUB_TOKEN }}"
             echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-            /opt/alaya/deploy.sh "${{ github.sha }}"
+            /opt/alaya/deploy.sh "${{ github.event.workflow_run.head_sha }}"

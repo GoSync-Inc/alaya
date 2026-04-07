@@ -106,6 +106,23 @@ class Preprocessor:
         """Linear: ticket as one chunk, chunk by tokens if too long."""
         return self._chunk_by_tokens(text, "linear", source_id)
 
+    def chunk_with_cortex(self, text: str, source_type: str, source_id: str) -> list[Chunk]:
+        """Delegate to CortexChunker and convert to Chunk format."""
+        from alayaos_core.extraction.cortex.chunker import CortexChunker
+
+        cortex = CortexChunker(max_chunk_tokens=self._max_tokens, model="cl100k_base")
+        raw_chunks = cortex.chunk(text, source_type, source_id)
+        return [
+            Chunk(
+                text=rc.text,
+                index=rc.index,
+                total=rc.total,
+                source_type=rc.source_type,
+                source_id=rc.source_id,
+            )
+            for rc in raw_chunks
+        ]
+
     def propagate_entities(self, chunks: list[Chunk], extracted_entities: list[str]) -> None:
         """Update subsequent chunks with entity names from previous chunks."""
         for i in range(1, len(chunks)):

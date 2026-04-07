@@ -125,12 +125,13 @@ class TestIngestionRouter:
 
         assert response.status_code == 202
         body = response.json()
-        assert "event_id" in body
-        assert "extraction_run_id" in body
-        assert body["status"] == "pending"
+        assert "data" in body
+        assert "event_id" in body["data"]
+        assert "extraction_run_id" in body["data"]
+        assert body["data"]["status"] == "pending"
 
-    def test_ingest_text_too_long_returns_400(self) -> None:
-        """Text exceeding max_length=100000 is rejected by Pydantic validation (→ 400 via middleware)."""
+    def test_ingest_text_too_long_returns_422(self) -> None:
+        """Text exceeding 100K chars is rejected with validation.text_too_long."""
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
 
@@ -141,8 +142,8 @@ class TestIngestionRouter:
             headers={"X-Api-Key": RAW_KEY},
         )
 
-        assert response.status_code == 400
-        assert response.json()["error"]["code"] == "validation.invalid_input"
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "validation.text_too_long"
 
     def test_ingest_text_auto_source_id(self) -> None:
         """When source_id is not provided, a UUID is auto-generated."""

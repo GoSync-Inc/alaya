@@ -19,9 +19,10 @@ from alayaos_core.schemas.claim import ClaimRead, ClaimUpdate
 
 router = APIRouter()
 
-# Valid status transitions from active
+# Valid status transitions
 _VALID_TRANSITIONS: dict[str, set[str]] = {
-    "active": {"retracted", "disputed"},
+    "active": {"retracted"},
+    "retracted": {"active"},
 }
 
 

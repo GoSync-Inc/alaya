@@ -15,7 +15,7 @@ from alayaos_api.deps import (
 from alayaos_core.models.api_key import APIKey
 from alayaos_core.repositories.base import BaseRepository
 from alayaos_core.repositories.extraction_run import ExtractionRunRepository
-from alayaos_core.schemas.extraction_run import ExtractionRunRead
+from alayaos_core.schemas.extraction_run import ExtractionRunListRead, ExtractionRunRead
 
 router = APIRouter()
 
@@ -61,7 +61,7 @@ async def list_extraction_runs(
 
     repo = ExtractionRunRepository(session, api_key.workspace_id)
     items, next_cursor, has_more = await repo.list(cursor=cursor, limit=limit)
-    return paginated_response(items, ExtractionRunRead, next_cursor, has_more)
+    return paginated_response(items, ExtractionRunListRead, next_cursor, has_more)
 
 
 @router.get("/extraction-runs/{run_id}")

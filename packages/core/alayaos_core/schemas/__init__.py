@@ -10,7 +10,7 @@ from alayaos_core.schemas.common import (
 from alayaos_core.schemas.entity import EntityCreate, EntityRead, EntityUpdate, ExternalIdRead
 from alayaos_core.schemas.entity_type import EntityTypeCreate, EntityTypeRead, EntityTypeUpdate
 from alayaos_core.schemas.event import EventCreate, EventRead, EventUpdate
-from alayaos_core.schemas.extraction_run import ExtractionRunRead
+from alayaos_core.schemas.extraction_run import ExtractionRunListRead, ExtractionRunRead
 from alayaos_core.schemas.ingestion import IngestTextRequest, IngestTextResponse
 from alayaos_core.schemas.predicate import PredicateCreate, PredicateRead
 from alayaos_core.schemas.relation import RelationCreate, RelationRead
@@ -35,6 +35,7 @@ __all__ = [
     "EventRead",
     "EventUpdate",
     "ExternalIdRead",
+    "ExtractionRunListRead",
     "ExtractionRunRead",
     "HealthResponse",
     "IngestTextRequest",

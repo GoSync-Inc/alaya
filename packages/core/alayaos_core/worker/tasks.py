@@ -2,10 +2,16 @@
 
 import uuid
 
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from alayaos_core.config import Settings
 from alayaos_core.worker.broker import broker
+
+
+async def _set_workspace_context(session: AsyncSession, workspace_id: str) -> None:
+    """Set RLS workspace context for the current transaction."""
+    await session.execute(text("SET LOCAL app.workspace_id = :wid"), {"wid": workspace_id})
 
 
 def _session_factory():
@@ -37,6 +43,7 @@ async def job_extract(event_id: str, extraction_run_id: str, workspace_id: str) 
 
     factory = _session_factory()
     async with factory() as session, session.begin():
+        await _set_workspace_context(session, workspace_id)
         result = await run_extraction(
             event_id=uuid.UUID(event_id),
             run_id=uuid.UUID(extraction_run_id),
@@ -70,6 +77,7 @@ async def job_write(extraction_run_id: str, workspace_id: str) -> dict:
 
     factory = _session_factory()
     async with factory() as session, session.begin():
+        await _set_workspace_context(session, workspace_id)
         counters = await run_write(
             run_id=uuid.UUID(extraction_run_id),
             session=session,
@@ -89,6 +97,7 @@ async def job_enrich(extraction_run_id: str, workspace_id: str) -> dict:
 
     factory = _session_factory()
     async with factory() as session, session.begin():
+        await _set_workspace_context(session, workspace_id)
         await run_enrich(uuid.UUID(extraction_run_id), session)
 
     return {"extraction_run_id": extraction_run_id, "status": "enriched"}

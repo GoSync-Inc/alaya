@@ -13,6 +13,7 @@ class ExtractedEntity(BaseModel):
     external_ids: dict[str, str] = Field(default_factory=dict)
     confidence: float = Field(ge=0.0, le=1.0, default=0.8)
     properties: dict[str, Any] = Field(default_factory=dict)
+    tier: str | None = None  # high/medium/low — set by apply_confidence_tiers
 
     @field_validator("name")
     @classmethod

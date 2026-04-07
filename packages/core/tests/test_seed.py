@@ -139,7 +139,7 @@ class TestSeedFunction:
         mock_create_key.assert_called_once()
         call_kwargs = mock_create_key.call_args
         assert call_kwargs.kwargs.get("is_bootstrap") is True
-        session.commit.assert_called_once()
+        session.commit.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_seed_skips_bootstrap_key_when_exists(self) -> None:
@@ -179,7 +179,7 @@ class TestSeedFunction:
             await seed(session)
 
         mock_create_key.assert_not_called()
-        session.commit.assert_called_once()
+        session.commit.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_seed_skips_bootstrap_key_in_production(self) -> None:

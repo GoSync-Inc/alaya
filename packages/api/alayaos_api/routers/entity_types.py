@@ -60,7 +60,7 @@ async def list_entity_types(
                 },
             ) from e
 
-    repo = EntityTypeRepository(session)
+    repo = EntityTypeRepository(session, api_key.workspace_id)
     items, next_cursor, has_more = await repo.list(cursor=cursor, limit=limit)
     return paginated_response(items, EntityTypeRead, next_cursor, has_more)
 
@@ -71,7 +71,7 @@ async def create_entity_type(
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("admin"))],
 ):
-    repo = EntityTypeRepository(session)
+    repo = EntityTypeRepository(session, api_key.workspace_id)
     try:
         entity_type = await repo.create(
             workspace_id=api_key.workspace_id,
@@ -117,7 +117,7 @@ async def get_entity_type(
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("read"))],
 ):
-    repo = EntityTypeRepository(session)
+    repo = EntityTypeRepository(session, api_key.workspace_id)
     entity_type = await repo.get_by_id(type_id)
     if entity_type is None:
         raise _not_found(str(type_id))

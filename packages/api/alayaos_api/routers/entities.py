@@ -42,7 +42,7 @@ async def create_entity(
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("write"))],
 ):
-    repo = EntityRepository(session)
+    repo = EntityRepository(session, api_key.workspace_id)
     try:
         entity = await repo.create(
             workspace_id=api_key.workspace_id,
@@ -92,7 +92,7 @@ async def list_entities(
                 },
             ) from e
 
-    repo = EntityRepository(session)
+    repo = EntityRepository(session, api_key.workspace_id)
     items, next_cursor, has_more = await repo.list(cursor=cursor, limit=limit, type_slug=type_slug)
     return paginated_response(items, EntityRead, next_cursor, has_more)
 
@@ -103,7 +103,7 @@ async def get_entity(
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("read"))],
 ):
-    repo = EntityRepository(session)
+    repo = EntityRepository(session, api_key.workspace_id)
     entity = await repo.get_by_id(entity_id)
     if entity is None:
         raise _not_found(str(entity_id))
@@ -117,7 +117,7 @@ async def update_entity(
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("write"))],
 ):
-    repo = EntityRepository(session)
+    repo = EntityRepository(session, api_key.workspace_id)
     updates = body.model_dump(exclude_none=True)
     entity = await repo.update(entity_id, **updates)
     if entity is None:
@@ -131,7 +131,7 @@ async def delete_entity(
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("write"))],
 ):
-    repo = EntityRepository(session)
+    repo = EntityRepository(session, api_key.workspace_id)
     entity = await repo.update(entity_id, is_deleted=True)
     if entity is None:
         raise _not_found(str(entity_id))

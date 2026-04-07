@@ -36,7 +36,7 @@ async def create_api_key_endpoint(
     )
     # Re-fetch to get server-generated timestamps
     await session.flush()
-    repo = APIKeyRepository(session)
+    repo = APIKeyRepository(session, api_key.workspace_id)
     refreshed = await repo.get_by_prefix(new_key.key_prefix)
     base_data = APIKeyRead.model_validate(refreshed).model_dump()
     base_data["raw_key"] = raw_key
@@ -68,7 +68,7 @@ async def list_api_keys(
                 },
             ) from e
 
-    repo = APIKeyRepository(session)
+    repo = APIKeyRepository(session, api_key.workspace_id)
     items, next_cursor, has_more = await repo.list(
         workspace_id=api_key.workspace_id,
         cursor=cursor,
@@ -84,7 +84,7 @@ async def revoke_api_key(
     api_key: Annotated[APIKey, Depends(require_scope("admin"))],
 ):
     """Revoke an API key by its prefix."""
-    repo = APIKeyRepository(session)
+    repo = APIKeyRepository(session, api_key.workspace_id)
     revoked = await repo.revoke(prefix, api_key.workspace_id)
     if revoked is None:
         raise HTTPException(

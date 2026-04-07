@@ -59,7 +59,7 @@ async def list_predicates(
                 },
             ) from e
 
-    repo = PredicateRepository(session)
+    repo = PredicateRepository(session, api_key.workspace_id)
     items, next_cursor, has_more = await repo.list(cursor=cursor, limit=limit)
     return paginated_response(items, PredicateRead, next_cursor, has_more)
 
@@ -70,7 +70,7 @@ async def get_predicate(
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("read"))],
 ):
-    repo = PredicateRepository(session)
+    repo = PredicateRepository(session, api_key.workspace_id)
     predicate = await repo.get_by_id(predicate_id)
     if predicate is None:
         raise _not_found(str(predicate_id))

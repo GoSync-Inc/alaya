@@ -30,7 +30,12 @@ class EntityRepository(BaseRepository):
         return await self.get_by_id(entity.id)  # type: ignore[return-value]
 
     async def get_by_id(self, entity_id: uuid.UUID) -> L1Entity | None:
-        stmt = select(L1Entity).where(L1Entity.id == entity_id).options(selectinload(L1Entity.external_ids))
+        stmt = (
+            select(L1Entity)
+            .where(L1Entity.id == entity_id)
+            .where(self._ws_filter(L1Entity))
+            .options(selectinload(L1Entity.external_ids))
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -52,7 +57,12 @@ class EntityRepository(BaseRepository):
         limit: int = 50,
         type_slug: str | None = None,
     ) -> tuple[list[L1Entity], str | None, bool]:
-        stmt = select(L1Entity).where(L1Entity.is_deleted == False).options(selectinload(L1Entity.external_ids))  # noqa: E712
+        stmt = (
+            select(L1Entity)
+            .where(L1Entity.is_deleted == False)  # noqa: E712
+            .where(self._ws_filter(L1Entity))
+            .options(selectinload(L1Entity.external_ids))
+        )
         if type_slug is not None:
             stmt = stmt.join(EntityTypeDefinition, L1Entity.entity_type_id == EntityTypeDefinition.id).where(
                 EntityTypeDefinition.slug == type_slug
@@ -98,6 +108,7 @@ class EntityRepository(BaseRepository):
                 EntityExternalId.source_type == source_type,
                 EntityExternalId.external_id == external_id,
             )
+            .where(self._ws_filter(L1Entity))
             .options(selectinload(L1Entity.external_ids))
         )
         result = await self.session.execute(stmt)

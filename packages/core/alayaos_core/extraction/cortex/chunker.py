@@ -47,7 +47,7 @@ class CortexChunker:
         if source_type == "slack":
             return self._chunk_slack(text, source_id)
         elif source_type in ("meeting_transcript", "document"):
-            return self._chunk_by_speaker_turns(text, source_id)
+            return self._chunk_by_speaker_turns(text, source_type, source_id)
         else:
             return self._chunk_by_paragraphs(text, source_type, source_id)
 
@@ -79,13 +79,32 @@ class CortexChunker:
             for i, t in enumerate(texts)
         ]
 
+    def _hard_token_split(self, text: str) -> list[str]:
+        """Last resort: split text at exact token boundaries."""
+        tokens = self.encoding.encode(text)
+        parts: list[str] = []
+        for i in range(0, len(tokens), self.max_tokens):
+            parts.append(self.encoding.decode(tokens[i : i + self.max_tokens]))
+        return parts if parts else [text]
+
     def _split_at_sentence_boundary(self, text: str) -> list[str]:
-        """Split oversized text at sentence boundaries, never mid-sentence."""
+        """Split oversized text at sentence boundaries, never mid-sentence.
+
+        Falls back to hard token splitting if no sentence boundaries found
+        or if a single sentence still exceeds max_tokens.
+        """
         sentence_pattern = re.compile(r"(?<=[.!?])\s+")
         sentences = sentence_pattern.split(text)
         parts: list[str] = []
         current = ""
         for sentence in sentences:
+            # If a single sentence exceeds max_tokens, hard-split it
+            if self.count_tokens(sentence) > self.max_tokens:
+                if current:
+                    parts.append(current)
+                    current = ""
+                parts.extend(self._hard_token_split(sentence))
+                continue
             candidate = (current + " " + sentence).strip() if current else sentence
             if self.count_tokens(candidate) > self.max_tokens and current:
                 parts.append(current)
@@ -141,7 +160,7 @@ class CortexChunker:
         threads: dict[str, list[dict]] = {}
         thread_order: list[str] = []
         for msg in messages:
-            ts = msg.get("thread_ts") or msg.get("ts", "root")
+            ts = msg.get("thread_ts") or "main"
             if ts not in threads:
                 threads[ts] = []
                 thread_order.append(ts)
@@ -253,24 +272,28 @@ class CortexChunker:
 
     # ── Meeting transcript / document ──────────────────────────────────────────
 
-    def _chunk_by_speaker_turns(self, text: str, source_id: str) -> list[RawChunk]:
+    def _chunk_by_speaker_turns(self, text: str, source_type: str, source_id: str) -> list[RawChunk]:
         """Chunk by speaker turns for meeting transcripts and documents."""
         if not text.strip():
-            return self._finalize([], "meeting_transcript", source_id)
+            return self._finalize([], source_type, source_id)
 
         # Regex: line starts with optional bracket, speaker name, closing bracket/colon
         speaker_pattern = re.compile(r"^[\[({]?\s*([\w][\w\s]*)[\])}]?\s*:", re.MULTILINE)
 
         lines = text.splitlines()
         turns: list[tuple[str, str]] = []  # (speaker, text)
+        preamble_lines: list[str] = []  # Lines before first speaker
         current_speaker: str | None = None
         current_lines: list[str] = []
 
         for line in lines:
             m = speaker_pattern.match(line)
             if m:
-                if current_lines and current_speaker is not None:
+                if current_speaker is not None and current_lines:
                     turns.append((current_speaker, "\n".join(current_lines).strip()))
+                elif current_speaker is None and current_lines:
+                    # Preserve preamble (text before first speaker)
+                    preamble_lines = current_lines[:]
                 current_speaker = m.group(1).strip()
                 # Rest of the line after the colon
                 rest = line[m.end() :].strip()
@@ -288,10 +311,16 @@ class CortexChunker:
 
         if not turns:
             # No speaker pattern found — fall back to paragraph chunking
-            return self._chunk_by_paragraphs_generic(text, "meeting_transcript", source_id)
+            return self._chunk_by_paragraphs_generic(text, source_type, source_id)
 
         # Group consecutive same-speaker turns
         groups: list[str] = []
+
+        # Prepend preamble as its own group if it exists
+        preamble_text = "\n".join(preamble_lines).strip()
+        if preamble_text:
+            groups.append(preamble_text)
+
         prev_speaker: str | None = None
         prev_text_parts: list[str] = []
 
@@ -308,7 +337,7 @@ class CortexChunker:
             groups.append("\n".join(prev_text_parts))
 
         segments = self._accumulate(groups)
-        return self._finalize(segments, "meeting_transcript", source_id)
+        return self._finalize(segments, source_type, source_id)
 
     # ── Generic paragraph ─────────────────────────────────────────────────────
 

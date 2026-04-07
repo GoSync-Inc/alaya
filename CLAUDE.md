@@ -38,7 +38,7 @@ docker/                             # seed.py, init-db.sql, Caddyfile
 ## Commands
 
 ```bash
-uv sync                          # Install dependencies
+uv sync --all-packages --dev     # Install dependencies
 uv run ruff check .              # Lint
 uv run ruff format --check .     # Format check
 uv run pyright                   # Type check
@@ -46,6 +46,8 @@ uv run pytest                    # Run unit tests
 uv run pytest -m integration     # Run integration tests (requires PostgreSQL)
 docker compose up -d             # Start all services
 docker compose up postgres redis # Start only DB + cache
+just check                       # Lint + format + typecheck + tests
+just smoke                       # Docker smoke test
 ```
 
 ## Verification

@@ -149,8 +149,12 @@ def upgrade() -> None:
     op.execute("ALTER TABLE extraction_runs ADD COLUMN IF NOT EXISTS chunks_total INTEGER NOT NULL DEFAULT 0")
     op.execute("ALTER TABLE extraction_runs ADD COLUMN IF NOT EXISTS chunks_crystal INTEGER NOT NULL DEFAULT 0")
     op.execute("ALTER TABLE extraction_runs ADD COLUMN IF NOT EXISTS chunks_skipped INTEGER NOT NULL DEFAULT 0")
-    op.execute("ALTER TABLE extraction_runs ADD COLUMN IF NOT EXISTS cortex_cost_usd FLOAT NOT NULL DEFAULT 0.0")
-    op.execute("ALTER TABLE extraction_runs ADD COLUMN IF NOT EXISTS crystallizer_cost_usd FLOAT NOT NULL DEFAULT 0.0")
+    op.execute(
+        "ALTER TABLE extraction_runs ADD COLUMN IF NOT EXISTS cortex_cost_usd NUMERIC(12,6) NOT NULL DEFAULT 0.0"
+    )
+    op.execute(
+        "ALTER TABLE extraction_runs ADD COLUMN IF NOT EXISTS crystallizer_cost_usd NUMERIC(12,6) NOT NULL DEFAULT 0.0"
+    )
     op.execute("ALTER TABLE extraction_runs ADD COLUMN IF NOT EXISTS verification_changes INTEGER NOT NULL DEFAULT 0")
 
 

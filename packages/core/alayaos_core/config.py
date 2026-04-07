@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # Cortex
     CORTEX_CLASSIFIER_MODEL: str = "claude-haiku-4-5-20251001"
     CORTEX_MAX_CHUNK_TOKENS: int = 3000
-    CORTEX_CRYSTAL_THRESHOLD: float = 0.3
+    CORTEX_CRYSTAL_THRESHOLD: float = 0.1  # Very low for max recall (charter non-negotiable)
     CORTEX_TRUNCATION_TOKENS: int = 800
 
     # Crystallizer

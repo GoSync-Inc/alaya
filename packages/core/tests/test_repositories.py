@@ -787,7 +787,7 @@ class TestClaimRepository:
         session = make_session()
         session.execute.return_value = make_scalar_result(claims)
         repo = ClaimRepository(session, ws_id)
-        items, cursor, has_more = await repo.list(entity_id=entity_id, predicate="status", status="active")
+        items, _cursor, has_more = await repo.list(entity_id=entity_id, predicate="status", status="active")
         assert len(items) == 2
         assert has_more is False
 
@@ -889,7 +889,7 @@ class TestRelationRepository:
         session.execute.return_value = make_scalar_result(rels)
         repo = RelationRepository(session, ws_id)
         entity_id = uuid.uuid4()
-        items, cursor, has_more = await repo.list(entity_id=entity_id)
+        items, _cursor, has_more = await repo.list(entity_id=entity_id)
         assert len(items) == 2
         assert has_more is False
 

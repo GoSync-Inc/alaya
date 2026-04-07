@@ -36,6 +36,12 @@ async def job_extract(event_id: str, extraction_run_id: str, workspace_id: str) 
     from alayaos_core.services.workspace import CORE_ENTITY_TYPES, CORE_PREDICATES
 
     settings = Settings()
+
+    # Feature flag: route to Cortex pipeline when enabled
+    if settings.FEATURE_FLAG_USE_CORTEX:
+        await job_cortex.kiq(event_id, extraction_run_id, workspace_id)
+        return {"event_id": event_id, "status": "routed_to_cortex"}
+
     # Use real adapter in production, fake for dev/test
     if settings.ANTHROPIC_API_KEY.get_secret_value():
         from alayaos_core.llm.anthropic import AnthropicAdapter

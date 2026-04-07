@@ -79,8 +79,11 @@ class AnthropicAdapter:
         pricing = PRICING.get(self._model, DEFAULT_PRICING)
         input_tokens: int = getattr(usage, "input_tokens", 0)
         output_tokens: int = getattr(usage, "output_tokens", 0)
-        cached_tokens: int = getattr(usage, "cache_read_input_tokens", 0)
-        input_cost = input_tokens * pricing["input"] / 1_000_000
+        cached_tokens: int = getattr(usage, "cache_read_input_tokens", 0) or 0
+        # Anthropic's input_tokens includes cache_read_input_tokens.
+        # Subtract cached from input to avoid double-counting.
+        non_cached_input = max(input_tokens - cached_tokens, 0)
+        input_cost = non_cached_input * pricing["input"] / 1_000_000
         output_cost = output_tokens * pricing["output"] / 1_000_000
         cached_cost = cached_tokens * pricing["cached"] / 1_000_000
         return input_cost + output_cost + cached_cost

@@ -41,6 +41,7 @@ async def list_chunks(
     api_key: Annotated[APIKey, Depends(require_scope("read"))],
     cursor: str | None = None,
     limit: int = 50,
+    event_id: Annotated[uuid.UUID | None, Query()] = None,
     processing_stage: Annotated[str | None, Query()] = None,
     is_crystal: Annotated[bool | None, Query()] = None,
 ):
@@ -65,6 +66,7 @@ async def list_chunks(
     items, next_cursor, has_more = await repo.list(
         cursor=cursor,
         limit=limit,
+        event_id=event_id,
         processing_stage=processing_stage,
         is_crystal=is_crystal,
     )

@@ -55,10 +55,13 @@ class ChunkRepository(BaseRepository):
         self,
         cursor: str | None = None,
         limit: int = 50,
+        event_id: uuid.UUID | None = None,
         processing_stage: str | None = None,
         is_crystal: bool | None = None,
     ) -> tuple[list[L0Chunk], str | None, bool]:
         stmt = select(L0Chunk).where(self._ws_filter(L0Chunk))
+        if event_id is not None:
+            stmt = stmt.where(L0Chunk.event_id == event_id)
         if processing_stage is not None:
             stmt = stmt.where(L0Chunk.processing_stage == processing_stage)
         if is_crystal is not None:

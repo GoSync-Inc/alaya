@@ -23,6 +23,18 @@ def normalize_name(name: str) -> str:
     return name
 
 
+def transliterate_name(name: str) -> str:
+    """Transliterate between Cyrillic↔Latin for cross-script matching."""
+    try:
+        from transliterate import translit
+
+        # Try Cyrillic→Latin
+        latin = translit(name, "ru", reversed=True)
+        return normalize_name(latin)
+    except Exception:
+        return normalize_name(name)
+
+
 async def resolve_entity(
     extracted: ExtractedEntity,
     workspace_id: uuid.UUID,
@@ -84,17 +96,25 @@ async def resolve_entity(
 
     # 2b: Jaro-Winkler fuzzy match against all known entities
     # JaroWinkler.normalized_similarity returns 0.0-1.0
+    # Skip fuzzy for very short names (< 4 chars) — too unreliable
     best_score = 0.0
     best_id: uuid.UUID | None = None
-    for name, eid in entity_index.items():
-        score = JaroWinkler.normalized_similarity(normalized, name)
-        if score > best_score:
-            best_score, best_id = score, eid
-    # Also check aliases
-    for alias, eid in alias_index.items():
-        score = JaroWinkler.normalized_similarity(normalized, alias)
-        if score > best_score:
-            best_score, best_id = score, eid
+    if len(normalized) >= 4:
+        translit_normalized = transliterate_name(extracted.name)
+        for name, eid in entity_index.items():
+            score = JaroWinkler.normalized_similarity(normalized, name)
+            # Also compare transliterated form for cross-script matching
+            translit_score = JaroWinkler.normalized_similarity(translit_normalized, name)
+            score = max(score, translit_score)
+            if score > best_score:
+                best_score, best_id = score, eid
+        # Also check aliases
+        for alias, eid in alias_index.items():
+            score = JaroWinkler.normalized_similarity(normalized, alias)
+            translit_score = JaroWinkler.normalized_similarity(translit_normalized, alias)
+            score = max(score, translit_score)
+            if score > best_score:
+                best_score, best_id = score, eid
 
     if best_score >= 0.92:
         return (

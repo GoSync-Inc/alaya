@@ -53,6 +53,7 @@ class PredicateRepository(BaseRepository):
         description: str | None = None,
         inverse_slug: str | None = None,
         is_core: bool = True,
+        supersession_strategy: str = "latest_wins",
     ) -> PredicateDefinition:
         """Create if not exists; do NOT overwrite existing predicates."""
         existing = await self.get_by_slug(workspace_id, slug)
@@ -66,6 +67,7 @@ class PredicateRepository(BaseRepository):
             description=description,
             inverse_slug=inverse_slug,
             is_core=is_core,
+            supersession_strategy=supersession_strategy,
         )
         self.session.add(pred)
         await self.session.flush()

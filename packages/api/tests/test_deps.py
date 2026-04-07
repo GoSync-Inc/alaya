@@ -207,3 +207,24 @@ async def test_require_scope_raises_403_when_missing() -> None:
         await checker(api_key=valid_key)
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail["error"]["code"] == "auth.insufficient_scope"
+
+
+@pytest.mark.asyncio
+async def test_set_local_uses_parameterized_query() -> None:
+    """Regression: SET LOCAL must use bound params, not f-string interpolation."""
+    from alayaos_api.deps import get_workspace_session
+
+    valid_key, _raw_key = _valid_api_key()
+
+    session = AsyncMock()
+    session.execute = AsyncMock()
+
+    gen = get_workspace_session(session=session, api_key=valid_key)
+    await gen.__anext__()
+
+    call_args = session.execute.call_args
+    assert call_args is not None
+    sql_text = call_args[0][0]
+    assert ":wid" in str(sql_text)
+    params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("params", {})
+    assert params.get("wid") == str(valid_key.workspace_id)

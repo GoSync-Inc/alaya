@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class ExtractionRunListRead(BaseModel):
@@ -37,6 +37,22 @@ class ExtractionRunListRead(BaseModel):
     cortex_cost_usd: float = 0.0
     crystallizer_cost_usd: float = 0.0
     verification_changes: int = 0
+
+    @field_validator(
+        "chunks_total",
+        "chunks_crystal",
+        "chunks_skipped",
+        "verification_changes",
+        mode="before",
+    )
+    @classmethod
+    def _none_to_zero_int(cls, v: int | None) -> int:
+        return v if v is not None else 0
+
+    @field_validator("cortex_cost_usd", "crystallizer_cost_usd", mode="before")
+    @classmethod
+    def _none_to_zero_float(cls, v: float | None) -> float:
+        return v if v is not None else 0.0
 
 
 class ExtractionRunRead(ExtractionRunListRead):

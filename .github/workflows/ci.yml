@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --all-packages
       - run: uv run ruff check .
       - run: uv run ruff format --check .
 
@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --all-packages
       - run: uv run pyright
 
   test:
@@ -46,7 +46,7 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --all-packages
       - name: Run unit tests
         run: uv run pytest -m "not integration" --tb=short
 
@@ -125,7 +125,7 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --all-packages
       - name: Generate migration SQL
         run: uv run alembic upgrade head --sql > migrations.sql
         env:
@@ -162,7 +162,7 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --all-packages
       - name: Run Alembic migrations
         run: uv run alembic upgrade head
         env:
@@ -188,7 +188,7 @@ jobs:
         with:
           python-version: "3.13"
           enable-cache: true
-      - run: uv sync --locked
+      - run: uv sync --locked --all-packages
       - name: Run pip-audit
         run: |
           uv pip install pip-audit

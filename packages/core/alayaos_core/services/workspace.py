@@ -1,3 +1,5 @@
+import uuid
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,11 +54,10 @@ async def create_workspace(session: AsyncSession, name: str, slug: str, settings
     workspace = await ws_repo.create(name=name, slug=slug, settings=settings)
     await session.flush()  # ensure workspace.id is available
 
-    # SET LOCAL for RLS — seeded tables are workspace-scoped
-    await session.execute(
-        text("SET LOCAL app.workspace_id = :wid"),
-        {"wid": str(workspace.id)},
-    )
+    # SET LOCAL for RLS — seeded tables are workspace-scoped.
+    # Re-parse to guarantee valid UUID; bound params not used (asyncpg rejects them in SET).
+    validated_wid = str(uuid.UUID(str(workspace.id)))
+    await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
 
     for et in CORE_ENTITY_TYPES:
         await et_repo.upsert_core(workspace_id=workspace.id, **et)
@@ -72,10 +73,8 @@ async def seed_core_metadata(session: AsyncSession, workspace: Workspace) -> Non
     et_repo = EntityTypeRepository(session)
     pred_repo = PredicateRepository(session)
 
-    await session.execute(
-        text("SET LOCAL app.workspace_id = :wid"),
-        {"wid": str(workspace.id)},
-    )
+    validated_wid = str(uuid.UUID(str(workspace.id)))
+    await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
 
     for et in CORE_ENTITY_TYPES:
         await et_repo.upsert_core(workspace_id=workspace.id, **et)

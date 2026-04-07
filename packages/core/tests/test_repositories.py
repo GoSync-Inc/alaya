@@ -382,6 +382,60 @@ class TestPredicateRepository:
         session.add.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_upsert_core_updates_supersession_strategy_on_existing(self) -> None:
+        from alayaos_core.repositories.predicate import PredicateRepository
+
+        ws_id = uuid.uuid4()
+        original = PredicateDefinition(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            slug="owner",
+            display_name="Owner",
+            value_type="entity_ref",
+            is_core=True,
+            supersession_strategy="latest_wins",
+        )
+        session = make_session()
+        session.execute.return_value = make_result(original)
+        repo = PredicateRepository(session)
+        result = await repo.upsert_core(
+            workspace_id=ws_id,
+            slug="owner",
+            display_name="Owner",
+            value_type="entity_ref",
+            supersession_strategy="explicit_only",
+        )
+        assert result is original
+        assert result.supersession_strategy == "explicit_only"
+        session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_upsert_core_does_not_update_strategy_on_non_core(self) -> None:
+        from alayaos_core.repositories.predicate import PredicateRepository
+
+        ws_id = uuid.uuid4()
+        original = PredicateDefinition(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            slug="custom",
+            display_name="Custom",
+            value_type="text",
+            is_core=False,
+            supersession_strategy="latest_wins",
+        )
+        session = make_session()
+        session.execute.return_value = make_result(original)
+        repo = PredicateRepository(session)
+        result = await repo.upsert_core(
+            workspace_id=ws_id,
+            slug="custom",
+            display_name="Custom",
+            is_core=False,
+            supersession_strategy="accumulate",
+        )
+        assert result.supersession_strategy == "latest_wins"
+
+    @pytest.mark.asyncio
     async def test_get_by_slug(self) -> None:
         from alayaos_core.repositories.predicate import PredicateRepository
 

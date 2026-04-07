@@ -33,11 +33,7 @@ class RelationRepository(BaseRepository):
         return await self.get_by_id(relation.id)  # type: ignore[return-value]
 
     async def get_by_id(self, relation_id: uuid.UUID) -> L1Relation | None:
-        stmt = (
-            select(L1Relation)
-            .where(L1Relation.id == relation_id)
-            .where(self._ws_filter(L1Relation))
-        )
+        stmt = select(L1Relation).where(L1Relation.id == relation_id).where(self._ws_filter(L1Relation))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -66,9 +62,7 @@ class RelationRepository(BaseRepository):
         next_cursor = self.encode_cursor(items[-1].created_at, items[-1].id) if has_more else None
         return items, next_cursor, has_more
 
-    async def create_batch(
-        self, workspace_id: uuid.UUID, relations: list[dict]
-    ) -> list[L1Relation]:
+    async def create_batch(self, workspace_id: uuid.UUID, relations: list[dict]) -> list[L1Relation]:
         """Bulk create relations. Flushes once after all inserts."""
         created = []
         for rel_data in relations:

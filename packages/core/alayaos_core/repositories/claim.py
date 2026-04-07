@@ -48,11 +48,7 @@ class ClaimRepository(BaseRepository):
         return await self.get_by_id(claim.id)  # type: ignore[return-value]
 
     async def get_by_id(self, claim_id: uuid.UUID) -> L2Claim | None:
-        stmt = (
-            select(L2Claim)
-            .where(L2Claim.id == claim_id)
-            .where(self._ws_filter(L2Claim))
-        )
+        stmt = select(L2Claim).where(L2Claim.id == claim_id).where(self._ws_filter(L2Claim))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -81,9 +77,7 @@ class ClaimRepository(BaseRepository):
         next_cursor = self.encode_cursor(items[-1].created_at, items[-1].id) if has_more else None
         return items, next_cursor, has_more
 
-    async def get_active_for_entity_predicate(
-        self, entity_id: uuid.UUID, predicate: str
-    ) -> list[L2Claim]:
+    async def get_active_for_entity_predicate(self, entity_id: uuid.UUID, predicate: str) -> list[L2Claim]:
         stmt = (
             select(L2Claim)
             .where(self._ws_filter(L2Claim))
@@ -94,9 +88,7 @@ class ClaimRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_active_values_for_entity_predicate(
-        self, entity_id: uuid.UUID, predicate: str
-    ) -> list[dict]:
+    async def get_active_values_for_entity_predicate(self, entity_id: uuid.UUID, predicate: str) -> list[dict]:
         """Return just the value JSONB for dedup."""
         claims = await self.get_active_for_entity_predicate(entity_id, predicate)
         return [c.value for c in claims]

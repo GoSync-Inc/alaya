@@ -29,11 +29,7 @@ class ExtractionRunRepository(BaseRepository):
         return await self.get_by_id(run.id)  # type: ignore[return-value]
 
     async def get_by_id(self, run_id: uuid.UUID) -> ExtractionRun | None:
-        stmt = (
-            select(ExtractionRun)
-            .where(ExtractionRun.id == run_id)
-            .where(self._ws_filter(ExtractionRun))
-        )
+        stmt = select(ExtractionRun).where(ExtractionRun.id == run_id).where(self._ws_filter(ExtractionRun))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -43,9 +39,7 @@ class ExtractionRunRepository(BaseRepository):
         limit: int = 50,
     ) -> tuple[list[ExtractionRun], str | None, bool]:
         stmt = select(ExtractionRun).where(self._ws_filter(ExtractionRun))
-        stmt = self.apply_cursor_pagination(
-            stmt, cursor, limit, ExtractionRun.created_at, ExtractionRun.id
-        )
+        stmt = self.apply_cursor_pagination(stmt, cursor, limit, ExtractionRun.created_at, ExtractionRun.id)
         result = await self.session.execute(stmt)
         items = list(result.scalars().all())
         actual_limit = min(max(limit, 1), 200)
@@ -93,9 +87,7 @@ class ExtractionRunRepository(BaseRepository):
         await self.session.flush()
         return run
 
-    async def store_raw_extraction(
-        self, run_id: uuid.UUID, raw_extraction: dict
-    ) -> ExtractionRun | None:
+    async def store_raw_extraction(self, run_id: uuid.UUID, raw_extraction: dict) -> ExtractionRun | None:
         run = await self.get_by_id(run_id)
         if run is None:
             return None

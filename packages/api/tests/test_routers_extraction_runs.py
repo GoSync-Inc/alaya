@@ -128,9 +128,7 @@ class TestExtractionRunsRouter:
             mock_cls.return_value = repo
 
             client = TestClient(app)
-            response = client.get(
-                f"/api/v1/extraction-runs/{uuid.uuid4()}", headers={"X-Api-Key": RAW_KEY}
-            )
+            response = client.get(f"/api/v1/extraction-runs/{uuid.uuid4()}", headers={"X-Api-Key": RAW_KEY})
 
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "resource.not_found"

@@ -4,7 +4,6 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from alayaos_api.main import create_app

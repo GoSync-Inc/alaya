@@ -55,8 +55,14 @@ class ChunkRepository(BaseRepository):
         self,
         cursor: str | None = None,
         limit: int = 50,
+        processing_stage: str | None = None,
+        is_crystal: bool | None = None,
     ) -> tuple[list[L0Chunk], str | None, bool]:
         stmt = select(L0Chunk).where(self._ws_filter(L0Chunk))
+        if processing_stage is not None:
+            stmt = stmt.where(L0Chunk.processing_stage == processing_stage)
+        if is_crystal is not None:
+            stmt = stmt.where(L0Chunk.is_crystal.is_(is_crystal))
         stmt = self.apply_cursor_pagination(stmt, cursor, limit, L0Chunk.created_at, L0Chunk.id)
         result = await self.session.execute(stmt)
         items = list(result.scalars().all())

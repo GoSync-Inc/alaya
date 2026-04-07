@@ -85,17 +85,24 @@ class IntegratorEngine:
         processing_key = f"dirty_set:{workspace_id}:processing"
         dirty_entity_ids: set[uuid.UUID] = set()
 
+        created_at_key = f"dirty_set:{workspace_id}:created_at"
         try:
             await self.redis.rename(dirty_key, processing_key)
             raw_members = await self.redis.smembers(processing_key)
             await self.redis.delete(processing_key)
+            # Clear the age marker so next batch starts fresh
+            await self.redis.delete(created_at_key)
             for member in raw_members:
                 member_str = member.decode() if isinstance(member, bytes) else member
                 with contextlib.suppress(ValueError):
                     dirty_entity_ids.add(uuid.UUID(member_str))
-        except Exception:
-            # dirty-set may not exist (no entities processed yet) — that's fine
-            pass
+        except Exception as exc:
+            # ResponseError("no such key") means dirty-set doesn't exist — that's fine
+            exc_str = str(exc).lower()
+            if "no such key" not in exc_str and "notfound" not in exc_str:
+                # Unexpected error after RENAME — re-raise to prevent data loss
+                log.error("integrator_dirty_set_error", workspace_id=str(workspace_id), error=str(exc))
+                raise
 
         # Step 2: Load 48h window entities
         window_hours = getattr(self.settings, "INTEGRATOR_WINDOW_HOURS", 48)
@@ -219,8 +226,15 @@ class IntegratorEngine:
                 await self.entity_repo.update(action.entity_id, is_deleted=True)
                 counters["noise_removed"] = 1
 
-            elif action.action in ("update_status", "normalize_date", "update_type", "add_assignee"):
-                # These actions affect claims or entity properties; count as claims_updated
+            elif action.action == "update_type" and action.entity_id:
+                new_type = action.details.get("entity_type")
+                if new_type:
+                    await self.entity_repo.update(action.entity_id, properties={"corrected_type": new_type})
+                    counters["claims_updated"] = 1
+
+            elif action.action in ("update_status", "normalize_date", "add_assignee") and action.entity_id:
+                # Update entity properties with the action details
+                await self.entity_repo.update(action.entity_id, properties=action.details)
                 counters["claims_updated"] = 1
 
         except Exception:

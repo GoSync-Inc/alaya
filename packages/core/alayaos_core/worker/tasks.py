@@ -3,10 +3,17 @@
 import contextlib
 import uuid
 
+import redis.asyncio as aioredis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from alayaos_core.config import Settings
+from alayaos_core.extraction.integrator.engine import IntegratorEngine
+from alayaos_core.repositories.claim import ClaimRepository
+from alayaos_core.repositories.entity import EntityRepository
+from alayaos_core.repositories.integrator_run import IntegratorRunRepository
+from alayaos_core.repositories.relation import RelationRepository
+from alayaos_core.services.entity_cache import EntityCacheService
 from alayaos_core.worker.broker import broker
 
 
@@ -425,3 +432,85 @@ async def job_enrich(extraction_run_id: str, workspace_id: str) -> dict:
         await run_enrich(uuid.UUID(extraction_run_id), session)
 
     return {"extraction_run_id": extraction_run_id, "status": "enriched"}
+
+
+@broker.task(timeout=300, retry_on_error=True, max_retries=2)
+async def job_integrate(workspace_id: str) -> dict:
+    """Integrator: process dirty_set ∪ 48h window for a workspace."""
+    settings = Settings()
+
+    # Use real LLM adapter if key is available, else fake
+    if settings.ANTHROPIC_API_KEY.get_secret_value():
+        from alayaos_core.llm.anthropic import AnthropicAdapter
+
+        llm = AnthropicAdapter(settings.ANTHROPIC_API_KEY.get_secret_value(), settings.INTEGRATOR_MODEL)
+    else:
+        from alayaos_core.llm.fake import FakeLLMAdapter
+
+        llm = FakeLLMAdapter()
+
+    redis_client = None
+    with contextlib.suppress(Exception):
+        redis_client = aioredis.from_url(settings.REDIS_URL)
+
+    ws_uuid = uuid.UUID(workspace_id)
+
+    factory = _session_factory()
+    try:
+        async with factory() as session, session.begin():
+            await _set_workspace_context(session, workspace_id)
+
+            entity_repo = EntityRepository(session, ws_uuid)
+            claim_repo = ClaimRepository(session, ws_uuid)
+            relation_repo = RelationRepository(session, ws_uuid)
+            run_repo = IntegratorRunRepository(session, ws_uuid)
+            entity_cache = EntityCacheService(redis=redis_client)
+
+            # Create IntegratorRun record
+            integrator_run = await run_repo.create(
+                workspace_id=ws_uuid,
+                trigger="job_integrate",
+                scope_description="dirty_set + 48h window",
+                llm_model=settings.INTEGRATOR_MODEL,
+            )
+
+            engine = IntegratorEngine(
+                llm=llm,
+                entity_repo=entity_repo,
+                claim_repo=claim_repo,
+                relation_repo=relation_repo,
+                entity_cache=entity_cache,
+                redis=redis_client,
+                settings=settings,
+            )
+
+            result = await engine.run(ws_uuid, session)
+
+            # Update IntegratorRun with counters
+            await run_repo.update_status(
+                integrator_run.id,
+                result.status,
+                error_message=result.reason if result.status == "failed" else None,
+            )
+            await run_repo.update_counters(
+                integrator_run.id,
+                entities_scanned=result.entities_scanned,
+                entities_deduplicated=result.entities_deduplicated,
+                entities_enriched=result.entities_enriched,
+                relations_created=result.relations_created,
+                claims_updated=result.claims_updated,
+                noise_removed=result.noise_removed,
+                tokens_used=result.tokens_used,
+                cost_usd=result.cost_usd,
+                duration_ms=result.duration_ms,
+            )
+    finally:
+        if redis_client:
+            await redis_client.aclose()
+
+    return {
+        "workspace_id": workspace_id,
+        "status": result.status,
+        "entities_scanned": result.entities_scanned,
+        "entities_deduplicated": result.entities_deduplicated,
+    }

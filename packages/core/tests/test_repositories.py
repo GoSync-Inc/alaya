@@ -233,49 +233,34 @@ class TestEventRepository:
     async def test_create_or_update_creates_new(self) -> None:
         from alayaos_core.repositories.event import EventRepository
 
-        session = make_session()
-        session.execute.return_value = make_result(None)
-        repo = EventRepository(session)
-        ev, created = await repo.create_or_update(
+        ev = L0Event(
+            id=uuid.uuid4(),
             workspace_id=uuid.uuid4(),
+            source_type="slack",
+            source_id="MSG1",
+            content={"text": "hi"},
+            content_hash="hash1",
+            event_metadata={},
+        )
+        session = make_session()
+        row = MagicMock()
+        row.__getitem__ = MagicMock(side_effect=lambda i: ev if i == 0 else True)
+        result = MagicMock()
+        result.one.return_value = row
+        session.execute.return_value = result
+        repo = EventRepository(session)
+        returned_ev, created = await repo.create_or_update(
+            workspace_id=ev.workspace_id,
             source_type="slack",
             source_id="MSG1",
             content={"text": "hi"},
             content_hash="hash1",
         )
         assert created is True
-        assert ev.content_hash == "hash1"
+        assert returned_ev is ev
 
     @pytest.mark.asyncio
-    async def test_create_or_update_skips_if_same_hash(self) -> None:
-        from alayaos_core.repositories.event import EventRepository
-
-        existing = L0Event(
-            id=uuid.uuid4(),
-            workspace_id=uuid.uuid4(),
-            source_type="slack",
-            source_id="MSG2",
-            content={"text": "original"},
-            content_hash="same_hash",
-            event_metadata={},
-        )
-        session = make_session()
-        session.execute.return_value = make_result(existing)
-        repo = EventRepository(session)
-        ev, created = await repo.create_or_update(
-            workspace_id=existing.workspace_id,
-            source_type="slack",
-            source_id="MSG2",
-            content={"text": "changed"},
-            content_hash="same_hash",
-        )
-        assert created is False
-        assert ev is existing
-        # Content NOT changed
-        assert ev.content == {"text": "original"}
-
-    @pytest.mark.asyncio
-    async def test_create_or_update_updates_if_hash_changed(self) -> None:
+    async def test_create_or_update_updates_on_conflict(self) -> None:
         from alayaos_core.repositories.event import EventRepository
 
         existing = L0Event(
@@ -283,12 +268,16 @@ class TestEventRepository:
             workspace_id=uuid.uuid4(),
             source_type="slack",
             source_id="MSG3",
-            content={"text": "v1"},
-            content_hash="hash_v1",
+            content={"text": "v2"},
+            content_hash="hash_v2",
             event_metadata={},
         )
         session = make_session()
-        session.execute.return_value = make_result(existing)
+        row = MagicMock()
+        row.__getitem__ = MagicMock(side_effect=lambda i: existing if i == 0 else False)
+        result = MagicMock()
+        result.one.return_value = row
+        session.execute.return_value = result
         repo = EventRepository(session)
         ev, created = await repo.create_or_update(
             workspace_id=existing.workspace_id,
@@ -298,9 +287,7 @@ class TestEventRepository:
             content_hash="hash_v2",
         )
         assert created is False
-        assert ev.content == {"text": "v2"}
-        assert ev.content_hash == "hash_v2"
-        session.flush.assert_called_once()
+        assert ev is existing
 
 
 # ─── EntityTypeRepository ─────────────────────────────────────────────────────

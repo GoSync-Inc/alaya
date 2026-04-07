@@ -1,8 +1,1 @@
-{
-  "sprint": 5,
-  "claude_product": "ACCEPTED",
-  "technical_review": "APPROVE",
-  "provider": "codex",
-  "fixes_applied": ["GHCR tag lowercase", "pip-audit install before use"],
-  "ts": "2026-04-07T09:10:00Z"
-}
+{"sprint":2,"claude_product":"ACCEPTED","technical_review":"APPROVE","provider":"codex","fixes_applied":["IntegrityError handling in PATCH for non-nullable nulls"],"ts":"2026-04-07T09:45:00Z"}

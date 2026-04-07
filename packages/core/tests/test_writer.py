@@ -130,7 +130,7 @@ async def test_write_claim_latest_wins_supersedes() -> None:
         confidence=0.9,
     )
 
-    result = await write_claim(
+    result, _ = await write_claim(
         claim=extracted_claim,
         entity_id=entity_id,
         event=event,
@@ -184,7 +184,7 @@ async def test_write_claim_latest_wins_late_arriving() -> None:
         confidence=0.9,
     )
 
-    result = await write_claim(
+    result, _ = await write_claim(
         claim=extracted_claim,
         entity_id=entity_id,
         event=event,
@@ -237,7 +237,7 @@ async def test_write_claim_explicit_only_supersedes() -> None:
         confidence=0.9,  # >= 0.85
     )
 
-    result = await write_claim(
+    result, _ = await write_claim(
         claim=extracted_claim,
         entity_id=entity_id,
         event=event,
@@ -289,7 +289,7 @@ async def test_write_claim_explicit_only_disputed() -> None:
         confidence=0.7,  # < 0.85 → disputed
     )
 
-    result = await write_claim(
+    result, _ = await write_claim(
         claim=extracted_claim,
         entity_id=entity_id,
         event=event,
@@ -337,7 +337,7 @@ async def test_write_claim_accumulate_dedup() -> None:
         confidence=0.9,
     )
 
-    result = await write_claim(
+    result, _ = await write_claim(
         claim=extracted_claim,
         entity_id=entity_id,
         event=event,
@@ -385,7 +385,7 @@ async def test_write_claim_accumulate_new() -> None:
         confidence=0.9,
     )
 
-    result = await write_claim(
+    result, _ = await write_claim(
         claim=extracted_claim,
         entity_id=entity_id,
         event=event,

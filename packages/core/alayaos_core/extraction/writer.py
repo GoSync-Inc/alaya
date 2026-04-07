@@ -86,7 +86,7 @@ async def write_claim(
     if strategy == "accumulate":
         existing_values = await claim_repo.get_active_values_for_entity_predicate(entity_id, claim.predicate)
         if normalized_value in existing_values:
-            return None
+            return None, 0
 
     # Create claim
     new_claim = await claim_repo.create(
@@ -105,6 +105,7 @@ async def write_claim(
     )
 
     # Supersession (non-accumulate) — process ALL existing active claims
+    superseded_count = 0
     if strategy != "accumulate":
         existing_claims = await claim_repo.get_active_for_entity_predicate(entity_id, claim.predicate)
         for old in existing_claims:
@@ -114,17 +115,19 @@ async def write_claim(
             if strategy == "latest_wins":
                 if claim_observed_at >= old_observed:
                     await claim_repo.mark_superseded(old.id, new_claim.id, claim_observed_at)
+                    superseded_count += 1
                 else:
                     await claim_repo.mark_superseded(new_claim.id, old.id, old_observed)
                     break  # new claim superseded — stop processing
             elif strategy == "explicit_only":
                 if claim.confidence >= 0.85 and normalized_value != old.value and claim_observed_at >= old_observed:
                     await claim_repo.mark_superseded(old.id, new_claim.id, claim_observed_at)
+                    superseded_count += 1
                 elif normalized_value != old.value:
                     await claim_repo.update_status(new_claim.id, "disputed")
                     break  # new claim disputed — stop processing
 
-    return new_claim
+    return new_claim, superseded_count
 
 
 # ─── Task 3: Atomic write ────────────────────────────────────────────────────
@@ -188,9 +191,12 @@ async def atomic_write(
     for claim in extraction_result.claims:
         eid = entity_name_to_id.get(claim.entity)
         if eid:
-            result = await write_claim(claim, eid, event, run, claim_repo, predicate_repo, entity_name_to_id)
+            result, superseded = await write_claim(
+                claim, eid, event, run, claim_repo, predicate_repo, entity_name_to_id
+            )
             if result:
                 counters["claims_created"] += 1
+                counters["claims_superseded"] += superseded
 
     # Update run counters
     await run_repo.update_counters(run.id, **counters)

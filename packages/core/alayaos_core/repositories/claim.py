@@ -102,15 +102,18 @@ class ClaimRepository(BaseRepository):
         return claim
 
     async def mark_superseded(
-        self, claim_id: uuid.UUID, superseded_by_id: uuid.UUID, valid_to: datetime
+        self, old_claim_id: uuid.UUID, new_claim_id: uuid.UUID, valid_to: datetime
     ) -> L2Claim | None:
-        """Mark a claim as superseded, recording who supersedes it and when validity ends."""
-        claim = await self.get_by_id(claim_id)
-        if claim is None:
+        """Mark old claim as superseded; set new claim's supersedes FK to old claim (per spec)."""
+        old_claim = await self.get_by_id(old_claim_id)
+        if old_claim is None:
             return None
-        claim.status = "superseded"
-        # supersedes on the *old* claim points to the *new* claim that replaces it
-        claim.supersedes = superseded_by_id
-        claim.valid_to = valid_to
+        old_claim.status = "superseded"
+        old_claim.valid_to = valid_to
+        # Per spec: supersedes = "FK to the claim this one replaces"
+        # NEW claim.supersedes → OLD claim (the one being replaced)
+        new_claim = await self.get_by_id(new_claim_id)
+        if new_claim:
+            new_claim.supersedes = old_claim_id
         await self.session.flush()
-        return claim
+        return old_claim

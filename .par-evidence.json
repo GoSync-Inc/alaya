@@ -1,13 +1,13 @@
 {
-  "sprint": 0,
+  "sprint": 1,
   "claude_product": "ACCEPTED",
   "technical_review": "APPROVE",
   "provider": "codex",
-  "ts": "2026-04-08T00:15:00Z",
+  "ts": "2026-04-08T00:30:00Z",
   "fixes_applied": [
-    "asyncpg SET LOCAL bind params → validated f-string",
-    "migration FLOAT → NUMERIC(12,6) for cost columns",
-    "CORTEX_CRYSTAL_THRESHOLD 0.3 → 0.1 (charter: max recall)",
-    "added job_extract RLS test + injection prevention test"
+    "preserve transcript preamble before first speaker",
+    "pass source_type through speaker-turn chunking (document stays document)",
+    "unthreaded Slack posts share main key for proper grouping",
+    "hard token-split fallback for unpunctuated oversized text"
   ]
 }

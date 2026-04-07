@@ -227,8 +227,8 @@ async def test_set_local_validates_uuid() -> None:
     sql_text = str(call_args[0][0])
     # Must contain the validated UUID, not a :wid placeholder
     assert str(valid_key.workspace_id) in sql_text
-    # Must NOT contain raw injection-prone patterns
-    assert "f'" not in sql_text  # no raw f-string leaking through
+    # Must contain SET LOCAL with a quoted UUID value
+    assert "SET LOCAL app.workspace_id" in sql_text
 
 
 @pytest.mark.asyncio

@@ -35,7 +35,19 @@ def create_app() -> FastAPI:
     app = FastAPI(title="AlayaOS API", version="0.1.0", lifespan=lifespan)
 
     from alayaos_api.middleware import register_error_handlers
-    from alayaos_api.routers import api_keys, entities, entity_types, events, health, predicates, workspaces
+    from alayaos_api.routers import (
+        api_keys,
+        claims,
+        entities,
+        entity_types,
+        events,
+        extraction_runs,
+        health,
+        ingestion,
+        predicates,
+        relations,
+        workspaces,
+    )
 
     register_error_handlers(app)
 
@@ -46,6 +58,10 @@ def create_app() -> FastAPI:
     app.include_router(events.router, prefix="/api/v1", tags=["events"])
     app.include_router(predicates.router, prefix="/api/v1", tags=["predicates"])
     app.include_router(api_keys.router, prefix="/api/v1", tags=["api-keys"])
+    app.include_router(claims.router, prefix="/api/v1", tags=["claims"])
+    app.include_router(relations.router, prefix="/api/v1", tags=["relations"])
+    app.include_router(extraction_runs.router, prefix="/api/v1", tags=["extraction-runs"])
+    app.include_router(ingestion.router, prefix="/api/v1", tags=["ingestion"])
 
     return app
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid as _uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import structlog
@@ -141,6 +142,7 @@ async def atomic_write(
     llm,
     entity_name_to_id: dict[str, _uuid.UUID] | None = None,
     resolver_decisions: list[dict] | None = None,
+    redis=None,
 ) -> dict:
     """Job 2: Atomic write — resolve entities, create relations+claims, update run."""
     from alayaos_core.extraction.resolver import resolve_batch
@@ -211,6 +213,25 @@ async def atomic_write(
     # Mark event as extracted
     event.is_extracted = True
     await session.flush()
+
+    # Push entity IDs to Redis dirty-set for Integrator
+    if redis:
+        dirty_key = f"dirty_set:{event.workspace_id}"
+        created_at_key = f"dirty_set:{event.workspace_id}:created_at"
+        entity_ids = list(entity_name_to_id.values())
+        if entity_ids:
+            pipeline = redis.pipeline()
+            pipeline.sadd(dirty_key, *[str(eid) for eid in entity_ids])
+            pipeline.expire(dirty_key, 48 * 3600)  # 48h TTL
+            # Set created_at only if it doesn't exist (first entity in this batch)
+            pipeline.set(created_at_key, datetime.now(UTC).isoformat(), nx=True, ex=48 * 3600)
+            await pipeline.execute()
+
+        # Invalidate entity cache for written entities
+        from alayaos_core.services.entity_cache import EntityCacheService
+
+        cache = EntityCacheService(redis)
+        await cache.invalidate_batch(event.workspace_id, list(entity_name_to_id.keys()))
 
     return counters
 

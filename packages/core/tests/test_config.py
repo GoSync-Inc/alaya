@@ -35,3 +35,28 @@ def test_settings_env_prefix() -> None:
     """model_config must have env_prefix ALAYA_."""
     s = Settings()
     assert s.model_config.get("env_prefix") == "ALAYA_"
+
+
+def test_settings_has_extraction_config() -> None:
+    s = Settings()
+    assert s.EXTRACTION_LLM_PROVIDER == "anthropic"
+    assert s.EXTRACTION_MAX_INPUT_CHARS == 100_000
+
+
+def test_settings_has_entity_resolution_thresholds() -> None:
+    s = Settings()
+    assert s.ENTITY_RESOLUTION_AUTO_MERGE_THRESHOLD == 0.92
+    assert s.ENTITY_RESOLUTION_POSSIBLE_MATCH_THRESHOLD == 0.85
+
+
+def test_settings_anthropic_key_is_secret() -> None:
+    from pydantic import SecretStr
+
+    s = Settings()
+    assert isinstance(s.ANTHROPIC_API_KEY, SecretStr)
+
+
+def test_settings_worker_config() -> None:
+    s = Settings()
+    assert s.WORKER_CONCURRENCY == 4
+    assert s.WORKER_EXTRACT_TIMEOUT == 120

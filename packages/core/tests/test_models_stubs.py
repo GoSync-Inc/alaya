@@ -31,6 +31,7 @@ def test_l1_relation_columns() -> None:
         "target_entity_id",
         "relation_type",
         "confidence",
+        "extraction_run_id",
         "created_at",
         "updated_at",
     }.issubset(cols)
@@ -87,6 +88,12 @@ def test_l2_claim_columns() -> None:
         "valid_from",
         "valid_to",
         "source_event_id",
+        "status",
+        "observed_at",
+        "supersedes",
+        "source_summary",
+        "value_type",
+        "extraction_run_id",
         "created_at",
         "updated_at",
     }.issubset(cols)
@@ -98,6 +105,24 @@ def test_l2_claim_predicate_id_fk() -> None:
     fks = list(col.foreign_keys)
     assert any("predicate_definitions.id" in str(fk) for fk in fks)
     assert col.nullable is True
+
+
+def test_l2_claim_extraction_run_composite_fk() -> None:
+    from sqlalchemy import ForeignKeyConstraint
+
+    table = L2Claim.__table__
+    composite_fks = [c for c in table.constraints if isinstance(c, ForeignKeyConstraint)]
+    fk_targets = {str(e) for c in composite_fks for e in c.elements}
+    assert any("extraction_runs" in t for t in fk_targets)
+
+
+def test_l1_relation_extraction_run_composite_fk() -> None:
+    from sqlalchemy import ForeignKeyConstraint
+
+    table = L1Relation.__table__
+    composite_fks = [c for c in table.constraints if isinstance(c, ForeignKeyConstraint)]
+    fk_targets = {str(e) for c in composite_fks for e in c.elements}
+    assert any("extraction_runs" in t for t in fk_targets)
 
 
 def test_claim_source_tablename() -> None:
@@ -319,6 +344,7 @@ def test_models_init_exports_all() -> None:
         "AccessGroup",
         "AccessGroupMember",
         "ResourceGrant",
+        "ExtractionRun",
     ]
     for name in expected:
         assert hasattr(models, name), f"models.__init__ missing: {name}"

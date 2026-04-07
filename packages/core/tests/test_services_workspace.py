@@ -160,3 +160,9 @@ class TestCreateWorkspace:
 
     def test_core_predicates_count(self) -> None:
         assert len(CORE_PREDICATES) == 20
+
+    def test_core_predicates_have_supersession_strategy(self) -> None:
+        valid_strategies = {"latest_wins", "explicit_only", "accumulate"}
+        for pred in CORE_PREDICATES:
+            assert "supersession_strategy" in pred, f"Missing supersession_strategy in {pred['slug']}"
+            assert pred["supersession_strategy"] in valid_strategies, f"Invalid strategy in {pred['slug']}"

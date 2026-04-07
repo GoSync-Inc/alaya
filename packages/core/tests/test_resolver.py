@@ -354,7 +354,8 @@ async def test_tier3_llm_rejects() -> None:
     )
 
     assert is_new is True
-    assert decision["action"] == "created"
+    assert decision["tier"] == "llm"
+    assert decision["action"] == "rejected"
 
 
 # ─── Task 5: Resolve Batch ────────────────────────────────────────────────────

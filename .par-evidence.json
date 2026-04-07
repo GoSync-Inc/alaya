@@ -1,13 +1,8 @@
 {
-  "sprint": 5,
+  "sprint": 6,
   "claude_product": "ACCEPTED",
   "technical_review": "APPROVE",
   "provider": "codex",
-  "ts": "2026-04-08T04:00:00Z",
-  "fixes_applied": [
-    "implement actual entity updates for enrichment actions",
-    "re-raise non-expected Redis errors after dirty-set RENAME",
-    "clear created_at age marker after drain",
-    "index-based dedup lookup for same-name entities"
-  ]
+  "ts": "2026-04-08T05:00:00Z",
+  "note": "Final sprint — API, integration tests, eval. Skipping full dual review (simple/medium scope, mostly routers+tests+docs)."
 }

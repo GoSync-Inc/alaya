@@ -1,6 +1,7 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, literal_column, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from alayaos_core.models.event import L0Event
 from alayaos_core.repositories.base import BaseRepository
@@ -37,39 +38,35 @@ class EventRepository(BaseRepository):
         content_hash: str | None = None,
         metadata: dict | None = None,
     ) -> tuple[L0Event, bool]:
-        """Idempotent upsert by (workspace_id, source_type, source_id).
+        """Atomic upsert by (workspace_id, source_type, source_id).
 
-        Returns (event, created). If content_hash changed -> update; if identical -> skip.
+        Returns (event, created). Uses INSERT ON CONFLICT for atomicity.
         """
-        stmt = select(L0Event).where(
-            L0Event.workspace_id == workspace_id,
-            L0Event.source_type == source_type,
-            L0Event.source_id == source_id,
-        )
-        result = await self.session.execute(stmt)
-        existing = result.scalar_one_or_none()
-
-        if existing is None:
-            event = await self.create(
-                workspace_id=workspace_id,
-                source_type=source_type,
-                source_id=source_id,
-                content=content,
-                content_hash=content_hash,
-                metadata=metadata,
-            )
-            return event, True
-
-        # If content_hash is the same (and both are non-None), skip update
-        if content_hash is not None and existing.content_hash == content_hash:
-            return existing, False
-
-        existing.content = content
-        existing.content_hash = content_hash
+        values = {
+            "workspace_id": workspace_id,
+            "source_type": source_type,
+            "source_id": source_id,
+            "content": content,
+            "content_hash": content_hash,
+            "event_metadata": metadata or {},
+        }
+        stmt = pg_insert(L0Event).values(**values)
+        update_set: dict = {
+            "content": stmt.excluded.content,
+            "content_hash": stmt.excluded.content_hash,
+            "updated_at": func.now(),
+        }
         if metadata is not None:
-            existing.event_metadata = metadata
-        await self.session.flush()
-        return existing, False
+            update_set["event_metadata"] = stmt.excluded.event_metadata
+
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_l0_events_ws_src",
+            set_=update_set,
+        )
+        stmt = stmt.returning(L0Event, literal_column("xmax = 0").label("inserted"))
+        result = await self.session.execute(stmt)
+        row = result.one()
+        return row[0], bool(row[1])
 
     async def get_by_id(self, event_id: uuid.UUID) -> L0Event | None:
         stmt = select(L0Event).where(L0Event.id == event_id).where(self._ws_filter(L0Event))

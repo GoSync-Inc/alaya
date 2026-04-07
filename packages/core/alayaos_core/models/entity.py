@@ -33,7 +33,7 @@ class L1Entity(Base, TimestampMixin):
     first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    entity_type: Mapped["EntityTypeDefinition"] = relationship("EntityTypeDefinition", lazy="select")
+    entity_type: Mapped["EntityTypeDefinition"] = relationship("EntityTypeDefinition", lazy="raise")
     external_ids: Mapped[list["EntityExternalId"]] = relationship(
         "EntityExternalId", back_populates="entity", lazy="select"
     )
@@ -63,4 +63,4 @@ class EntityExternalId(Base):
     external_id: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    entity: Mapped["L1Entity"] = relationship("L1Entity", back_populates="external_ids")
+    entity: Mapped["L1Entity"] = relationship("L1Entity", back_populates="external_ids", lazy="raise")

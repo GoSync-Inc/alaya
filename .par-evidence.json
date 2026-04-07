@@ -1,13 +1,12 @@
 {
-  "sprint": 1,
+  "sprint": 2,
   "claude_product": "ACCEPTED",
   "technical_review": "APPROVE",
   "provider": "codex",
-  "ts": "2026-04-08T00:30:00Z",
+  "ts": "2026-04-08T01:00:00Z",
   "fixes_applied": [
-    "preserve transcript preamble before first speaker",
-    "pass source_type through speaker-turn chunking (document stays document)",
-    "unthreaded Slack posts share main key for proper grouping",
-    "hard token-split fallback for unpunctuated oversized text"
+    "added should_extract() access-level gate to job_cortex",
+    "set run.status = cortex_complete after successful processing",
+    "pushed chunk filters into DB query for correct cursor pagination"
   ]
 }

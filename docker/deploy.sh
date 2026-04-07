@@ -50,7 +50,7 @@ fi
 # Health check (up to 30 seconds)
 echo "Waiting for health check..."
 for i in $(seq 1 30); do
-    if curl -sf "http://localhost:${STANDBY_PORT}/health/ready" > /dev/null 2>&1; then
+    if curl -sf "http://localhost:${STANDBY_PORT}/health/ready" 2>/dev/null | grep -q '"status":"ok"'; then
         echo "Health check passed on attempt ${i}"
         break
     fi

@@ -55,7 +55,7 @@ done
 
 # Get bootstrap key from seed output
 echo "Retrieving bootstrap API key..."
-BOOTSTRAP_KEY=$(docker compose logs migrations 2>/dev/null | grep -o 'ak_[a-zA-Z0-9]*' | head -1)
+BOOTSTRAP_KEY=$(docker compose logs migrations 2>/dev/null | grep -o 'ak_[a-zA-Z0-9_-]*' | head -1)
 if [ -z "${BOOTSTRAP_KEY}" ]; then
     echo "ERROR: Could not find bootstrap API key in migration logs"
     docker compose down -v

@@ -1,4 +1,3 @@
-# STUB — no repository until Run 2
 import uuid
 from datetime import datetime
 
@@ -23,6 +22,11 @@ class L1Relation(Base, TimestampMixin):
             ["l1_entities.workspace_id", "l1_entities.id"],
             name="fk_relation_target_entity",
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "extraction_run_id"],
+            ["extraction_runs.workspace_id", "extraction_runs.id"],
+            name="fk_relation_extraction_run",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -32,6 +36,7 @@ class L1Relation(Base, TimestampMixin):
     relation_type: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, server_default="1.0")
     relation_metadata: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default="{}")
+    extraction_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
 
 class RelationSource(Base):

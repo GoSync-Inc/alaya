@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Text, UniqueConstraint, func
+from sqlalchemy import ARRAY, Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -21,6 +21,11 @@ class L1Entity(Base, TimestampMixin):
             ["entity_type_definitions.workspace_id", "entity_type_definitions.id"],
             name="fk_entities_type",
         ),
+        ForeignKeyConstraint(
+            ["workspace_id", "extraction_run_id"],
+            ["extraction_runs.workspace_id", "extraction_runs.id"],
+            name="fk_entity_extraction_run",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -32,6 +37,8 @@ class L1Entity(Base, TimestampMixin):
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    aliases: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
+    extraction_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     entity_type: Mapped["EntityTypeDefinition"] = relationship("EntityTypeDefinition", lazy="raise")
     external_ids: Mapped[list["EntityExternalId"]] = relationship(

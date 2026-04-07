@@ -28,3 +28,4 @@ class PredicateDefinition(Base, TimestampMixin):
     is_core: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     schema_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    supersession_strategy: Mapped[str] = mapped_column(Text, nullable=False, server_default="latest_wins")

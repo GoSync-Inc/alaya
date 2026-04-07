@@ -1,11 +1,12 @@
 """Tests for full SQLAlchemy models (Task 2)."""
 
-from sqlalchemy import inspect
+from sqlalchemy import ForeignKeyConstraint, inspect
 
 from alayaos_core.models.api_key import APIKey
 from alayaos_core.models.entity import EntityExternalId, L1Entity
 from alayaos_core.models.entity_type import EntityTypeDefinition
 from alayaos_core.models.event import L0Event
+from alayaos_core.models.extraction_run import ExtractionRun
 from alayaos_core.models.predicate import PredicateDefinition
 from alayaos_core.models.workspace import Workspace
 
@@ -262,3 +263,107 @@ def test_api_key_workspace_fk() -> None:
     fks = list(col.foreign_keys)
     assert len(fks) == 1
     assert "workspaces.id" in str(fks[0])
+
+
+# ─── L0Event new extraction columns ──────────────────────────────────────────
+
+
+def test_l0_event_extraction_columns() -> None:
+    mapper = inspect(L0Event)
+    cols = {c.key for c in mapper.columns}
+    for col_name in [
+        "raw_text",
+        "access_level",
+        "access_context",
+        "actor_external_id",
+        "event_kind",
+        "occurred_at",
+        "is_extracted",
+    ]:
+        assert col_name in cols, f"L0Event missing column: {col_name}"
+
+
+# ─── L1Entity new columns ────────────────────────────────────────────────────
+
+
+def test_l1_entity_aliases_column() -> None:
+    mapper = inspect(L1Entity)
+    cols = {c.key for c in mapper.columns}
+    assert "aliases" in cols, "L1Entity missing column: aliases"
+
+
+def test_l1_entity_extraction_run_id_column() -> None:
+    mapper = inspect(L1Entity)
+    cols = {c.key for c in mapper.columns}
+    assert "extraction_run_id" in cols, "L1Entity missing column: extraction_run_id"
+
+
+def test_l1_entity_extraction_run_composite_fk() -> None:
+    table = L1Entity.__table__
+    composite_fks = [c for c in table.constraints if isinstance(c, ForeignKeyConstraint)]
+    fk_targets = {str(e) for c in composite_fks for e in c.elements}
+    assert any("extraction_runs" in t for t in fk_targets)
+
+
+# ─── PredicateDefinition new column ──────────────────────────────────────────
+
+
+def test_predicate_supersession_strategy_column() -> None:
+    mapper = inspect(PredicateDefinition)
+    cols = {c.key for c in mapper.columns}
+    assert "supersession_strategy" in cols, "PredicateDefinition missing column: supersession_strategy"
+
+
+# ─── ExtractionRun ───────────────────────────────────────────────────────────
+
+
+def test_extraction_run_tablename() -> None:
+    assert ExtractionRun.__tablename__ == "extraction_runs"
+
+
+def test_extraction_run_columns() -> None:
+    mapper = inspect(ExtractionRun)
+    cols = {c.key for c in mapper.columns}
+    expected = {
+        "id",
+        "workspace_id",
+        "event_id",
+        "status",
+        "started_at",
+        "completed_at",
+        "llm_provider",
+        "llm_model",
+        "prompt_version",
+        "tokens_in",
+        "tokens_out",
+        "tokens_cached",
+        "cost_usd",
+        "raw_extraction",
+        "entities_created",
+        "entities_merged",
+        "relations_created",
+        "claims_created",
+        "claims_superseded",
+        "resolver_decisions",
+        "error_message",
+        "error_detail",
+        "retry_count",
+        "parent_run_id",
+        "created_at",
+        "updated_at",
+    }
+    assert expected.issubset(cols)
+
+
+def test_extraction_run_workspace_fk() -> None:
+    mapper = inspect(ExtractionRun)
+    col = mapper.columns["workspace_id"]
+    fks = list(col.foreign_keys)
+    assert any("workspaces.id" in str(fk) for fk in fks)
+
+
+def test_extraction_run_event_composite_fk() -> None:
+    table = ExtractionRun.__table__
+    composite_fks = [c for c in table.constraints if isinstance(c, ForeignKeyConstraint)]
+    fk_targets = {str(e) for c in composite_fks for e in c.elements}
+    assert any("l0_events" in t for t in fk_targets)

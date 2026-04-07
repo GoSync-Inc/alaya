@@ -27,7 +27,6 @@ async def seed(session: AsyncSession) -> None:
     # 2. Bootstrap API key (idempotent)
     settings = Settings()
     if settings.ENV == "production":
-        await session.commit()
         print("Production mode — skipping bootstrap API key")
         return
 
@@ -44,13 +43,11 @@ async def seed(session: AsyncSession) -> None:
             scopes=["read", "write", "admin"],
             is_bootstrap=True,
         )
-        await session.commit()
         print("=" * 50)
         print("Bootstrap API Key (dev only):")
         print(raw_key)
         print("=" * 50)
     else:
-        await session.commit()
         print("Bootstrap API key already exists")
 
 
@@ -59,7 +56,7 @@ async def main() -> None:
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-    async with session_factory() as session:
+    async with session_factory() as session, session.begin():
         await seed(session)
 
     await engine.dispose()

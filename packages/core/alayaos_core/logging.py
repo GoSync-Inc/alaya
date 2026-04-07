@@ -21,10 +21,7 @@ def setup_logging(json_output: bool = True, log_level: str = "INFO") -> None:
         structlog.processors.StackInfoRenderer(),
     ]
 
-    if json_output:
-        renderer = structlog.processors.JSONRenderer()
-    else:
-        renderer = structlog.dev.ConsoleRenderer()
+    renderer = structlog.processors.JSONRenderer() if json_output else structlog.dev.ConsoleRenderer()
 
     structlog.configure(
         processors=[

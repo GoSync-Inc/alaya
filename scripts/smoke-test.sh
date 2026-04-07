@@ -6,11 +6,38 @@ API_URL="http://localhost:8000"
 
 echo "=== Alaya Smoke Test ==="
 
-# Start services
-echo "Starting services..."
-docker compose up -d
+# Clean start — remove old volumes so seed.py prints the bootstrap key
+echo "Cleaning previous state..."
+docker compose down -v 2>/dev/null || true
 
-# Wait for health check
+# Start only required services (not Caddy — avoids port 80/443 conflicts)
+echo "Starting services..."
+docker compose up -d postgres redis
+
+# Wait for postgres to be ready, then run migrations + seed + start API
+echo "Waiting for PostgreSQL..."
+for i in $(seq 1 30); do
+    if docker compose exec -T postgres pg_isready -q 2>/dev/null; then
+        echo "PostgreSQL ready"
+        break
+    fi
+    if [ "${i}" -eq 30 ]; then
+        echo "ERROR: PostgreSQL not ready after 30 seconds"
+        docker compose down -v
+        exit 1
+    fi
+    sleep 1
+done
+
+# Run migrations and seed
+echo "Running migrations and seed..."
+docker compose up -d migrations 2>/dev/null || true
+sleep 5
+
+# Start API
+docker compose up -d api
+
+# Wait for API health check
 echo "Waiting for API to be ready..."
 for i in $(seq 1 60); do
     if curl -sf "${API_URL}/health/ready" > /dev/null 2>&1; then
@@ -20,7 +47,7 @@ for i in $(seq 1 60); do
     if [ "${i}" -eq 60 ]; then
         echo "ERROR: API not ready after 60 seconds"
         docker compose logs --tail=50
-        docker compose down
+        docker compose down -v
         exit 1
     fi
     sleep 1
@@ -28,10 +55,10 @@ done
 
 # Get bootstrap key from seed output
 echo "Retrieving bootstrap API key..."
-BOOTSTRAP_KEY=$(docker compose logs migrations 2>/dev/null | grep -oP 'ak_[a-zA-Z0-9]+' | head -1)
+BOOTSTRAP_KEY=$(docker compose logs migrations 2>/dev/null | grep -o 'ak_[a-zA-Z0-9]*' | head -1)
 if [ -z "${BOOTSTRAP_KEY}" ]; then
     echo "ERROR: Could not find bootstrap API key in migration logs"
-    docker compose down
+    docker compose down -v
     exit 1
 fi
 echo "Found key: ${BOOTSTRAP_KEY:0:12}..."
@@ -43,7 +70,7 @@ STATUS=$(curl -sf -o /dev/null -w '%{http_code}' \
     "${API_URL}/api/v1/entities")
 if [ "${STATUS}" != "200" ]; then
     echo "FAIL: Expected 200, got ${STATUS}"
-    docker compose down
+    docker compose down -v
     exit 1
 fi
 echo "PASS: 200"
@@ -56,7 +83,7 @@ TYPES_RESPONSE=$(curl -sf \
 TYPE_ID=$(echo "${TYPES_RESPONSE}" | python3 -c "import sys,json; print(json.load(sys.stdin)['data'][0]['id'])" 2>/dev/null)
 if [ -z "${TYPE_ID}" ]; then
     echo "FAIL: No entity types found"
-    docker compose down
+    docker compose down -v
     exit 1
 fi
 echo "PASS: Found entity type ${TYPE_ID}"
@@ -69,13 +96,13 @@ CREATE_STATUS=$(curl -sf -o /dev/null -w '%{http_code}' \
     "${API_URL}/api/v1/entities")
 if [ "${CREATE_STATUS}" != "201" ]; then
     echo "FAIL: Expected 201, got ${CREATE_STATUS}"
-    docker compose down
+    docker compose down -v
     exit 1
 fi
 echo "PASS: 201"
 
 # Cleanup
 echo "Stopping services..."
-docker compose down
+docker compose down -v
 
 echo "=== Smoke Test PASSED ==="

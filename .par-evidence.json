@@ -1,14 +1,17 @@
 {
-  "sprint": 1,
+  "sprint": 2,
   "claude_product": "ACCEPTED",
   "technical_review": "APPROVE",
   "provider": "codex",
   "fixes_applied": [
-    "upsert_core updates supersession_strategy on existing core predicates",
-    "mock seed_core_metadata in seed tests",
-    "deduplicate external IDs before unique index",
-    "sync ORM UniqueConstraint with migration index"
+    "data_response wrapper for 202",
+    "typed ingestion fields to columns",
+    "idempotent re-ingest",
+    "ExtractionRunListRead without resolver_decisions",
+    "validation.text_too_long error code",
+    "claim transitions active<->retracted only",
+    "tokens_cached + prompt_version in schema"
   ],
-  "test_evidence": "241 passed, 18 skipped, 1 warning in 1.92s",
-  "ts": "2026-04-07T17:25:00Z"
+  "test_evidence": "271 passed, 18 skipped, 1 warning in 1.92s",
+  "ts": "2026-04-07T17:55:00Z"
 }

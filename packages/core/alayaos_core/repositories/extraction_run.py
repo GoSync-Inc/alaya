@@ -49,6 +49,17 @@ class ExtractionRunRepository(BaseRepository):
         next_cursor = self.encode_cursor(items[-1].created_at, items[-1].id) if has_more else None
         return items, next_cursor, has_more
 
+    async def list_by_event(self, event_id: uuid.UUID) -> list[ExtractionRun]:
+        """List all extraction runs for a specific event."""
+        stmt = (
+            select(ExtractionRun)
+            .where(ExtractionRun.event_id == event_id)
+            .where(self._ws_filter(ExtractionRun))
+            .order_by(ExtractionRun.created_at.desc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def update_status(
         self,
         run_id: uuid.UUID,

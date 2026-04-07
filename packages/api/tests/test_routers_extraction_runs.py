@@ -65,6 +65,7 @@ def make_run(ws_id: uuid.UUID | None = None):
         status="completed",
         tokens_in=100,
         tokens_out=200,
+        tokens_cached=0,
         cost_usd=0.001,
         entities_created=3,
         entities_merged=0,

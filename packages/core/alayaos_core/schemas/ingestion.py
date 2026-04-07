@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class IngestTextRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=100000)
+    text: str = Field(min_length=1)
     source_type: str = "manual"
     source_id: str | None = None  # auto-generated UUID if not provided
     access_level: str = "public"

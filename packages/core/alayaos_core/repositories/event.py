@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from sqlalchemy import func, literal_column, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -37,23 +38,35 @@ class EventRepository(BaseRepository):
         content: dict,
         content_hash: str | None = None,
         metadata: dict | None = None,
+        raw_text: str | None = None,
+        access_level: str = "public",
+        event_kind: str | None = None,
+        occurred_at: datetime | None = None,
     ) -> tuple[L0Event, bool]:
         """Atomic upsert by (workspace_id, source_type, source_id).
 
         Returns (event, created). Uses INSERT ON CONFLICT for atomicity.
         """
-        values = {
+        values: dict = {
             "workspace_id": workspace_id,
             "source_type": source_type,
             "source_id": source_id,
             "content": content,
             "content_hash": content_hash,
             "event_metadata": metadata or {},
+            "raw_text": raw_text,
+            "access_level": access_level,
+            "event_kind": event_kind,
+            "occurred_at": occurred_at,
         }
         stmt = pg_insert(L0Event).values(**values)
         update_set: dict = {
             "content": stmt.excluded.content,
             "content_hash": stmt.excluded.content_hash,
+            "raw_text": stmt.excluded.raw_text,
+            "access_level": stmt.excluded.access_level,
+            "event_kind": stmt.excluded.event_kind,
+            "occurred_at": stmt.excluded.occurred_at,
             "updated_at": func.now(),
         }
         if metadata is not None:

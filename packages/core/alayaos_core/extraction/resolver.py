@@ -2,7 +2,7 @@
 
 import unicodedata
 import uuid
-from collections.abc import Callable, Awaitable
+from collections.abc import Awaitable, Callable
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,7 +54,7 @@ async def resolve_entity(
             )
 
     # Tier 2: Fuzzy name + alias match
-    from rapidfuzz.distance import JaroWinkler  # noqa: PLC0415 — deferred import
+    from rapidfuzz.distance import JaroWinkler  # deferred import to avoid top-level cost
 
     normalized = normalize_name(extracted.name)
 
@@ -83,7 +83,7 @@ async def resolve_entity(
         )
 
     # 2b: Jaro-Winkler fuzzy match against all known entities
-    # JaroWinkler.normalized_similarity returns 0.0–1.0
+    # JaroWinkler.normalized_similarity returns 0.0-1.0
     best_score = 0.0
     best_id: uuid.UUID | None = None
     for name, eid in entity_index.items():
@@ -152,10 +152,10 @@ async def resolve_entity(
 async def _llm_resolve_entity(llm, extracted: ExtractedEntity, existing) -> bool:
     """Ask LLM: are these the same entity?"""
     prompt = (
-        f'Are these the same entity?\n'
+        f"Are these the same entity?\n"
         f'Entity A: name="{extracted.name}", type="{extracted.entity_type}", aliases={extracted.aliases}\n'
         f'Entity B: name="{existing.name}", aliases={getattr(existing, "aliases", []) or []}\n'
-        f'Respond with is_same_entity (true/false) and brief reasoning.'
+        f"Respond with is_same_entity (true/false) and brief reasoning."
     )
     result, _ = await llm.extract(
         text=prompt,
@@ -205,7 +205,7 @@ async def resolve_batch(
     entities, _, _ = await entity_repo.list(limit=200)
     for entity in entities:
         entity_index[normalize_name(entity.name)] = entity.id
-        for alias in (entity.aliases or []):
+        for alias in entity.aliases or []:
             alias_index[normalize_name(alias)] = entity.id
 
     entity_name_to_id: dict[str, uuid.UUID] = {}

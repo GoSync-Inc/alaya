@@ -54,7 +54,7 @@ async def resolve_entity(
             )
 
     # Tier 2: Fuzzy name + alias match
-    from rapidfuzz import fuzz  # noqa: PLC0415 — deferred import to keep module lightweight
+    from rapidfuzz.distance import JaroWinkler  # noqa: PLC0415 — deferred import
 
     normalized = normalize_name(extracted.name)
 
@@ -83,15 +83,16 @@ async def resolve_entity(
         )
 
     # 2b: Jaro-Winkler fuzzy match against all known entities
+    # JaroWinkler.normalized_similarity returns 0.0–1.0
     best_score = 0.0
     best_id: uuid.UUID | None = None
     for name, eid in entity_index.items():
-        score = fuzz.jaro_winkler_similarity(normalized, name) / 100.0
+        score = JaroWinkler.normalized_similarity(normalized, name)
         if score > best_score:
             best_score, best_id = score, eid
     # Also check aliases
     for alias, eid in alias_index.items():
-        score = fuzz.jaro_winkler_similarity(normalized, alias) / 100.0
+        score = JaroWinkler.normalized_similarity(normalized, alias)
         if score > best_score:
             best_score, best_id = score, eid
 

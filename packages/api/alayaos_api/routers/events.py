@@ -41,7 +41,7 @@ async def create_event(
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("write"))],
 ):
-    repo = EventRepository(session)
+    repo = EventRepository(session, api_key.workspace_id)
     event, _created = await repo.create_or_update(
         workspace_id=api_key.workspace_id,
         source_type=body.source_type,
@@ -76,7 +76,7 @@ async def list_events(
                 },
             ) from e
 
-    repo = EventRepository(session)
+    repo = EventRepository(session, api_key.workspace_id)
     items, next_cursor, has_more = await repo.list(cursor=cursor, limit=limit)
     return paginated_response(items, EventRead, next_cursor, has_more)
 
@@ -87,7 +87,7 @@ async def get_event(
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
     api_key: Annotated[APIKey, Depends(require_scope("read"))],
 ):
-    repo = EventRepository(session)
+    repo = EventRepository(session, api_key.workspace_id)
     event = await repo.get_by_id(event_id)
     if event is None:
         raise _not_found(str(event_id))

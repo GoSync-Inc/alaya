@@ -126,6 +126,17 @@ def upgrade() -> None:
     # --------------------------------------------------------------------------
     # 7. ADD UNIQUE INDEX on entity_external_ids
     # --------------------------------------------------------------------------
+    # Deduplicate before enforcing stricter uniqueness: the old constraint
+    # allowed (ws, entity_a, src, ext) + (ws, entity_b, src, ext).  Keep the
+    # oldest row per (workspace_id, source_type, external_id).
+    op.execute(
+        "DELETE FROM entity_external_ids a "
+        "USING entity_external_ids b "
+        "WHERE a.workspace_id = b.workspace_id "
+        "AND a.source_type = b.source_type "
+        "AND a.external_id = b.external_id "
+        "AND a.created_at > b.created_at"
+    )
     op.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_ext_ids_ws_src_ext "
         "ON entity_external_ids(workspace_id, source_type, external_id)"

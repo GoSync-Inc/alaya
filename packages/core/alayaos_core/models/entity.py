@@ -56,6 +56,12 @@ class EntityExternalId(Base):
             "external_id",
             name="uq_entity_ext_id",
         ),
+        UniqueConstraint(
+            "workspace_id",
+            "source_type",
+            "external_id",
+            name="idx_ext_ids_ws_src_ext",
+        ),
         ForeignKeyConstraint(
             ["workspace_id", "entity_id"],
             ["l1_entities.workspace_id", "l1_entities.id"],

@@ -708,3 +708,127 @@ class TestAPIKeyRepository:
         items, _, has_more = await repo.list(workspace_id=ws_id)
         assert len(items) == 2
         assert has_more is False
+
+
+# ─── ClaimRepository ─────────────────────────────────────────────────────────
+
+
+class TestClaimRepository:
+    def _make_claim(self, ws_id: uuid.UUID | None = None, entity_id: uuid.UUID | None = None):
+        from alayaos_core.models.claim import L2Claim
+
+        now = datetime.now(UTC)
+        claim = L2Claim(
+            id=uuid.uuid4(),
+            workspace_id=ws_id or uuid.uuid4(),
+            entity_id=entity_id or uuid.uuid4(),
+            predicate="status",
+            value={"v": "active"},
+            confidence=0.9,
+            status="active",
+            value_type="text",
+        )
+        claim.created_at = now
+        claim.updated_at = now
+        return claim
+
+    @pytest.mark.asyncio
+    async def test_create_claim(self) -> None:
+        from alayaos_core.repositories.claim import ClaimRepository
+
+        ws_id = uuid.uuid4()
+        entity_id = uuid.uuid4()
+        session = make_session()
+        session.execute.return_value = make_result(self._make_claim(ws_id, entity_id))
+        repo = ClaimRepository(session, ws_id)
+        claim = await repo.create(
+            workspace_id=ws_id,
+            entity_id=entity_id,
+            predicate="status",
+            value={"v": "active"},
+        )
+        session.add.assert_called_once()
+        session.flush.assert_called_once()
+        assert claim.predicate == "status"
+        assert claim.workspace_id == ws_id
+
+    @pytest.mark.asyncio
+    async def test_get_by_id(self) -> None:
+        from alayaos_core.repositories.claim import ClaimRepository
+
+        ws_id = uuid.uuid4()
+        claim = self._make_claim(ws_id)
+        session = make_session()
+        session.execute.return_value = make_result(claim)
+        repo = ClaimRepository(session, ws_id)
+        result = await repo.get_by_id(claim.id)
+        assert result is claim
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_missing_returns_none(self) -> None:
+        from alayaos_core.repositories.claim import ClaimRepository
+
+        session = make_session()
+        session.execute.return_value = make_result(None)
+        repo = ClaimRepository(session)
+        result = await repo.get_by_id(uuid.uuid4())
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_list_with_filters(self) -> None:
+        from alayaos_core.repositories.claim import ClaimRepository
+
+        ws_id = uuid.uuid4()
+        entity_id = uuid.uuid4()
+        now = datetime.now(UTC)
+        claims = [self._make_claim(ws_id, entity_id) for _ in range(2)]
+        for c in claims:
+            c.created_at = now
+        session = make_session()
+        session.execute.return_value = make_scalar_result(claims)
+        repo = ClaimRepository(session, ws_id)
+        items, cursor, has_more = await repo.list(entity_id=entity_id, predicate="status", status="active")
+        assert len(items) == 2
+        assert has_more is False
+
+    @pytest.mark.asyncio
+    async def test_get_active_for_entity_predicate(self) -> None:
+        from alayaos_core.repositories.claim import ClaimRepository
+
+        ws_id = uuid.uuid4()
+        entity_id = uuid.uuid4()
+        claims = [self._make_claim(ws_id, entity_id)]
+        session = make_session()
+        session.execute.return_value = make_scalar_result(claims)
+        repo = ClaimRepository(session, ws_id)
+        result = await repo.get_active_for_entity_predicate(entity_id, "status")
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_update_status(self) -> None:
+        from alayaos_core.repositories.claim import ClaimRepository
+
+        ws_id = uuid.uuid4()
+        claim = self._make_claim(ws_id)
+        session = make_session()
+        session.execute.return_value = make_result(claim)
+        repo = ClaimRepository(session, ws_id)
+        result = await repo.update_status(claim.id, "retracted")
+        assert result is not None
+        assert result.status == "retracted"
+
+    @pytest.mark.asyncio
+    async def test_mark_superseded(self) -> None:
+        from alayaos_core.repositories.claim import ClaimRepository
+
+        ws_id = uuid.uuid4()
+        claim = self._make_claim(ws_id)
+        superseded_by_id = uuid.uuid4()
+        valid_to = datetime.now(UTC)
+        session = make_session()
+        session.execute.return_value = make_result(claim)
+        repo = ClaimRepository(session, ws_id)
+        result = await repo.mark_superseded(claim.id, superseded_by_id, valid_to)
+        assert result is not None
+        assert result.status == "superseded"
+        assert result.valid_to == valid_to

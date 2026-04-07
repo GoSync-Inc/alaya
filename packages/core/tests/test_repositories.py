@@ -832,3 +832,83 @@ class TestClaimRepository:
         assert result is not None
         assert result.status == "superseded"
         assert result.valid_to == valid_to
+
+
+# ─── RelationRepository ───────────────────────────────────────────────────────
+
+
+class TestRelationRepository:
+    def _make_relation(self, ws_id: uuid.UUID | None = None):
+        from alayaos_core.models.relation import L1Relation
+
+        now = datetime.now(UTC)
+        rel = L1Relation(
+            id=uuid.uuid4(),
+            workspace_id=ws_id or uuid.uuid4(),
+            source_entity_id=uuid.uuid4(),
+            target_entity_id=uuid.uuid4(),
+            relation_type="member_of",
+            confidence=0.95,
+        )
+        rel.created_at = now
+        rel.updated_at = now
+        return rel
+
+    @pytest.mark.asyncio
+    async def test_create_relation(self) -> None:
+        from alayaos_core.repositories.relation import RelationRepository
+
+        ws_id = uuid.uuid4()
+        source_id = uuid.uuid4()
+        target_id = uuid.uuid4()
+        session = make_session()
+        relation = self._make_relation(ws_id)
+        session.execute.return_value = make_result(relation)
+        repo = RelationRepository(session, ws_id)
+        result = await repo.create(
+            workspace_id=ws_id,
+            source_entity_id=source_id,
+            target_entity_id=target_id,
+            relation_type="member_of",
+            confidence=0.95,
+        )
+        session.add.assert_called_once()
+        session.flush.assert_called_once()
+        assert result.relation_type == "member_of"
+
+    @pytest.mark.asyncio
+    async def test_list_with_entity_filter(self) -> None:
+        from alayaos_core.repositories.relation import RelationRepository
+
+        ws_id = uuid.uuid4()
+        now = datetime.now(UTC)
+        rels = [self._make_relation(ws_id) for _ in range(2)]
+        for r in rels:
+            r.created_at = now
+        session = make_session()
+        session.execute.return_value = make_scalar_result(rels)
+        repo = RelationRepository(session, ws_id)
+        entity_id = uuid.uuid4()
+        items, cursor, has_more = await repo.list(entity_id=entity_id)
+        assert len(items) == 2
+        assert has_more is False
+
+    @pytest.mark.asyncio
+    async def test_create_batch(self) -> None:
+        from alayaos_core.repositories.relation import RelationRepository
+
+        ws_id = uuid.uuid4()
+        session = make_session()
+        rels_data = [
+            {
+                "source_entity_id": uuid.uuid4(),
+                "target_entity_id": uuid.uuid4(),
+                "relation_type": "reports_to",
+                "confidence": 1.0,
+            }
+        ]
+        repo = RelationRepository(session, ws_id)
+        results = await repo.create_batch(ws_id, rels_data)
+        assert len(results) == 1
+        session.add.assert_called()
+        session.flush.assert_called_once()

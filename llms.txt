@@ -1,53 +1,100 @@
 # Alaya
 
-> Open-source corporate memory platform (Python, BSL 1.1) — extracts structured knowledge from work tools and serves it to AI agents via CLI, MCP, and REST API. Pre-implementation stage: documentation and CI scaffolding only, zero source code.
+> Open-source corporate memory platform (Python 3.13, BSL 1.1) — ingests data from work tools, extracts structured entities and temporal claims via LLM, and serves them to any AI agent through CLI, MCP, and REST API.
 
-## Overview
+## What Alaya Is
 
-- [README](./README.md): Project vision, architecture diagram, stack summary (39 LOC)
-- [CLAUDE.md](./CLAUDE.md): AI assistant instructions — stack, architecture rules, code conventions, security policy (81 LOC)
-- [CHANGELOG](./CHANGELOG.md): Version history, Keep a Changelog format (14 LOC)
-- [CONTRIBUTING](./CONTRIBUTING.md): Contributor guide with dev setup, code style, PR workflow (52 LOC)
-- [SECURITY](./SECURITY.md): Vulnerability reporting policy, planned security features (24 LOC)
-- [LICENSE](./LICENSE): BSL 1.1 — converts to Apache 2.0 on 2029-04-07 (72 LOC)
+Alaya builds a queryable corporate knowledge graph from unstructured work data. It processes events (messages, documents, tickets) through a 3-job LLM extraction pipeline to produce structured entities (people, projects, teams) and claims (title, deadline, status) with full provenance. AI agents query the graph via REST API or MCP.
 
-## Project Status
+## Architecture
 
-No source code exists yet. The `packages/` directory referenced in CLAUDE.md and README.md has not been created. No `pyproject.toml`, `uv.lock`, or `docker-compose.yml` exists. All stack references (Python 3.13, FastAPI, SQLAlchemy 2.0, Pydantic, PostgreSQL + pgvector, Redis, TaskIQ, Anthropic SDK, Typer + Rich) are planned, not verified via imports.
+### 3-Job Extraction Pipeline
 
-## Planned Architecture (from CLAUDE.md)
+```
+Event → Job 1 (Extract) → Job 2 (Write) → Job 3 (Enrich)
+```
 
-Five packages planned under `packages/`:
-- **core/** — Domain models, LLM extraction, consolidation, search, ontology. Zero framework dependencies.
-- **connectors/** — Source connectors (Slack, GitHub, Linear, webhook). Implements interfaces from core.
-- **cli/** — CLI tool (planned: Typer + Rich). Depends on core.
-- **api/** — REST API (planned: FastAPI) + MCP Server. Depends on core.
-- **web/** — Web UI (future).
+- **Job 1 — Extract:** Preprocesses and chunks raw event text, runs LLM extraction, stores `ExtractionResult` (entities + claims + relations).
+- **Job 2 — Write:** Resolves entities against existing graph (exact → fuzzy → LLM disambiguation), atomically writes entities/claims/relations with `extraction_run_id` provenance.
+- **Job 3 — Enrich:** Embedding stub (vector generation deferred to Run 3).
 
-Data flow: Sources -> L0 Events -> Extraction -> L1 Entities + L2 Claims -> L3 Knowledge Tree -> CLI/MCP/API
+Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`). All task parameters are string IDs — raw text never passed via job queue.
 
-## CI/CD
+### Packages
 
-- [CI Pipeline](./.github/workflows/ci.yml): Lint (ruff), typecheck (pyright), test (pytest) — Python 3.13 via uv (50 LOC)
-- [CodeQL](./.github/workflows/codeql.yml): Static analysis for Python, weekly schedule + push/PR (23 LOC)
-- [Auto Label](./.github/workflows/auto-label.yml): Labels PRs by changed file paths (17 LOC)
-- [Release Drafter](./.github/workflows/release-drafter.yml): Generates draft release notes from merged PRs (19 LOC)
-- [Dependabot](./.github/dependabot.yml): Weekly updates for pip and github-actions ecosystems (15 LOC)
+- **`packages/core/`** — Domain logic: models, schemas, repositories, extraction pipeline, LLM adapters, worker tasks. Zero framework dependencies.
+- **`packages/api/`** — FastAPI REST API + MCP server. Depends on core.
+- **`packages/cli/`** — CLI (Run 4, placeholder).
+- **`packages/connectors/`** — Source connectors (Run 5, placeholder).
 
-## Configuration
+### Security Layers
 
-- [Labeler Rules](./.github/labeler.yml): Maps file paths to PR labels — core, api, cli, connectors, web, docs, ci, docker, tests (40 LOC)
-- [Release Drafter Config](./.github/release-drafter.yml): Version resolver and changelog template (34 LOC)
-- [Gitignore](./.gitignore): Python, IDE, env, Docker, Claude Code artifacts (45 LOC)
+1. **Input sanitizer** (`extraction/sanitizer.py`) — NFKC normalization, zero-width stripping, HTML comment removal, injection pattern detection (log + pass through).
+2. **Prompt boundary** — System prompt uses `<instructions>`, `<ontology>`, `<data>` XML tags to isolate instructions from data.
+3. **Pydantic validators** — All LLM output validated before persistence: script tag rejection, control char stripping, confidence bounds [0, 1], length limits.
+4. **Job arg safety** — TaskIQ tasks accept only string IDs (`event_id`, `extraction_run_id`, `workspace_id`).
 
-## Templates
+## API Endpoints (30 total)
 
-- [PR Template](./.github/pull_request_template.md): Checklist for linting, tests, conventional commits (11 LOC)
-- [Bug Report](./.github/ISSUE_TEMPLATE/bug_report.yml): Structured bug report form (38 LOC)
-- [Feature Request](./.github/ISSUE_TEMPLATE/feature_request.yml): Feature suggestion form (21 LOC)
+```
+GET  /health/live
+GET  /health/ready
+POST /workspaces          — bootstrap key required
+GET  /workspaces
+GET  /workspaces/{id}
+PATCH /workspaces/{id}
+POST /ingest              — trigger extraction pipeline
+POST /entities
+GET  /entities
+GET  /entities/{id}
+PATCH /entities/{id}
+DELETE /entities/{id}     — soft delete
+GET  /entity-types
+POST /entity-types
+GET  /entity-types/{id}
+GET  /predicates
+GET  /predicates/{id}
+POST /events              — idempotent upsert
+GET  /events
+GET  /events/{id}
+GET  /claims
+GET  /claims/{id}
+GET  /claims (by entity)
+GET  /relations
+GET  /relations/{id}
+GET  /extraction-runs
+GET  /extraction-runs/{id}
+POST /api-keys            — raw key shown once
+GET  /api-keys            — prefix only
+DELETE /api-keys/{prefix} — revoke
+```
 
-## Optional
+## Data Model
 
-- [Docs](./docs/): Extended documentation directory (planning docs are gitignored via `docs/superflow/`)
+19 tables across 3 layers:
 
-<!-- updated-by-superflow:2026-04-07 -->
+- **L0 Events** — Raw ingested events with source metadata.
+- **L1 Entities** — Resolved named entities (person, project, team, etc.). 10 seeded entity types, 20 seeded predicates per workspace.
+- **L2 Claims + Relations** — Structured facts with confidence scores and `extraction_run_id` provenance.
+- **Extraction Runs** — Tracks each pipeline execution: status, token usage, cost, timestamps.
+
+Tenant isolation via PostgreSQL RLS (`SET LOCAL app.workspace_id`). Composite FK `(workspace_id, id)` prevents cross-workspace references.
+
+## LLM Integration
+
+- **Model-agnostic** via `LLMServiceInterface`. Anthropic Claude is primary; OpenAI/Ollama/vllm planned.
+- Config: `EXTRACTION_LLM_PROVIDER=anthropic|openai|ollama|vllm`
+- Structured output extraction using provider-native tool-call / JSON mode.
+- `FakeLLMAdapter` for deterministic testing.
+
+## Stack
+
+Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · Redis · TaskIQ · Anthropic SDK · Typer + Rich
+
+## Source
+
+- [README](./README.md)
+- [CLAUDE.md](./CLAUDE.md): Development guide, architecture rules, security policy
+- [CHANGELOG](./CHANGELOG.md)
+
+<!-- updated-by-superflow:run2 -->

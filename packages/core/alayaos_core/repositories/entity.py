@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -97,6 +100,26 @@ class EntityRepository(BaseRepository):
         self.session.add(ext)
         await self.session.flush()
         return ext
+
+    async def list_recent(
+        self,
+        workspace_id: uuid.UUID,
+        hours: int = 48,
+        limit: int = 500,
+    ) -> list[L1Entity]:
+        """List entities updated within the last N hours."""
+        cutoff = datetime.now(UTC) - timedelta(hours=hours)
+        stmt = (
+            select(L1Entity)
+            .where(L1Entity.workspace_id == workspace_id)
+            .where(L1Entity.updated_at >= cutoff)
+            .where(self._ws_filter(L1Entity))
+            .options(selectinload(L1Entity.external_ids))
+            .order_by(L1Entity.updated_at.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def get_by_external_id(
         self,

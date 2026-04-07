@@ -8,8 +8,7 @@ IMAGE_TAG="${1:?Usage: deploy.sh <image_tag>}"
 IMAGE="ghcr.io/gosync-inc/alaya:${IMAGE_TAG}"
 CONTAINER_BLUE="alaya-blue"
 CONTAINER_GREEN="alaya-green"
-HEALTH_URL="http://localhost:8000/health/ready"
-CADDY_UPSTREAM_FILE="/etc/caddy/upstream"
+CADDY_CONFIG="/etc/caddy/Caddyfile"
 
 echo "=== Deploying ${IMAGE} ==="
 
@@ -42,7 +41,11 @@ docker run -d \
     "${IMAGE}"
 
 # Run migrations
-docker exec "${STANDBY}" uv run alembic upgrade head
+if ! docker exec "${STANDBY}" uv run alembic upgrade head; then
+    echo "ERROR: Migration failed. Removing standby container."
+    docker rm -f "${STANDBY}"
+    exit 1
+fi
 
 # Health check (up to 30 seconds)
 echo "Waiting for health check..."
@@ -59,9 +62,9 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-# Swap Caddy upstream
-echo "localhost:${STANDBY_PORT}" > "${CADDY_UPSTREAM_FILE}"
-caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || systemctl reload caddy
+# Swap Caddy upstream — rewrite reverse_proxy target in Caddyfile
+sed -i "s|reverse_proxy localhost:[0-9]*|reverse_proxy localhost:${STANDBY_PORT}|" "${CADDY_CONFIG}"
+caddy reload --config "${CADDY_CONFIG}" 2>/dev/null || systemctl reload caddy
 
 # Stop old container
 docker rm -f "${ACTIVE}" 2>/dev/null || true

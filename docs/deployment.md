@@ -33,9 +33,18 @@ On deploy:
    ALAYA_REDIS_URL=redis://redis:6379/0
    ALAYA_ENV=production
    ```
-4. Copy `docker/deploy.sh` to `/opt/alaya/deploy.sh`
-5. Create `/etc/caddy/upstream` with initial value: `localhost:8000`
-6. Configure Caddy to proxy to the upstream file
+4. Copy `docker/deploy.sh` to `/opt/alaya/deploy.sh` and make it executable:
+   ```bash
+   cp docker/deploy.sh /opt/alaya/deploy.sh
+   chmod +x /opt/alaya/deploy.sh
+   ```
+5. Set up the production Caddyfile:
+   ```bash
+   cp docker/Caddyfile.prod /etc/caddy/Caddyfile
+   # Edit /etc/caddy/Caddyfile — replace YOUR_DOMAIN with your actual domain
+   caddy start --config /etc/caddy/Caddyfile
+   ```
+   The deploy script uses `sed` to swap `reverse_proxy localhost:PORT` in the Caddyfile on each deploy, then reloads Caddy.
 
 ### GitHub Secrets
 

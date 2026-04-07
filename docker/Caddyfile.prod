@@ -1,0 +1,15 @@
+# Production Caddyfile for Alaya blue-green deployment.
+# deploy.sh rewrites the reverse_proxy target and reloads Caddy.
+#
+# Initial setup:
+#   cp docker/Caddyfile.prod /etc/caddy/Caddyfile
+#   Replace YOUR_DOMAIN with the actual domain
+#   caddy start --config /etc/caddy/Caddyfile
+
+YOUR_DOMAIN {
+	reverse_proxy localhost:8000
+
+	log {
+		output file /var/log/caddy/access.log
+	}
+}

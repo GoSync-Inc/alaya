@@ -20,13 +20,16 @@ packages/
 │       ├── schemas/                # Pydantic schemas (7 files)
 │       ├── repositories/           # Async repos with cursor pagination (7 files)
 │       ├── services/               # workspace (seed), api_key (generate/verify)
+│       ├── extraction/             # Sanitizer, extractor, pipeline, resolver, writer
+│       ├── llm/                    # LLMServiceInterface + Anthropic/Fake adapters
+│       ├── worker/                 # TaskIQ broker + 3-job pipeline tasks
 │       └── config.py               # pydantic-settings (DATABASE_URL, REDIS_URL, ENV)
 ├── api/                            # REST API (FastAPI)
 │   └── alayaos_api/
 │       ├── main.py                 # App factory + lifespan
 │       ├── deps.py                 # Auth, session, scope dependencies
 │       ├── middleware.py           # Error envelope, request ID
-│       └── routers/                # 7 routers: health, workspaces, entities, etc.
+│       └── routers/                # 12 routers: health, workspaces, entities, claims, etc.
 ├── cli/                            # Placeholder (Run 4)
 └── connectors/                     # Placeholder (Run 5)
 alembic/                            # Migrations (001: 18 tables + RLS, 002: auth bypass)
@@ -48,6 +51,7 @@ docker compose up -d             # Start all services
 docker compose up postgres redis # Start only DB + cache
 just check                       # Lint + format + typecheck + tests
 just smoke                       # Docker smoke test
+taskiq worker alayaos_core.worker.tasks:broker  # Start extraction worker
 ```
 
 ## Verification
@@ -72,6 +76,7 @@ Run before every commit:
 7. **Composite FK** — `(workspace_id, id)` on parent tables prevents cross-workspace references.
 8. **No `session.commit()` in repositories** — commit at service/endpoint level only.
 9. **Cursor-based pagination only** — no offset/page. Limit clamped to max 200.
+10. **LLM output = untrusted user input.** All LLM responses pass through Pydantic schema validation before persistence. Never trust raw LLM text.
 
 ## Code Conventions
 
@@ -84,11 +89,12 @@ Run before every commit:
 
 ## Data Model
 
-18 tables: 7 full (workspace, event, entity, entity_type, predicate, entity_external_id, api_key) + 11 stubs.
+19 tables: 7 full (workspace, event, entity, entity_type, predicate, entity_external_id, api_key) + 11 stubs + extraction_run.
 Core predicates: 20 seeded per workspace (deadline, status, owner, role, title, member_of, reports_to, etc.)
 Core entity types: 10 seeded per workspace (person, project, team, document, decision, meeting, etc.)
+Claims and relations carry `extraction_run_id` for full provenance tracing.
 
-## API Endpoints (22 total)
+## API Endpoints (30 total)
 
 Health: `/health/live`, `/health/ready`
 Workspaces: POST, GET, GET/{id}, PATCH/{id} — bootstrap key required for create
@@ -97,6 +103,10 @@ Entity Types: GET, POST, GET/{id}
 Predicates: GET, GET/{id} — read-only in Run 1
 Events: POST (idempotent upsert), GET, GET/{id}
 API Keys: POST (raw key once), GET (prefix only), DELETE/{prefix} (revoke)
+Claims: GET, GET/{id}, GET (by entity)
+Relations: GET, GET/{id}
+Extraction Runs: GET, GET/{id}
+Ingestion: POST `/ingest` — trigger extraction pipeline
 
 ## Security (CRITICAL)
 
@@ -114,4 +124,4 @@ Model-agnostic: `LLMServiceInterface` with provider adapters.
 Config: `EXTRACTION_LLM_PROVIDER=anthropic|openai|ollama|vllm`
 Provider-specific features preserved — no lowest common denominator.
 
-<!-- updated-by-superflow:2026-04-07 -->
+<!-- updated-by-superflow:run2 -->

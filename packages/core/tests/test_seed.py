@@ -84,6 +84,7 @@ class TestSeedFunction:
             patch(f"{_MODULE}.create_workspace") as mock_create_ws,
             patch(f"{_MODULE}.create_api_key") as mock_create_key,
             patch(f"{_MODULE}.Settings") as mock_settings_cls,
+            patch(f"{_MODULE}.seed_core_metadata", new_callable=AsyncMock),
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.get_by_slug = AsyncMock(return_value=ws)
@@ -163,6 +164,7 @@ class TestSeedFunction:
             patch(f"{_MODULE}.create_workspace"),
             patch(f"{_MODULE}.create_api_key") as mock_create_key,
             patch(f"{_MODULE}.Settings") as mock_settings_cls,
+            patch(f"{_MODULE}.seed_core_metadata", new_callable=AsyncMock),
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.get_by_slug = AsyncMock(return_value=ws)
@@ -194,6 +196,7 @@ class TestSeedFunction:
             patch(f"{_MODULE}.create_workspace"),
             patch(f"{_MODULE}.create_api_key") as mock_create_key,
             patch(f"{_MODULE}.Settings") as mock_settings_cls,
+            patch(f"{_MODULE}.seed_core_metadata", new_callable=AsyncMock),
         ):
             ws_repo_inst = AsyncMock()
             ws_repo_inst.get_by_slug = AsyncMock(return_value=ws)

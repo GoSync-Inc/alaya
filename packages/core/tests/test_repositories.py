@@ -912,3 +912,109 @@ class TestRelationRepository:
         assert len(results) == 1
         session.add.assert_called()
         session.flush.assert_called_once()
+
+
+# ─── ExtractionRunRepository ──────────────────────────────────────────────────
+
+
+class TestExtractionRunRepository:
+    def _make_run(self, ws_id: uuid.UUID | None = None):
+        from alayaos_core.models.extraction_run import ExtractionRun
+
+        now = datetime.now(UTC)
+        run = ExtractionRun(
+            id=uuid.uuid4(),
+            workspace_id=ws_id or uuid.uuid4(),
+            event_id=uuid.uuid4(),
+            status="pending",
+            tokens_in=0,
+            tokens_out=0,
+            cost_usd=0,
+            entities_created=0,
+            entities_merged=0,
+            relations_created=0,
+            claims_created=0,
+            claims_superseded=0,
+            resolver_decisions=[],
+            error_detail={},
+            retry_count=0,
+        )
+        run.created_at = now
+        run.updated_at = now
+        return run
+
+    @pytest.mark.asyncio
+    async def test_create(self) -> None:
+        from alayaos_core.repositories.extraction_run import ExtractionRunRepository
+
+        ws_id = uuid.uuid4()
+        session = make_session()
+        run = self._make_run(ws_id)
+        session.execute.return_value = make_result(run)
+        repo = ExtractionRunRepository(session, ws_id)
+        result = await repo.create(workspace_id=ws_id, event_id=run.event_id)
+        session.add.assert_called_once()
+        session.flush.assert_called_once()
+        assert result.workspace_id == ws_id
+
+    @pytest.mark.asyncio
+    async def test_update_status(self) -> None:
+        from alayaos_core.repositories.extraction_run import ExtractionRunRepository
+
+        ws_id = uuid.uuid4()
+        run = self._make_run(ws_id)
+        session = make_session()
+        session.execute.return_value = make_result(run)
+        repo = ExtractionRunRepository(session, ws_id)
+        result = await repo.update_status(run.id, "completed")
+        assert result is not None
+        assert result.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_update_counters(self) -> None:
+        from alayaos_core.repositories.extraction_run import ExtractionRunRepository
+
+        ws_id = uuid.uuid4()
+        run = self._make_run(ws_id)
+        session = make_session()
+        session.execute.return_value = make_result(run)
+        repo = ExtractionRunRepository(session, ws_id)
+        result = await repo.update_counters(
+            run.id,
+            entities_created=3,
+            entities_merged=1,
+            relations_created=2,
+            claims_created=5,
+            claims_superseded=0,
+        )
+        assert result is not None
+        assert result.entities_created == 3
+        assert result.claims_created == 5
+
+    @pytest.mark.asyncio
+    async def test_store_raw_extraction(self) -> None:
+        from alayaos_core.repositories.extraction_run import ExtractionRunRepository
+
+        ws_id = uuid.uuid4()
+        run = self._make_run(ws_id)
+        session = make_session()
+        session.execute.return_value = make_result(run)
+        repo = ExtractionRunRepository(session, ws_id)
+        raw = {"entities": [], "claims": []}
+        result = await repo.store_raw_extraction(run.id, raw)
+        assert result is not None
+        assert result.raw_extraction == raw
+
+    @pytest.mark.asyncio
+    async def test_clear_raw_extraction(self) -> None:
+        from alayaos_core.repositories.extraction_run import ExtractionRunRepository
+
+        ws_id = uuid.uuid4()
+        run = self._make_run(ws_id)
+        run.raw_extraction = {"entities": []}
+        session = make_session()
+        session.execute.return_value = make_result(run)
+        repo = ExtractionRunRepository(session, ws_id)
+        result = await repo.clear_raw_extraction(run.id)
+        assert result is not None
+        assert result.raw_extraction is None

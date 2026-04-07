@@ -3,13 +3,15 @@
 import pytest
 from sqlalchemy import text
 
+TEST_WID = "00000000-0000-0000-0000-000000000001"
+
 
 @pytest.mark.integration
 async def test_set_local_does_not_persist_across_transactions(engine):
     """SET LOCAL must not persist across transactions on same pooled connection."""
     async with engine.connect() as conn:
         async with conn.begin():
-            await conn.execute(text("SET LOCAL app.workspace_id = '00000000-0000-0000-0000-000000000001'"))
+            await conn.execute(text(f"SET LOCAL app.workspace_id = '{TEST_WID}'"))
         # Transaction ended, SET LOCAL should be gone
 
         async with conn.begin():
@@ -24,10 +26,7 @@ async def test_set_local_clears_after_rollback(engine):
     async with engine.connect() as conn:
         try:
             async with conn.begin():
-                await conn.execute(
-                    text("SET LOCAL app.workspace_id = :wid"),
-                    {"wid": "00000000-0000-0000-0000-000000000001"},
-                )
+                await conn.execute(text(f"SET LOCAL app.workspace_id = '{TEST_WID}'"))
                 raise RuntimeError("deliberate rollback")
         except RuntimeError:
             pass

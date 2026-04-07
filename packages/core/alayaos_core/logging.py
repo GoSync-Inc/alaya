@@ -6,7 +6,7 @@ import sys
 import structlog
 
 
-def setup_logging(json_output: bool = True, log_level: str = "INFO") -> None:
+def setup_logging(json_output: bool = True, log_level: str = "INFO", db_echo: bool = False) -> None:
     """Configure structlog + stdlib logging.
 
     Args:
@@ -36,6 +36,7 @@ def setup_logging(json_output: bool = True, log_level: str = "INFO") -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(
         structlog.stdlib.ProcessorFormatter(
+            foreign_pre_chain=shared_processors,
             processors=[
                 structlog.stdlib.ProcessorFormatter.remove_processors_meta,
                 renderer,
@@ -48,6 +49,7 @@ def setup_logging(json_output: bool = True, log_level: str = "INFO") -> None:
     root_logger.addHandler(handler)
     root_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
 
-    # Quiet noisy libraries
+    # Quiet noisy libraries (but respect DB_ECHO)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    if not db_echo:
+        logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)

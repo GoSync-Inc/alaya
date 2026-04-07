@@ -227,13 +227,163 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
         await session.flush()
 
     # Enqueue job_crystallize per crystal chunk (outside the session)
-    # This will be implemented in Sprint 3 — for now just log
+    crystal_chunk_ids = []
+    async with factory() as session, session.begin():
+        await _set_workspace_context(session, workspace_id)
+        from alayaos_core.repositories.chunk import ChunkRepository
+
+        chunk_repo = ChunkRepository(session, uuid.UUID(workspace_id))
+        crystal_chunks = await chunk_repo.list_crystal(uuid.UUID(event_id))
+        crystal_chunk_ids = [str(c.id) for c in crystal_chunks]
+
+    for chunk_id in crystal_chunk_ids:
+        await job_crystallize.kiq(chunk_id, extraction_run_id, workspace_id)
+
     return {
         "event_id": event_id,
         "extraction_run_id": extraction_run_id,
         "chunks_total": len(raw_chunks),
         "chunks_crystal": chunks_crystal,
         "status": "cortex_complete",
+    }
+
+
+@broker.task(timeout=120, retry_on_error=True, max_retries=3)
+async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: str) -> dict:
+    """Crystallizer stage: extract from crystal chunk → verify → update chunk stage → trace → enqueue job_write."""
+    from alayaos_core.extraction.crystallizer.extractor import CrystallizerExtractor, apply_confidence_tiers
+    from alayaos_core.extraction.crystallizer.verifier import CrystallizerVerifier
+    from alayaos_core.llm.fake import FakeLLMAdapter
+    from alayaos_core.repositories.chunk import ChunkRepository
+    from alayaos_core.repositories.extraction_run import ExtractionRunRepository
+    from alayaos_core.repositories.pipeline_trace import PipelineTraceRepository
+    from alayaos_core.services.entity_cache import EntityCacheService
+    from alayaos_core.services.workspace import CORE_ENTITY_TYPES, CORE_PREDICATES
+
+    settings = Settings()
+
+    # Use real LLM adapter if key is available
+    if settings.ANTHROPIC_API_KEY.get_secret_value():
+        from alayaos_core.llm.anthropic import AnthropicAdapter
+
+        llm = AnthropicAdapter(settings.ANTHROPIC_API_KEY.get_secret_value(), settings.CRYSTALLIZER_MODEL)
+    else:
+        llm = FakeLLMAdapter()
+
+    # EntityCacheService with redis=None: graceful in-memory fallback for unit tests
+    entity_cache = EntityCacheService(redis=None)
+
+    extractor = CrystallizerExtractor(llm=llm, entity_cache=entity_cache)
+    verifier = CrystallizerVerifier(llm=llm)
+
+    factory = _session_factory()
+    async with factory() as session, session.begin():
+        await _set_workspace_context(session, workspace_id)
+
+        chunk_repo = ChunkRepository(session, uuid.UUID(workspace_id))
+        run_repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
+        trace_repo = PipelineTraceRepository(session, uuid.UUID(workspace_id))
+
+        chunk = await chunk_repo.get_by_id(uuid.UUID(chunk_id))
+        if chunk is None:
+            return {"status": "skipped", "reason": "chunk not found"}
+
+        # Idempotency: skip if not in 'classified' stage
+        if chunk.processing_stage != "classified":
+            return {"status": "skipped", "reason": f"stage={chunk.processing_stage}"}
+
+        run = await run_repo.get_by_id(uuid.UUID(extraction_run_id))
+        if run is None:
+            return {"status": "skipped", "reason": "run not found"}
+
+        # Update chunk to 'extracting'
+        await chunk_repo.update_processing_stage(chunk.id, "extracting")
+
+        # Extract
+        entity_types = [dict(et) for et in CORE_ENTITY_TYPES]
+        predicates = [dict(p) for p in CORE_PREDICATES]
+        extraction_result, usage_extract = await extractor.extract(
+            chunk=chunk,
+            entity_types=entity_types,
+            predicates=predicates,
+            workspace_id=uuid.UUID(workspace_id),
+        )
+
+        # Build system prompt for verifier (same prompt for cache hit)
+        system_prompt = extractor._build_prompt(entity_types, predicates, [], chunk)
+
+        # Verify
+        verified_result, verification_changed, usage_verify = await verifier.verify(
+            chunk_text=chunk.text,
+            system_prompt=system_prompt,
+            initial_result=extraction_result,
+        )
+
+        # Apply confidence tiers
+        final_result = apply_confidence_tiers(
+            verified_result,
+            high=settings.CRYSTALLIZER_CONFIDENCE_HIGH,
+            low=settings.CRYSTALLIZER_CONFIDENCE_LOW,
+        )
+
+        # Merge chunk result into extraction_run.raw_extraction
+        # Append: existing list of chunk results or initialize
+        existing = run.raw_extraction or {"chunks": []}
+        if "chunks" not in existing:
+            existing = {"chunks": []}
+        existing["chunks"].append(
+            {
+                "chunk_id": chunk_id,
+                "result": final_result.model_dump(),
+                "verification_changed": verification_changed,
+            }
+        )
+        run.raw_extraction = existing
+
+        # Update chunk to 'extracted'
+        await chunk_repo.update_processing_stage(chunk.id, "extracted")
+
+        # Write pipeline trace
+        total_tokens = usage_extract.tokens_in + usage_extract.tokens_out + usage_verify.tokens_in + usage_verify.tokens_out
+        total_cost = usage_extract.cost_usd + usage_verify.cost_usd
+        await trace_repo.create(
+            workspace_id=uuid.UUID(workspace_id),
+            event_id=chunk.event_id,
+            stage="crystallizer",
+            decision="extracted",
+            reason=f"chunk_id={chunk_id}, verified={True}, changed={verification_changed}",
+            details={
+                "entities": len(final_result.entities),
+                "relations": len(final_result.relations),
+                "claims": len(final_result.claims),
+                "verification_changed": verification_changed,
+            },
+            tokens_used=total_tokens,
+            cost_usd=total_cost,
+            extraction_run_id=run.id,
+        )
+
+        # Update extraction_run.crystallizer_cost_usd
+        run.crystallizer_cost_usd = float(run.crystallizer_cost_usd or 0) + total_cost
+
+        await session.flush()
+
+        # Check if all chunks for this event are extracted — if so enqueue job_write
+        all_chunks = await chunk_repo.list_by_event(chunk.event_id)
+        crystal_chunks = [c for c in all_chunks if c.is_crystal]
+        all_extracted = all(c.processing_stage == "extracted" for c in crystal_chunks)
+
+    if all_extracted and crystal_chunks:
+        await job_write.kiq(extraction_run_id, workspace_id)
+
+    return {
+        "chunk_id": chunk_id,
+        "extraction_run_id": extraction_run_id,
+        "entities": len(final_result.entities),
+        "relations": len(final_result.relations),
+        "claims": len(final_result.claims),
+        "verification_changed": verification_changed,
+        "status": "extracted",
     }
 
 

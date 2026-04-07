@@ -61,9 +61,7 @@ services:
         condition: service_started
 
   worker:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    build: .
     command: ["taskiq", "worker", "alayaos_core.worker.tasks:broker"]
     environment:
       - ALAYA_DATABASE_URL=postgresql+asyncpg://alaya:alaya@postgres:5432/alaya

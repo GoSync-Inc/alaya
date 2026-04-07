@@ -68,7 +68,14 @@ async def write_claim(
 
     # Normalize value
     if claim.value_type == "entity_ref":
-        ref_id = entity_name_to_id.get(normalize_name(claim.value))
+        # entity_name_to_id uses original names as keys (from resolve_batch)
+        ref_id = entity_name_to_id.get(claim.value)
+        if not ref_id:
+            # Fallback: try case-insensitive lookup
+            for name, eid in entity_name_to_id.items():
+                if normalize_name(name) == normalize_name(claim.value):
+                    ref_id = eid
+                    break
         normalized_value = normalize_claim_value(
             claim.value, claim.value_type, resolved_entity_id=str(ref_id) if ref_id else None
         )

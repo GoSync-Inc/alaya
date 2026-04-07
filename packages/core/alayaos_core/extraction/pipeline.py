@@ -171,3 +171,5 @@ async def run_enrich(run_id: uuid.UUID, session: AsyncSession) -> None:
     await run_repo.update_status(run.id, "enriching")
     # Actual embedding deferred to Run 3
     log.info("enrich_stub_completed", run_id=str(run_id))
+    # Return to completed (enrich is a no-op stub for now)
+    await run_repo.update_status(run.id, "completed")

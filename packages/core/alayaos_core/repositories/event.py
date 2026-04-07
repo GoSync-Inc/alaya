@@ -72,7 +72,7 @@ class EventRepository(BaseRepository):
         return existing, False
 
     async def get_by_id(self, event_id: uuid.UUID) -> L0Event | None:
-        stmt = select(L0Event).where(L0Event.id == event_id)
+        stmt = select(L0Event).where(L0Event.id == event_id).where(self._ws_filter(L0Event))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -81,7 +81,7 @@ class EventRepository(BaseRepository):
         cursor: str | None = None,
         limit: int = 50,
     ) -> tuple[list[L0Event], str | None, bool]:
-        stmt = select(L0Event)
+        stmt = select(L0Event).where(self._ws_filter(L0Event))
         stmt = self.apply_cursor_pagination(stmt, cursor, limit, L0Event.created_at, L0Event.id)
         result = await self.session.execute(stmt)
         items = list(result.scalars().all())

@@ -32,7 +32,7 @@ class APIKeyRepository(BaseRepository):
         return api_key
 
     async def get_by_prefix(self, key_prefix: str) -> APIKey | None:
-        stmt = select(APIKey).where(APIKey.key_prefix == key_prefix)
+        stmt = select(APIKey).where(APIKey.key_prefix == key_prefix).where(self._ws_filter(APIKey))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -42,7 +42,7 @@ class APIKeyRepository(BaseRepository):
         cursor: str | None = None,
         limit: int = 50,
     ) -> tuple[list[APIKey], str | None, bool]:
-        stmt = select(APIKey).where(APIKey.workspace_id == workspace_id)
+        stmt = select(APIKey).where(APIKey.workspace_id == workspace_id).where(self._ws_filter(APIKey))
         stmt = self.apply_cursor_pagination(stmt, cursor, limit, APIKey.created_at, APIKey.id)
         result = await self.session.execute(stmt)
         items = list(result.scalars().all())
@@ -54,7 +54,11 @@ class APIKeyRepository(BaseRepository):
         return items, next_cursor, has_more
 
     async def revoke(self, key_prefix: str, workspace_id: uuid.UUID) -> APIKey | None:
-        stmt = select(APIKey).where(APIKey.key_prefix == key_prefix, APIKey.workspace_id == workspace_id)
+        stmt = (
+            select(APIKey)
+            .where(APIKey.key_prefix == key_prefix, APIKey.workspace_id == workspace_id)
+            .where(self._ws_filter(APIKey))
+        )
         result = await self.session.execute(stmt)
         api_key = result.scalar_one_or_none()
         if api_key is None:

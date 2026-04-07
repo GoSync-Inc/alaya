@@ -31,14 +31,22 @@ class EntityTypeRepository(BaseRepository):
         return et
 
     async def get_by_id(self, type_id: uuid.UUID) -> EntityTypeDefinition | None:
-        stmt = select(EntityTypeDefinition).where(EntityTypeDefinition.id == type_id)
+        stmt = (
+            select(EntityTypeDefinition)
+            .where(EntityTypeDefinition.id == type_id)
+            .where(self._ws_filter(EntityTypeDefinition))
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_by_slug(self, workspace_id: uuid.UUID, slug: str) -> EntityTypeDefinition | None:
-        stmt = select(EntityTypeDefinition).where(
-            EntityTypeDefinition.workspace_id == workspace_id,
-            EntityTypeDefinition.slug == slug,
+        stmt = (
+            select(EntityTypeDefinition)
+            .where(
+                EntityTypeDefinition.workspace_id == workspace_id,
+                EntityTypeDefinition.slug == slug,
+            )
+            .where(self._ws_filter(EntityTypeDefinition))
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -48,7 +56,7 @@ class EntityTypeRepository(BaseRepository):
         cursor: str | None = None,
         limit: int = 50,
     ) -> tuple[list[EntityTypeDefinition], str | None, bool]:
-        stmt = select(EntityTypeDefinition)
+        stmt = select(EntityTypeDefinition).where(self._ws_filter(EntityTypeDefinition))
         stmt = self.apply_cursor_pagination(
             stmt, cursor, limit, EntityTypeDefinition.created_at, EntityTypeDefinition.id
         )

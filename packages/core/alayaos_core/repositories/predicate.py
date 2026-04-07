@@ -8,14 +8,22 @@ from alayaos_core.repositories.base import BaseRepository
 
 class PredicateRepository(BaseRepository):
     async def get_by_id(self, predicate_id: uuid.UUID) -> PredicateDefinition | None:
-        stmt = select(PredicateDefinition).where(PredicateDefinition.id == predicate_id)
+        stmt = (
+            select(PredicateDefinition)
+            .where(PredicateDefinition.id == predicate_id)
+            .where(self._ws_filter(PredicateDefinition))
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_by_slug(self, workspace_id: uuid.UUID, slug: str) -> PredicateDefinition | None:
-        stmt = select(PredicateDefinition).where(
-            PredicateDefinition.workspace_id == workspace_id,
-            PredicateDefinition.slug == slug,
+        stmt = (
+            select(PredicateDefinition)
+            .where(
+                PredicateDefinition.workspace_id == workspace_id,
+                PredicateDefinition.slug == slug,
+            )
+            .where(self._ws_filter(PredicateDefinition))
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -25,7 +33,7 @@ class PredicateRepository(BaseRepository):
         cursor: str | None = None,
         limit: int = 50,
     ) -> tuple[list[PredicateDefinition], str | None, bool]:
-        stmt = select(PredicateDefinition)
+        stmt = select(PredicateDefinition).where(self._ws_filter(PredicateDefinition))
         stmt = self.apply_cursor_pagination(stmt, cursor, limit, PredicateDefinition.created_at, PredicateDefinition.id)
         result = await self.session.execute(stmt)
         items = list(result.scalars().all())

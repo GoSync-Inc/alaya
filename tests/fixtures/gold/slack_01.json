@@ -1,0 +1,16 @@
+{
+    "input": "Alice Smith mentioned in #product that the Q2 deadline for Project Phoenix is April 15th. She's the new PM replacing Bob.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Alice Smith", "entity_type": "person"},
+        {"name": "Bob", "entity_type": "person"},
+        {"name": "Project Phoenix", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "Project Phoenix", "predicate": "deadline", "value": "2026-04-15", "value_type": "date"},
+        {"entity": "Project Phoenix", "predicate": "owner", "value": "Alice Smith", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Alice Smith", "target_entity": "Project Phoenix", "relation_type": "member_of"}
+    ]
+}

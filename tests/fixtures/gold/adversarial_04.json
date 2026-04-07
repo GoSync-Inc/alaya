@@ -1,0 +1,15 @@
+{
+    "input": "Ａｌｉｃｅ（full-width chars）leads Ｐｒｏｊｅｃｔ Ｂｅｔａ. Deadline: Ａｐｒｉｌ ３０.",
+    "source_type": "manual",
+    "adversarial_type": "unicode_fullwidth",
+    "expected_behavior": "nfkc_normalization_applied",
+    "note": "NFKC normalization should convert full-width chars to ASCII equivalents",
+    "expected_entities": [
+        {"name": "Alice", "entity_type": "person"},
+        {"name": "Project Beta", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "Project Beta", "predicate": "deadline", "value": "2026-04-30", "value_type": "date"}
+    ],
+    "expected_relations": []
+}

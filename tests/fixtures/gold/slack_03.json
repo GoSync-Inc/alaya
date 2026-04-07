@@ -1,0 +1,19 @@
+{
+    "input": "#general\nCEO Sarah Chen announced that Alaya raised a $12M Series A led by Sequoia. The round also included participation from YC and angel investor Tom Nguyen. Closing expected by end of May.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Sarah Chen", "entity_type": "person"},
+        {"name": "Alaya", "entity_type": "project"},
+        {"name": "Sequoia", "entity_type": "team"},
+        {"name": "Tom Nguyen", "entity_type": "person"},
+        {"name": "YC", "entity_type": "team"}
+    ],
+    "expected_claims": [
+        {"entity": "Alaya", "predicate": "title", "value": "Series A", "value_type": "text"},
+        {"entity": "Sarah Chen", "predicate": "role", "value": "CEO", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Sarah Chen", "target_entity": "Alaya", "relation_type": "member_of"},
+        {"source_entity": "Sequoia", "target_entity": "Alaya", "relation_type": "member_of"}
+    ]
+}

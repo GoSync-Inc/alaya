@@ -1,0 +1,18 @@
+{
+    "input": "Alice\x07\x0c Smith (control chars in name) is PM of Project\x00 Delta. Deadline:\x1f April 20.",
+    "source_type": "manual",
+    "adversarial_type": "control_chars",
+    "expected_behavior": "control_chars_stripped_by_entity_validator",
+    "note": "Control characters should be stripped from entity names by the sanitize_name validator",
+    "expected_entities": [
+        {"name": "Alice Smith", "entity_type": "person"},
+        {"name": "Project Delta", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "Project Delta", "predicate": "deadline", "value": "2026-04-20", "value_type": "date"},
+        {"entity": "Project Delta", "predicate": "owner", "value": "Alice Smith", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Alice Smith", "target_entity": "Project Delta", "relation_type": "member_of"}
+    ]
+}

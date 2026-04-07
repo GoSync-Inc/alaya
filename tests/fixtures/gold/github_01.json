@@ -1,0 +1,18 @@
+{
+    "input": "Title: Fix memory leak in connector pool\nAuthor: Carlos Reyes\nAssignee: Yuki Tanaka\nLabels: bug, performance\nMilestone: v0.5.0\n\nBody:\nWe're seeing RSS grow by ~50MB/hour in production when the Slack connector is active. Heap profiling points to the connection pool not releasing closed sockets.\n\nReproduction: Start the connector, send 1000 messages, observe RSS growth.\n\nExpected: Memory stays stable after GC.\nActual: Memory grows unbounded.\n\nRelated to #247 (rate limiter refactor by Ana Lima).",
+    "source_type": "github",
+    "expected_entities": [
+        {"name": "Carlos Reyes", "entity_type": "person"},
+        {"name": "Yuki Tanaka", "entity_type": "person"},
+        {"name": "Ana Lima", "entity_type": "person"},
+        {"name": "connector pool", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "connector pool", "predicate": "status", "value": "bug", "value_type": "text"},
+        {"entity": "Yuki Tanaka", "predicate": "owner", "value": "connector pool", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Carlos Reyes", "target_entity": "connector pool", "relation_type": "member_of"},
+        {"source_entity": "Yuki Tanaka", "target_entity": "connector pool", "relation_type": "member_of"}
+    ]
+}

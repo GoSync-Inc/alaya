@@ -1,0 +1,24 @@
+{
+    "input": "1:1 James Park and Yuki Tanaka — April 3, 2026\n\nJames: How's the connector pool work going?\nYuki: I filed the bug. Carlos and I estimated 2 days. Should be done by April 10.\nJames: Great. After that, I want you on the LLM adapter work with Priya. That starts April 14.\nYuki: Sounds good. One concern: I'm traveling to Tokyo April 7-11 for the AWS Summit.\nJames: Got it. I'll note that in your OOO.",
+    "source_type": "meeting",
+    "expected_entities": [
+        {"name": "James Park", "entity_type": "person"},
+        {"name": "Yuki Tanaka", "entity_type": "person"},
+        {"name": "Carlos", "entity_type": "person"},
+        {"name": "Priya", "entity_type": "person"},
+        {"name": "connector pool", "entity_type": "project"},
+        {"name": "LLM adapter", "entity_type": "project"},
+        {"name": "AWS Summit", "entity_type": "meeting"}
+    ],
+    "expected_claims": [
+        {"entity": "connector pool", "predicate": "deadline", "value": "2026-04-10", "value_type": "date"},
+        {"entity": "LLM adapter", "predicate": "deadline", "value": "2026-04-14", "value_type": "date"},
+        {"entity": "Yuki Tanaka", "predicate": "deadline", "value": "2026-04-07", "value_type": "date"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Yuki Tanaka", "target_entity": "connector pool", "relation_type": "member_of"},
+        {"source_entity": "Carlos", "target_entity": "connector pool", "relation_type": "member_of"},
+        {"source_entity": "Yuki Tanaka", "target_entity": "LLM adapter", "relation_type": "member_of"},
+        {"source_entity": "Yuki Tanaka", "target_entity": "James Park", "relation_type": "reports_to"}
+    ]
+}

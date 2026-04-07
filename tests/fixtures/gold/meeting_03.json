@@ -1,0 +1,21 @@
+{
+    "input": "Incident Post-Mortem — Production Outage April 2, 2026\nFacilitator: SRE Lead Kira Volkov\nAttendees: Leo Martinez, Ivan Petrov (DevOps), Backend lead Omar Al-Farsi\n\nTimeline:\n- 14:23 UTC: First alert — disk usage >90% on db-prod-01\n- 14:31 UTC: Leo acknowledged incident, started diagnosis\n- 14:58 UTC: Ivan cleared 40GB of WAL logs, disk dropped to 62%\n- 15:05 UTC: Service restored\nTotal downtime: 42 minutes\n\nRoot cause: No automatic WAL archiving configured on db-prod-01.\nAction items:\n1. Configure WAL archiving — Owner: Ivan, Deadline: April 12, 2026\n2. Disk alert threshold lowered from 90% to 75% — Owner: Kira, Deadline: April 9, 2026\n3. Runbook updated — Owner: Leo, Deadline: April 14, 2026",
+    "source_type": "meeting",
+    "expected_entities": [
+        {"name": "Kira Volkov", "entity_type": "person"},
+        {"name": "Leo Martinez", "entity_type": "person"},
+        {"name": "Ivan Petrov", "entity_type": "person"},
+        {"name": "Omar Al-Farsi", "entity_type": "person"},
+        {"name": "DevOps", "entity_type": "team"}
+    ],
+    "expected_claims": [
+        {"entity": "Kira Volkov", "predicate": "role", "value": "SRE Lead", "value_type": "text"},
+        {"entity": "Ivan Petrov", "predicate": "deadline", "value": "2026-04-12", "value_type": "date"},
+        {"entity": "Kira Volkov", "predicate": "deadline", "value": "2026-04-09", "value_type": "date"},
+        {"entity": "Leo Martinez", "predicate": "deadline", "value": "2026-04-14", "value_type": "date"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Ivan Petrov", "target_entity": "DevOps", "relation_type": "member_of"},
+        {"source_entity": "Leo Martinez", "target_entity": "Kira Volkov", "relation_type": "reports_to"}
+    ]
+}

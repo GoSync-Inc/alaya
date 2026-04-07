@@ -1,0 +1,15 @@
+{
+    "input": "Title: Implement cursor-based pagination for /entities endpoint\nAuthor: Mei Chen\nAssignee: Mei Chen\nLabels: enhancement, api\nMilestone: Sprint 4\n\nBody:\nCurrently the /entities endpoint uses offset pagination which doesn't scale. We need to switch to cursor-based pagination.\n\nAcceptance criteria:\n- Add `cursor` query parameter\n- Response includes `next_cursor` field\n- Max page size capped at 200\n- Existing integration tests updated\n\nBlocking: PR #312 (schema migration) must merge first.",
+    "source_type": "github",
+    "expected_entities": [
+        {"name": "Mei Chen", "entity_type": "person"},
+        {"name": "/entities endpoint", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "/entities endpoint", "predicate": "status", "value": "enhancement", "value_type": "text"},
+        {"entity": "Mei Chen", "predicate": "owner", "value": "/entities endpoint", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Mei Chen", "target_entity": "/entities endpoint", "relation_type": "member_of"}
+    ]
+}

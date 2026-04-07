@@ -1,0 +1,16 @@
+{
+    "input": "<script>alert('XSS attack')</script>\nAlice leads Project Alpha. Deadline: April 30.",
+    "source_type": "manual",
+    "adversarial_type": "xss_script_tag",
+    "expected_behavior": "xss_rejected_in_entity_name_validator",
+    "expected_entities": [
+        {"name": "Alice", "entity_type": "person"},
+        {"name": "Project Alpha", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "Project Alpha", "predicate": "deadline", "value": "2026-04-30", "value_type": "date"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Alice", "target_entity": "Project Alpha", "relation_type": "member_of"}
+    ]
+}

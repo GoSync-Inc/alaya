@@ -1,0 +1,18 @@
+{
+    "input": "#engineering\nDan: Just merged the authentication PR. The API gateway is now in staging.\nEva: Great! @Dan can you update the Linear ticket LIN-442?\nDan: Done. Pointing Maria as reviewer for the next sprint.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Dan", "entity_type": "person"},
+        {"name": "Eva", "entity_type": "person"},
+        {"name": "Maria", "entity_type": "person"},
+        {"name": "LIN-442", "entity_type": "document"},
+        {"name": "API gateway", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "API gateway", "predicate": "status", "value": "staging", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Dan", "target_entity": "API gateway", "relation_type": "member_of"},
+        {"source_entity": "Maria", "target_entity": "API gateway", "relation_type": "member_of"}
+    ]
+}

@@ -1,0 +1,24 @@
+{
+    "input": "Board Meeting Summary — March 31, 2026\nBoard members: Sequoia (partner: Diana Fox), YC (partner: Greg Shaw), Angel investor Tom Nguyen\nCompany reps: CEO Sarah Chen, CFO Wei Zhang\n\nKey outcomes:\n1. Series A closes April 15: $12M total, $7M from Sequoia, $3M from YC, $2M from angels.\n2. Hiring plan: 8 engineers by Q3 end (September 30). Recruiting lead: HR Director Rachel Park.\n3. Revenue target: $500K ARR by year-end (December 31, 2026).\n4. Next board meeting: June 30, 2026.",
+    "source_type": "meeting",
+    "expected_entities": [
+        {"name": "Sarah Chen", "entity_type": "person"},
+        {"name": "Wei Zhang", "entity_type": "person"},
+        {"name": "Diana Fox", "entity_type": "person"},
+        {"name": "Greg Shaw", "entity_type": "person"},
+        {"name": "Tom Nguyen", "entity_type": "person"},
+        {"name": "Rachel Park", "entity_type": "person"},
+        {"name": "Sequoia", "entity_type": "team"},
+        {"name": "YC", "entity_type": "team"}
+    ],
+    "expected_claims": [
+        {"entity": "Sarah Chen", "predicate": "role", "value": "CEO", "value_type": "text"},
+        {"entity": "Wei Zhang", "predicate": "role", "value": "CFO", "value_type": "text"},
+        {"entity": "Rachel Park", "predicate": "role", "value": "HR Director", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Sarah Chen", "target_entity": "Alaya", "relation_type": "member_of"},
+        {"source_entity": "Diana Fox", "target_entity": "Sequoia", "relation_type": "member_of"},
+        {"source_entity": "Greg Shaw", "target_entity": "YC", "relation_type": "member_of"}
+    ]
+}

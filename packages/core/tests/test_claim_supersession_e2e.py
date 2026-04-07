@@ -72,7 +72,7 @@ async def test_latest_wins_newer_supersedes_older() -> None:
 
     extracted = ExtractedClaim(entity="Alice", predicate="role", value="lead", confidence=0.9)
 
-    result = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
+    result, _ = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
 
     assert result is new_claim
     claim_repo.mark_superseded.assert_called_once_with(old_id, new_id, new_at)
@@ -110,7 +110,7 @@ async def test_latest_wins_late_arriving_is_superseded() -> None:
 
     extracted = ExtractedClaim(entity="Alice", predicate="role", value="engineer", confidence=0.9)
 
-    result = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
+    result, _ = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
 
     assert result is late_claim
     # The newly created late claim should be superseded by the existing newer claim
@@ -149,7 +149,7 @@ async def test_explicit_only_high_confidence_supersedes() -> None:
     # confidence >= 0.85 → should supersede
     extracted = ExtractedClaim(entity="Alice", predicate="role", value="staff-engineer", confidence=0.9)
 
-    result = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
+    result, _ = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
 
     assert result is new_claim
     claim_repo.mark_superseded.assert_called_once_with(old_id, new_id, new_at)
@@ -188,7 +188,7 @@ async def test_explicit_only_low_confidence_disputed() -> None:
     # confidence < 0.85 → should be disputed
     extracted = ExtractedClaim(entity="Alice", predicate="role", value="contractor", confidence=0.7)
 
-    result = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
+    result, _ = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
 
     assert result is new_claim
     claim_repo.mark_superseded.assert_not_called()
@@ -222,7 +222,7 @@ async def test_accumulate_different_values_both_active() -> None:
 
     extracted = ExtractedClaim(entity="Alice", predicate="skills", value="backend", confidence=0.9)
 
-    result = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
+    result, _ = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
 
     assert result is new_claim
     claim_repo.create.assert_called_once()
@@ -252,7 +252,7 @@ async def test_accumulate_duplicate_value_skipped() -> None:
 
     extracted = ExtractedClaim(entity="Alice", predicate="skills", value="frontend", confidence=0.9)
 
-    result = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
+    result, _ = await write_claim(extracted, entity_id, event, run, claim_repo, predicate_repo, {})
 
     assert result is None
     claim_repo.create.assert_not_called()

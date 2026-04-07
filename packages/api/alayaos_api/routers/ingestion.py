@@ -83,6 +83,14 @@ async def ingest_text(
                 parent_run_id=parent_id,
             )
 
+    # Enqueue extraction job (async, non-blocking)
+    try:
+        from alayaos_core.worker.tasks import job_extract
+
+        await job_extract.kiq(str(event.id), str(run.id), str(api_key.workspace_id))
+    except Exception:
+        pass  # Worker may not be running; run stays pending for manual pickup
+
     return data_response(
         IngestTextResponse(
             event_id=event.id,

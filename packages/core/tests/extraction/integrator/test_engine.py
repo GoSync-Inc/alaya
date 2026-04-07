@@ -356,3 +356,190 @@ async def test_engine_entity_cache_warmed():
     await engine.run(ws_id, session)
 
     entity_cache.warm.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_merge_duplicates_soft_deletes_entity_b_and_merges_aliases():
+    """_merge_duplicates soft-deletes entity_b and merges aliases into entity_a."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+
+    ws_id = uuid.uuid4()
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_a = MagicMock()
+    entity_a.id = entity_a_id
+    entity_a.name = "Alice Smith"
+    entity_a.aliases = ["Ali"]
+
+    entity_b = MagicMock()
+    entity_b.id = entity_b_id
+    entity_b.name = "Alice Smyth"
+    entity_b.aliases = ["Alicia"]
+
+    entity_repo = AsyncMock()
+    entity_repo.update = AsyncMock(return_value=None)
+
+    async def get_by_id(eid):
+        if eid == entity_a_id:
+            return entity_a
+        if eid == entity_b_id:
+            return entity_b
+        return None
+
+    entity_repo.get_by_id = get_by_id
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=AsyncMock(),
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="Alice Smith",
+        entity_b_name="Alice Smyth",
+        score=0.92,
+        method="fuzzy",
+    )
+
+    session = AsyncMock()
+    merged_count = await engine._merge_duplicates([pair], ws_id, session)
+
+    assert merged_count == 1
+    # entity_b must be soft-deleted
+    delete_calls = [call for call in entity_repo.update.call_args_list if call.kwargs.get("is_deleted") is True]
+    assert any(c.args[0] == entity_b_id for c in delete_calls)
+    # entity_a must have its aliases updated (merged)
+    alias_calls = [call for call in entity_repo.update.call_args_list if "aliases" in call.kwargs]
+    assert alias_calls, "entity_a.aliases should be updated"
+    merged_aliases = alias_calls[0].kwargs["aliases"]
+    # entity_b's name should appear in merged aliases
+    assert "Alice Smyth" in merged_aliases
+
+
+@pytest.mark.asyncio
+async def test_merge_duplicates_skips_missing_entities():
+    """_merge_duplicates skips pair if either entity is missing."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+
+    ws_id = uuid.uuid4()
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=None)  # both missing
+    entity_repo.update = AsyncMock()
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=AsyncMock(),
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="A",
+        entity_b_name="B",
+        score=0.9,
+        method="fuzzy",
+    )
+
+    merged_count = await engine._merge_duplicates([pair], ws_id, AsyncMock())
+    assert merged_count == 0
+    entity_repo.update.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_apply_action_update_status_merges_properties():
+    """update_status action merges into existing properties instead of replacing."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import EnrichmentAction
+
+    entity_id = uuid.uuid4()
+    entity_mock = MagicMock()
+    entity_mock.id = entity_id
+    entity_mock.properties = {"existing_key": "existing_value"}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=entity_mock)
+    entity_repo.update = AsyncMock(return_value=entity_mock)
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=AsyncMock(),
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    action = EnrichmentAction(
+        action="update_status",
+        entity_id=entity_id,
+        details={"status": "active"},
+    )
+
+    ws_id = uuid.uuid4()
+    counters = await engine._apply_action(action, ws_id, AsyncMock())
+
+    assert counters.get("claims_updated") == 1
+    update_kwargs = entity_repo.update.call_args.kwargs
+    merged_props = update_kwargs["properties"]
+    # Both old key and new key should be present
+    assert merged_props["existing_key"] == "existing_value"
+    assert merged_props["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_apply_action_normalize_date_calls_date_normalizer():
+    """normalize_date action calls DateNormalizer and stores normalized result."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import EnrichmentAction
+
+    entity_id = uuid.uuid4()
+    entity_mock = MagicMock()
+    entity_mock.id = entity_id
+    entity_mock.properties = {"project": "X"}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=entity_mock)
+    entity_repo.update = AsyncMock(return_value=entity_mock)
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=AsyncMock(),
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    action = EnrichmentAction(
+        action="normalize_date",
+        entity_id=entity_id,
+        details={"date_value": "2024-04-15"},
+    )
+
+    ws_id = uuid.uuid4()
+    counters = await engine._apply_action(action, ws_id, AsyncMock())
+
+    assert counters.get("claims_updated") == 1
+    update_kwargs = entity_repo.update.call_args.kwargs
+    props = update_kwargs["properties"]
+    # DateNormalizer should have stored normalized_date
+    assert "normalized_date" in props

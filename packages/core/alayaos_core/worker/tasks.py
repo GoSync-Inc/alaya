@@ -164,9 +164,9 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
         if not event or not run:
             return {"status": "skipped", "reason": "event or run not found"}
 
-        # Idempotency
-        if run.status == "completed":
-            return {"status": "skipped", "reason": "already completed"}
+        # Idempotency: skip if already processed (completed or cortex_complete)
+        if run.status in ("completed", "cortex_complete"):
+            return {"status": "skipped", "reason": "already processed"}
 
         # Access-level gating (same as existing should_extract in pipeline.py)
         from alayaos_core.extraction.pipeline import should_extract
@@ -260,10 +260,16 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
             await job_crystallize.kiq(chunk_id, extraction_run_id, workspace_id)
     else:
         # No crystal chunks — complete the run (nothing to extract)
+        # Also mark event as extracted so it is not reprocessed on retry
         async with factory() as session, session.begin():
             await _set_workspace_context(session, workspace_id)
             run_repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
             await run_repo.update_status(uuid.UUID(extraction_run_id), "completed")
+            event_repo = EventRepository(session, uuid.UUID(workspace_id))
+            event = await event_repo.get_by_id(uuid.UUID(event_id))
+            if event:
+                event.is_extracted = True
+                await session.flush()
 
     return {
         "event_id": event_id,
@@ -282,8 +288,8 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
     from alayaos_core.llm.fake import FakeLLMAdapter
     from alayaos_core.repositories.chunk import ChunkRepository
     from alayaos_core.repositories.pipeline_trace import PipelineTraceRepository
-    from alayaos_core.services.entity_cache import EntityCacheService
     from alayaos_core.services.workspace import CORE_ENTITY_TYPES, CORE_PREDICATES
+    # EntityCacheService is already imported at module level — no local import needed
 
     settings = Settings()
 
@@ -295,8 +301,12 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
     else:
         llm = FakeLLMAdapter()
 
-    # EntityCacheService with redis=None: graceful in-memory fallback for unit tests
-    entity_cache = EntityCacheService(redis=None)
+    # Wire Redis so EntityCacheService can use the shared entity cache
+    redis_client = None
+    with contextlib.suppress(Exception):
+        redis_client = aioredis.from_url(settings.REDIS_URL)
+
+    entity_cache = EntityCacheService(redis=redis_client)
 
     extractor = CrystallizerExtractor(llm=llm, entity_cache=entity_cache)
     verifier = CrystallizerVerifier(llm=llm)
@@ -410,6 +420,9 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
     if all_extracted:
         await job_write.kiq(extraction_run_id, workspace_id)
 
+    if redis_client:
+        await redis_client.aclose()
+
     return {
         "chunk_id": chunk_id,
         "extraction_run_id": extraction_run_id,
@@ -516,9 +529,12 @@ async def job_integrate(workspace_id: str) -> dict:
     }
 
 
-@broker.task(timeout=30)
+@broker.task(timeout=30, schedule=[{"cron": "* * * * *"}])
 async def job_check_integrator() -> dict:
-    """Periodic task: check all dirty-sets and trigger job_integrate if thresholds met."""
+    """Periodic task: check all dirty-sets and trigger job_integrate if thresholds met.
+
+    Runs every minute via TaskIQ scheduler (LabelScheduleSource).
+    """
     from datetime import UTC, datetime
 
     settings = Settings()

@@ -46,7 +46,6 @@ async def test_job_check_integrator_triggers_when_threshold_met():
     """job_check_integrator triggers job_integrate when dirty-set size >= threshold."""
     ws_id = str(uuid.uuid4())
     dirty_key = f"dirty_set:{ws_id}"
-    created_at_key = f"dirty_set:{ws_id}:created_at"
 
     redis_mock = _make_redis_with_keys(
         keys=[dirty_key],

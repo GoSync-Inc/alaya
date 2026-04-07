@@ -1,7 +1,6 @@
 """Tests for EntityDeduplicator."""
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -85,7 +84,6 @@ async def test_transliteration_fallback_cyrillic_latin():
 @pytest.mark.asyncio
 async def test_llm_fallback_for_ambiguous_band():
     """When score falls in ambiguous band, LLM is consulted."""
-    from alayaos_core.extraction.integrator.schemas import EntityMatchResult
     from alayaos_core.llm.fake import FakeLLMAdapter
 
     llm = FakeLLMAdapter()

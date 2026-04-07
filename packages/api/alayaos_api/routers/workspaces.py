@@ -141,7 +141,7 @@ async def update_workspace(
         raise _not_found(str(workspace_id))
 
     repo = WorkspaceRepository(session)
-    updates = body.model_dump(exclude_none=True)
+    updates = body.model_dump(exclude_unset=True)
     workspace = await repo.update(workspace_id, **updates)
     if workspace is None:
         raise _not_found(str(workspace_id))

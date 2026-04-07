@@ -50,7 +50,7 @@ class EntityRepository(BaseRepository):
         entity = await self.get_by_id(entity_id)
         if entity is None:
             return None
-        allowed = {"name", "description", "properties", "is_deleted"}
+        allowed = {"name", "description", "properties", "aliases", "is_deleted"}
         for key, value in kwargs.items():
             if key in allowed:
                 setattr(entity, key, value)

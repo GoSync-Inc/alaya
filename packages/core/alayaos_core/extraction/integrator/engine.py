@@ -161,7 +161,7 @@ class IntegratorEngine:
         # Step 5: Deduplicate
         if entities_with_context:
             dup_pairs = await self._deduplicator.find_duplicates(entities_with_context)
-            entities_deduplicated = len(dup_pairs)
+            entities_deduplicated = await self._merge_duplicates(dup_pairs, workspace_id, session)
             log.info(
                 "integrator_dedup",
                 workspace_id=str(workspace_id),
@@ -204,6 +204,25 @@ class IntegratorEngine:
             duration_ms=duration_ms,
         )
 
+    async def _merge_duplicates(self, pairs, workspace_id: uuid.UUID, session) -> int:
+        """Merge duplicate entity pairs: keep entity_a, soft-delete entity_b, merge aliases.
+
+        Returns the number of pairs successfully merged.
+        """
+        merged = 0
+        for pair in pairs:
+            entity_b = await self.entity_repo.get_by_id(pair.entity_b_id)
+            entity_a = await self.entity_repo.get_by_id(pair.entity_a_id)
+            if not entity_a or not entity_b:
+                continue
+            # Merge aliases: union of both alias lists + entity_b's name as an alias
+            new_aliases = list(set(list(entity_a.aliases or []) + list(entity_b.aliases or []) + [entity_b.name]))
+            await self.entity_repo.update(entity_a.id, aliases=new_aliases)
+            # Soft-delete entity_b so it is no longer active in the graph
+            await self.entity_repo.update(entity_b.id, is_deleted=True)
+            merged += 1
+        return merged
+
     async def _apply_action(self, action: EnrichmentAction, workspace_id: uuid.UUID, session) -> dict:
         """Apply a single enrichment action. Returns counter increments."""
         counters: dict[str, int] = {}
@@ -227,14 +246,43 @@ class IntegratorEngine:
                 counters["noise_removed"] = 1
 
             elif action.action == "update_type" and action.entity_id:
-                new_type = action.details.get("entity_type")
-                if new_type:
-                    await self.entity_repo.update(action.entity_id, properties={"corrected_type": new_type})
+                new_type_slug = action.details.get("entity_type")
+                if new_type_slug:
+                    # Resolve slug to entity_type_id and update the entity's type directly
+                    from alayaos_core.repositories.entity_type import EntityTypeRepository
+
+                    et_repo = EntityTypeRepository(session, workspace_id)
+                    entity_type = await et_repo.get_by_slug(workspace_id, new_type_slug)
+                    if entity_type:
+                        entity = await self.entity_repo.get_by_id(action.entity_id)
+                        if entity:
+                            entity.entity_type_id = entity_type.id
+                            await session.flush()
                     counters["claims_updated"] = 1
 
-            elif action.action in ("update_status", "normalize_date", "add_assignee") and action.entity_id:
-                # Update entity properties with the action details
-                await self.entity_repo.update(action.entity_id, properties=action.details)
+            elif action.action in ("update_status", "add_assignee") and action.entity_id:
+                # Merge action details into existing entity properties (not wholesale replace)
+                entity = await self.entity_repo.get_by_id(action.entity_id)
+                if entity:
+                    merged_props = dict(entity.properties or {})
+                    merged_props.update(action.details)
+                    await self.entity_repo.update(action.entity_id, properties=merged_props)
+                counters["claims_updated"] = 1
+
+            elif action.action == "normalize_date" and action.entity_id:
+                from alayaos_core.extraction.integrator.date_normalizer import DateNormalizer
+
+                normalizer = DateNormalizer()
+                entity = await self.entity_repo.get_by_id(action.entity_id)
+                if entity:
+                    merged_props = dict(entity.properties or {})
+                    raw_date = action.details.get("date_value", "")
+                    normalized = normalizer.normalize(raw_date)
+                    if normalized:
+                        merged_props["normalized_date"] = normalized
+                    # Merge remaining action details regardless of normalization outcome
+                    merged_props.update(action.details)
+                    await self.entity_repo.update(action.entity_id, properties=merged_props)
                 counters["claims_updated"] = 1
 
         except Exception:

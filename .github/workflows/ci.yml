@@ -95,6 +95,40 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
 
+  migration-lint:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: alaya_lint
+          POSTGRES_USER: alaya
+          POSTGRES_PASSWORD: lint
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Generate migration SQL
+        run: uv run alembic upgrade head --sql > migrations.sql
+        env:
+          ALAYA_DATABASE_URL: postgresql+asyncpg://alaya:lint@localhost:5432/alaya_lint
+          ALAYA_REDIS_URL: redis://localhost:6379/0
+          ALAYA_ENV: dev
+      - name: Install and run Squawk
+        run: |
+          npm install -g squawk-cli
+          squawk migrations.sql || true
+
   integration-test:
     runs-on: ubuntu-latest
     services:

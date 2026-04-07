@@ -1,0 +1,8 @@
+{
+  "sprint": 1,
+  "claude_product": "ACCEPTED",
+  "technical_review": "APPROVE",
+  "provider": "codex",
+  "fixes_applied": ["SET LOCAL: switched from bound params to UUID-validated f-string per asyncpg constraint"],
+  "ts": "2026-04-07T09:10:00Z"
+}

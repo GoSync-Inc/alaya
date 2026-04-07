@@ -1,5 +1,5 @@
 {
-    "input": "Alice\x07\x0c Smith (control chars in name) is PM of Project\x00 Delta. Deadline:\x1f April 20.",
+    "input": "Alice\u0007\u000c Smith (control chars in name) is PM of Project\u0000 Delta. Deadline:\u001f April 20.",
     "source_type": "manual",
     "adversarial_type": "control_chars",
     "expected_behavior": "control_chars_stripped_by_entity_validator",

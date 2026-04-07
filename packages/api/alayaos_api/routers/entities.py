@@ -118,7 +118,7 @@ async def update_entity(
     api_key: Annotated[APIKey, Depends(require_scope("write"))],
 ):
     repo = EntityRepository(session, api_key.workspace_id)
-    updates = body.model_dump(exclude_none=True)
+    updates = body.model_dump(exclude_unset=True)
     entity = await repo.update(entity_id, **updates)
     if entity is None:
         raise _not_found(str(entity_id))

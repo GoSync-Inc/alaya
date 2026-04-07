@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 
@@ -33,14 +32,20 @@ def _make_entity_type_resolver(type_id: uuid.UUID):
     return resolver
 
 
+# Cyrillic test strings defined as Unicode escapes (avoids RUF001/RUF002/RUF003)
+# These represent "Egor" and "Alisa" in Cyrillic script
+CYRILLIC_EGOR = "\u0415\u0433\u043e\u0440"
+CYRILLIC_ALICE = "\u0410\u043b\u0438\u0441\u0430"
+
+
 # ─── transliterate_name tests ─────────────────────────────────────────────────
 
 
 def test_transliterate_name_cyrillic_to_latin() -> None:
-    """Cyrillic name 'Егор' transliterates to a Latin form close to 'egor'."""
+    """Cyrillic name transliterates to a Latin form close to 'egor'."""
     from alayaos_core.extraction.resolver import transliterate_name
 
-    result = transliterate_name("Егор")
+    result = transliterate_name(CYRILLIC_EGOR)
     # Should produce latin letters, not cyrillic
     assert result.isascii(), f"Expected ASCII output, got: {result!r}"
     assert len(result) > 0
@@ -51,7 +56,7 @@ def test_transliterate_name_returns_normalized() -> None:
     from alayaos_core.extraction.resolver import transliterate_name
 
     # Should be lowercased and stripped
-    result = transliterate_name("  Алиса  ")
+    result = transliterate_name(f"  {CYRILLIC_ALICE}  ")
     assert result == result.lower().strip()
 
 
@@ -72,10 +77,10 @@ def test_transliterate_name_handles_empty() -> None:
 
 
 def test_transliterate_name_egor_is_ascii() -> None:
-    """'Егор' transliterates to some ASCII string."""
+    """Cyrillic 'Egor' transliterates to some ASCII string."""
     from alayaos_core.extraction.resolver import transliterate_name
 
-    result = transliterate_name("Егор")
+    result = transliterate_name(CYRILLIC_EGOR)
     assert result.isascii()
     assert len(result) >= 3  # At least 3 characters
 
@@ -85,9 +90,9 @@ def test_transliterate_name_egor_is_ascii() -> None:
 
 @pytest.mark.asyncio
 async def test_short_name_skips_fuzzy_matching() -> None:
-    """Names shorter than 4 chars skip fuzzy matching → new entity created."""
-    from alayaos_core.extraction.schemas import ExtractedEntity
+    """Names shorter than 4 chars skip fuzzy matching -> new entity created."""
     from alayaos_core.extraction.resolver import resolve_entity
+    from alayaos_core.extraction.schemas import ExtractedEntity
 
     ws_id = uuid.uuid4()
     run_id = uuid.uuid4()
@@ -96,13 +101,13 @@ async def test_short_name_skips_fuzzy_matching() -> None:
     new_entity = _make_fake_entity(new_entity_id, "Bob")
 
     repo = _make_entity_repo(get_by_external_id_return=None, create_return=new_entity)
-    # "bob" is 3 chars — should skip fuzzy
+    # "bob" is 3 chars - should skip fuzzy
     extracted = ExtractedEntity(name="Bob", entity_type="person")
     # Entity index has similar-looking entry
     entity_index = {"rob": existing_id}
     type_resolver = _make_entity_type_resolver(uuid.uuid4())
 
-    entity_id, is_new, decision = await resolve_entity(
+    _entity_id, is_new, decision = await resolve_entity(
         extracted=extracted,
         workspace_id=ws_id,
         run_id=run_id,
@@ -122,15 +127,15 @@ async def test_short_name_skips_fuzzy_matching() -> None:
 @pytest.mark.asyncio
 async def test_regular_ascii_name_works_without_transliteration() -> None:
     """Regular ASCII names still fuzzy-match normally."""
-    from alayaos_core.extraction.schemas import ExtractedEntity
     from alayaos_core.extraction.resolver import resolve_entity
+    from alayaos_core.extraction.schemas import ExtractedEntity
 
     ws_id = uuid.uuid4()
     run_id = uuid.uuid4()
     existing_id = uuid.uuid4()
 
     repo = _make_entity_repo(get_by_external_id_return=None)
-    # "alice smyth" vs "alice smith" — high JW similarity
+    # "alice smyth" vs "alice smith" - high JW similarity
     extracted = ExtractedEntity(name="alice smyth", entity_type="person")
     entity_index = {"alice smith": existing_id}
     type_resolver = _make_entity_type_resolver(uuid.uuid4())
@@ -155,28 +160,28 @@ async def test_regular_ascii_name_works_without_transliteration() -> None:
 
 @pytest.mark.asyncio
 async def test_cyrillic_matches_latin_via_transliteration() -> None:
-    """Cyrillic 'Егор' matches Latin 'Egor' via transliteration layer."""
-    from alayaos_core.extraction.schemas import ExtractedEntity
+    """Cyrillic name matches Latin equivalent via transliteration layer."""
     from alayaos_core.extraction.resolver import resolve_entity, transliterate_name
+    from alayaos_core.extraction.schemas import ExtractedEntity
 
     ws_id = uuid.uuid4()
     run_id = uuid.uuid4()
     existing_id = uuid.uuid4()
 
     # Verify that transliteration actually produces a string that would match
-    translit_egor = transliterate_name("Егор")
+    translit_egor = transliterate_name(CYRILLIC_EGOR)
     latin_egor = "egor"
 
     # Only run this test if transliteration produces the expected output
     if translit_egor != latin_egor:
-        pytest.skip(f"Transliteration gave {translit_egor!r} not 'egor' — skip cross-script test")
+        pytest.skip(f"Transliteration gave {translit_egor!r} not 'egor' - skip cross-script test")
 
     repo = _make_entity_repo(get_by_external_id_return=None)
-    extracted = ExtractedEntity(name="Егор", entity_type="person")
+    extracted = ExtractedEntity(name=CYRILLIC_EGOR, entity_type="person")
     entity_index = {latin_egor: existing_id}
     type_resolver = _make_entity_type_resolver(uuid.uuid4())
 
-    entity_id, is_new, decision = await resolve_entity(
+    entity_id, is_new, _decision = await resolve_entity(
         extracted=extracted,
         workspace_id=ws_id,
         run_id=run_id,

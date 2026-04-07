@@ -1,1 +1,1 @@
-{"sprint":2,"claude_product":"ACCEPTED","technical_review":"APPROVE","provider":"codex","fixes_applied":["IntegrityError handling in PATCH for non-nullable nulls"],"ts":"2026-04-07T09:45:00Z"}
+{"sprint":6,"claude_product":"ACCEPTED","technical_review":"APPROVE","provider":"codex","fixes_applied":["Production Caddyfile","Migration error handling","packages:read permission","workflow_run head_sha"],"ts":"2026-04-07T09:45:00Z"}

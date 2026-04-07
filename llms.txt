@@ -71,12 +71,12 @@ DELETE /api-keys/{prefix} — revoke
 
 ## Data Model
 
-19 tables across 3 layers:
+22 tables across 3 layers:
 
-- **L0 Events** — Raw ingested events with source metadata.
+- **L0 Events** — Raw ingested events with source metadata. `l0_chunks` stores chunked text segments per event.
 - **L1 Entities** — Resolved named entities (person, project, team, etc.). 10 seeded entity types, 20 seeded predicates per workspace.
 - **L2 Claims + Relations** — Structured facts with confidence scores and `extraction_run_id` provenance.
-- **Extraction Runs** — Tracks each pipeline execution: status, token usage, cost, timestamps.
+- **Extraction Runs** — Tracks each pipeline execution: status, token usage, cost, timestamps. `pipeline_traces` captures per-step execution details; `integrator_runs` tracks knowledge graph integration runs.
 
 Tenant isolation via PostgreSQL RLS (`SET LOCAL app.workspace_id`). Composite FK `(workspace_id, id)` prevents cross-workspace references.
 
@@ -97,4 +97,4 @@ Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · 
 - [CLAUDE.md](./CLAUDE.md): Development guide, architecture rules, security policy
 - [CHANGELOG](./CHANGELOG.md)
 
-<!-- updated-by-superflow:run2 -->
+<!-- updated-by-superflow:2026-04-07 -->

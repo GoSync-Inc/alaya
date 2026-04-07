@@ -16,9 +16,9 @@ Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · 
 packages/
 ├── core/                           # Brain: models, schemas, repositories, services
 │   └── alayaos_core/
-│       ├── models/                 # SQLAlchemy 2.0 (13 files: 7 full + 6 stubs)
+│       ├── models/                 # SQLAlchemy 2.0 (16 files: 10 full + 6 stubs)
 │       ├── schemas/                # Pydantic schemas (7 files)
-│       ├── repositories/           # Async repos with cursor pagination (7 files)
+│       ├── repositories/           # Async repos with cursor pagination (10 files)
 │       ├── services/               # workspace (seed), api_key (generate/verify)
 │       ├── extraction/             # Sanitizer, extractor, pipeline, resolver, writer
 │       ├── llm/                    # LLMServiceInterface + Anthropic/Fake adapters
@@ -32,7 +32,7 @@ packages/
 │       └── routers/                # 12 routers: health, workspaces, entities, claims, etc.
 ├── cli/                            # Placeholder (Run 4)
 └── connectors/                     # Placeholder (Run 5)
-alembic/                            # Migrations (001: 18 tables + RLS, 002: auth bypass)
+alembic/                            # Migrations (001: 18 tables + RLS, 002: auth bypass, 004: intelligence pipeline)
 docker/                             # seed.py, init-db.sql, Caddyfile
 ```
 
@@ -89,7 +89,7 @@ Run before every commit:
 
 ## Data Model
 
-19 tables: 7 full (workspace, event, entity, entity_type, predicate, entity_external_id, api_key) + 11 stubs + extraction_run.
+22 tables: 7 full (workspace, event, entity, entity_type, predicate, entity_external_id, api_key) + 11 stubs + extraction_run + l0_chunks + pipeline_traces + integrator_runs.
 Core predicates: 20 seeded per workspace (deadline, status, owner, role, title, member_of, reports_to, etc.)
 Core entity types: 10 seeded per workspace (person, project, team, document, decision, meeting, etc.)
 Claims and relations carry `extraction_run_id` for full provenance tracing.
@@ -124,4 +124,4 @@ Model-agnostic: `LLMServiceInterface` with provider adapters.
 Config: `EXTRACTION_LLM_PROVIDER=anthropic|openai|ollama|vllm`
 Provider-specific features preserved — no lowest common denominator.
 
-<!-- updated-by-superflow:run2 -->
+<!-- updated-by-superflow:2026-04-07 -->

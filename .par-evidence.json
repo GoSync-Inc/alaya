@@ -1,11 +1,13 @@
 {
-  "sprint": 6,
+  "sprint": 7,
   "claude_product": "ACCEPTED",
   "technical_review": "APPROVE",
   "provider": "codex",
   "fixes_applied": [
-    "removed hallucinated role claims from meeting_10 fixture"
+    "extraction. prefix on all monitoring events",
+    "injection_detected uses source_type per spec",
+    "low_confidence_batch threshold 0.6 per spec"
   ],
-  "test_evidence": "404 passed, 18 skipped, 1 warning in 4.32s",
-  "ts": "2026-04-07T19:20:00Z"
+  "test_evidence": "431 passed, 18 skipped, 1 warning in 4.11s",
+  "ts": "2026-04-07T19:40:00Z"
 }

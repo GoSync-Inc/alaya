@@ -47,8 +47,8 @@ class Settings(BaseSettings):
 
     # Crystallizer
     CRYSTALLIZER_MODEL: str = "claude-sonnet-4-6-20250514"
-    CRYSTALLIZER_CONFIDENCE_HIGH: float = 0.9
-    CRYSTALLIZER_CONFIDENCE_LOW: float = 0.5
+    CRYSTALLIZER_CONFIDENCE_HIGH: float = 0.8  # Spec: high tier >= 0.8
+    CRYSTALLIZER_CONFIDENCE_LOW: float = 0.6  # Spec: medium tier >= 0.6, low < 0.6
 
     # Integrator
     INTEGRATOR_MODEL: str = "claude-sonnet-4-6-20250514"

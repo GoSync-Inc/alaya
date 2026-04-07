@@ -30,16 +30,14 @@ class EntityCacheService:
             pipeline.hget(hash_key, member)
         details = await pipeline.execute()
         entities = []
-        for member, detail in zip(raw_members, details):
+        for _member, detail in zip(raw_members, details, strict=False):
             if detail:
                 entity = json.loads(detail)
                 if types is None or entity.get("entity_type") in types:
                     entities.append(entity)
         return entities[:limit]
 
-    async def warm(
-        self, workspace_id: uuid.UUID, entities: list[dict], ttl: int = 3600
-    ) -> None:
+    async def warm(self, workspace_id: uuid.UUID, entities: list[dict], ttl: int = 3600) -> None:
         """Populate cache from DB entities.
 
         Each entity dict: {name, entity_type, aliases, last_seen_at}

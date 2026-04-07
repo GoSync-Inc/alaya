@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
 
 from alayaos_core.extraction.schemas import ExtractionResult
-from alayaos_core.llm.interface import LLMServiceInterface, LLMUsage
-from alayaos_core.models.chunk import L0Chunk
-from alayaos_core.services.entity_cache import EntityCacheService
+
+if TYPE_CHECKING:
+    from alayaos_core.llm.interface import LLMServiceInterface, LLMUsage
+    from alayaos_core.models.chunk import L0Chunk
+    from alayaos_core.services.entity_cache import EntityCacheService
 
 # Domain → relevant entity types for cache snapshot filtering
 _DOMAIN_TO_TYPES: dict[str, list[str]] = {
@@ -81,9 +84,7 @@ class CrystallizerExtractor:
         prompt = "You are an entity extraction system for a corporate knowledge base.\n\n"
         prompt += "## Entity Types\n"
         prompt += (
-            "\n".join(
-                f"- {et.get('name', et.get('slug', ''))}: {et.get('description', '')}" for et in entity_types
-            )
+            "\n".join(f"- {et.get('name', et.get('slug', ''))}: {et.get('description', '')}" for et in entity_types)
             + "\n\n"
         )
         prompt += "## Predicates\n"

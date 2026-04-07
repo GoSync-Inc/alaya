@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from alayaos_core.extraction.schemas import ExtractionResult
-from alayaos_core.llm.interface import LLMServiceInterface, LLMUsage
+
+if TYPE_CHECKING:
+    from alayaos_core.llm.interface import LLMServiceInterface, LLMUsage
 
 
 class CrystallizerVerifier:

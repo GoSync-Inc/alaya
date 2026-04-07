@@ -171,3 +171,15 @@ jobs:
           ALAYA_DATABASE_URL: postgresql+asyncpg://alaya:test@localhost:5432/alaya_test
           ALAYA_REDIS_URL: redis://localhost:6379/0
           ALAYA_ENV: dev
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          python-version: "3.13"
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Run pip-audit
+        run: uv run pip-audit

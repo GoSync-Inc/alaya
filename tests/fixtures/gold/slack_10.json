@@ -1,0 +1,17 @@
+{
+    "input": "#announcements: Congratulations to Lena Park who has been promoted to Staff Engineer effective April 1! She will be joining the Platform team led by Dan Cho.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Lena Park", "entity_type": "person"},
+        {"name": "Dan Cho", "entity_type": "person"},
+        {"name": "Platform", "entity_type": "team"}
+    ],
+    "expected_claims": [
+        {"entity": "Lena Park", "predicate": "role", "value": "Staff Engineer", "value_type": "text"},
+        {"entity": "Dan Cho", "predicate": "role", "value": "lead", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Lena Park", "target_entity": "Platform", "relation_type": "member_of"},
+        {"source_entity": "Dan Cho", "target_entity": "Platform", "relation_type": "member_of"}
+    ]
+}

@@ -1,0 +1,17 @@
+{
+    "input": "Alice Smith / Alice S. / A. Smith / @alice — all referring to the same person — is the DRI for the Q3 initiative (codename: Project Sunrise). Deadline: September 15, 2026.",
+    "source_type": "manual",
+    "edge_case": "multiple_aliases_same_entity",
+    "description": "Multiple aliases for the same entity should resolve to one entity.",
+    "expected_entities": [
+        {"name": "Alice Smith", "entity_type": "person"},
+        {"name": "Project Sunrise", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "Project Sunrise", "predicate": "deadline", "value": "2026-09-15", "value_type": "date"},
+        {"entity": "Project Sunrise", "predicate": "owner", "value": "Alice Smith", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Alice Smith", "target_entity": "Project Sunrise", "relation_type": "member_of"}
+    ]
+}

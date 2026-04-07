@@ -1,0 +1,24 @@
+{
+    "input": "Customer Success Review — April 21, 2026\nAttendees: Andrea Fano (CS Lead), Rachel Kim (VP Sales), Omar Hassan (Eng)\n\nAndrea: Two enterprise customers at risk — MegaCorp (renewal June 1) and BetaBank (renewal May 15). Main complaint: slow extraction latency.\nRachel: BetaBank's decision maker is CTO Sven Larsson. He's evaluating competitors.\nOmar: We can improve extraction latency by 40% with the batching optimization — ETA May 1. Owner: Omar.",
+    "source_type": "meeting",
+    "expected_entities": [
+        {"name": "Andrea Fano", "entity_type": "person"},
+        {"name": "Rachel Kim", "entity_type": "person"},
+        {"name": "Omar Hassan", "entity_type": "person"},
+        {"name": "Sven Larsson", "entity_type": "person"},
+        {"name": "MegaCorp", "entity_type": "person"},
+        {"name": "BetaBank", "entity_type": "person"},
+        {"name": "batching optimization", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "batching optimization", "predicate": "deadline", "value": "2026-05-01", "value_type": "date"},
+        {"entity": "batching optimization", "predicate": "owner", "value": "Omar Hassan", "value_type": "entity_ref"},
+        {"entity": "Andrea Fano", "predicate": "role", "value": "CS Lead", "value_type": "text"},
+        {"entity": "Rachel Kim", "predicate": "role", "value": "VP Sales", "value_type": "text"},
+        {"entity": "Sven Larsson", "predicate": "role", "value": "CTO", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Omar Hassan", "target_entity": "batching optimization", "relation_type": "member_of"},
+        {"source_entity": "Sven Larsson", "target_entity": "BetaBank", "relation_type": "member_of"}
+    ]
+}

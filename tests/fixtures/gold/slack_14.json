@@ -1,0 +1,19 @@
+{
+    "input": "#team-ops: Reminder — the Q2 All-Hands is scheduled for June 2nd at 10 AM. Speaker lineup: CEO Maya Oduya, CPO Leo Fischer, and special guest advisor Dr. Rachel Kim. Please RSVP by May 28.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Maya Oduya", "entity_type": "person"},
+        {"name": "Leo Fischer", "entity_type": "person"},
+        {"name": "Rachel Kim", "entity_type": "person"},
+        {"name": "Q2 All-Hands", "entity_type": "meeting"}
+    ],
+    "expected_claims": [
+        {"entity": "Q2 All-Hands", "predicate": "deadline", "value": "2026-06-02", "value_type": "date"},
+        {"entity": "Maya Oduya", "predicate": "role", "value": "CEO", "value_type": "text"},
+        {"entity": "Leo Fischer", "predicate": "role", "value": "CPO", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Maya Oduya", "target_entity": "Q2 All-Hands", "relation_type": "member_of"},
+        {"source_entity": "Leo Fischer", "target_entity": "Q2 All-Hands", "relation_type": "member_of"}
+    ]
+}

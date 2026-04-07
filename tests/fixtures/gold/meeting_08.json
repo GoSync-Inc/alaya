@@ -1,0 +1,22 @@
+{
+    "input": "Architecture Review — May 2, 2026\nAttendees: Hana Novak, Ben Kowalski, Priya Sharma, Chloe Weiss\n\nTopic: Connector architecture for Run 3\nHana: Proposing event-sourced connector model — each source emits L0Events. Decision: adopt. Owner: Hana. Design doc due May 10.\nBen: REST API is stable. v1.0.0 locked. No breaking changes until Run 5.\nPriya: Pagination RFC approved. Merging Friday.\nChloe: MCP server prototype ready for review. Needs security audit by Security Team before v1.",
+    "source_type": "meeting",
+    "expected_entities": [
+        {"name": "Hana Novak", "entity_type": "person"},
+        {"name": "Ben Kowalski", "entity_type": "person"},
+        {"name": "Priya Sharma", "entity_type": "person"},
+        {"name": "Chloe Weiss", "entity_type": "person"},
+        {"name": "connector architecture", "entity_type": "decision"},
+        {"name": "MCP server", "entity_type": "project"},
+        {"name": "Security Team", "entity_type": "team"}
+    ],
+    "expected_claims": [
+        {"entity": "connector architecture", "predicate": "deadline", "value": "2026-05-10", "value_type": "date"},
+        {"entity": "connector architecture", "predicate": "owner", "value": "Hana Novak", "value_type": "entity_ref"},
+        {"entity": "connector architecture", "predicate": "status", "value": "approved", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Hana Novak", "target_entity": "connector architecture", "relation_type": "member_of"},
+        {"source_entity": "Chloe Weiss", "target_entity": "MCP server", "relation_type": "member_of"}
+    ]
+}

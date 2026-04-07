@@ -1,0 +1,9 @@
+{
+    "input": "The project has no clear owner. No deadlines were set. Budget is TBD. Team assignment pending. Meeting scheduled for sometime next quarter.",
+    "source_type": "manual",
+    "edge_case": "empty_extraction",
+    "description": "Vague content with no extractable entities or concrete claims.",
+    "expected_entities": [],
+    "expected_claims": [],
+    "expected_relations": []
+}

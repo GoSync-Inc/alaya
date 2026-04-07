@@ -1,0 +1,19 @@
+{
+    "input": "In #engineering, Maria Santos posted: 'The Redis migration is on track. Nina is leading the effort and expects to complete by end of Q3. Current blocker: need DevOps sign-off from Tom.'",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Maria Santos", "entity_type": "person"},
+        {"name": "Nina", "entity_type": "person"},
+        {"name": "Tom", "entity_type": "person"},
+        {"name": "Redis migration", "entity_type": "project"},
+        {"name": "DevOps", "entity_type": "team"}
+    ],
+    "expected_claims": [
+        {"entity": "Redis migration", "predicate": "status", "value": "on track", "value_type": "text"},
+        {"entity": "Redis migration", "predicate": "owner", "value": "Nina", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Nina", "target_entity": "Redis migration", "relation_type": "member_of"},
+        {"source_entity": "Tom", "target_entity": "DevOps", "relation_type": "member_of"}
+    ]
+}

@@ -1,0 +1,22 @@
+{
+    "input": "1:1 — Sarah Chen + Leo Fischer — April 28, 2026\n\nSarah: What's the status of the mobile app?\nLeo: We're 3 weeks behind. iOS build passes, Android has a crash in the notification service. Responsible: Rosa Martins. We might need to cut mobile from the Q2 launch.\nSarah: Keep mobile in scope but move the launch date to July 15. Communicate this to Priya and the design team (lead: Kim Nguyen).\nLeo: Agreed. I'll set up a review with Kim by May 5.",
+    "source_type": "meeting",
+    "expected_entities": [
+        {"name": "Sarah Chen", "entity_type": "person"},
+        {"name": "Leo Fischer", "entity_type": "person"},
+        {"name": "Rosa Martins", "entity_type": "person"},
+        {"name": "Kim Nguyen", "entity_type": "person"},
+        {"name": "Priya", "entity_type": "person"},
+        {"name": "Mobile App", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "Mobile App", "predicate": "deadline", "value": "2026-07-15", "value_type": "date"},
+        {"entity": "Mobile App", "predicate": "status", "value": "delayed", "value_type": "text"},
+        {"entity": "Sarah Chen", "predicate": "role", "value": "CEO", "value_type": "text"},
+        {"entity": "Leo Fischer", "predicate": "role", "value": "CPO", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Rosa Martins", "target_entity": "Mobile App", "relation_type": "member_of"},
+        {"source_entity": "Leo Fischer", "target_entity": "Mobile App", "relation_type": "member_of"}
+    ]
+}

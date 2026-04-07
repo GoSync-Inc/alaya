@@ -1,0 +1,16 @@
+{
+    "input": "#infra: The Postgres upgrade from 14 to 16 is blocked on the pgvector compatibility issue. Estimated resolution: next Wednesday. Yusuf Adeyemi is coordinating. This blocks the Analytics Dashboard launch.",
+    "source_type": "slack",
+    "expected_entities": [
+        {"name": "Yusuf Adeyemi", "entity_type": "person"},
+        {"name": "Postgres upgrade", "entity_type": "project"},
+        {"name": "Analytics Dashboard", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "Postgres upgrade", "predicate": "status", "value": "blocked", "value_type": "text"},
+        {"entity": "Postgres upgrade", "predicate": "owner", "value": "Yusuf Adeyemi", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Yusuf Adeyemi", "target_entity": "Postgres upgrade", "relation_type": "member_of"}
+    ]
+}

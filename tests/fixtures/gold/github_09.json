@@ -1,0 +1,17 @@
+{
+    "input": "Title: Implement MCP server for AlayaOS\nAuthor: Chloe Weiss\nAssignee: Chloe Weiss\nReviewer: Ben Kowalski\nLabels: feature, run-1\nMilestone: Run 1\n\nBody:\nImplement the Model Context Protocol server so that Claude and other AI agents can query the knowledge graph directly.\n\nScope: tools/entities, tools/claims, tools/search. Authentication via API key.\n\nDepends on: #89 (REST API stabilization by Ben). Target completion: April 20.",
+    "source_type": "github",
+    "expected_entities": [
+        {"name": "Chloe Weiss", "entity_type": "person"},
+        {"name": "Ben Kowalski", "entity_type": "person"},
+        {"name": "MCP server", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "MCP server", "predicate": "deadline", "value": "2026-04-20", "value_type": "date"},
+        {"entity": "MCP server", "predicate": "owner", "value": "Chloe Weiss", "value_type": "entity_ref"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Chloe Weiss", "target_entity": "MCP server", "relation_type": "member_of"},
+        {"source_entity": "Ben Kowalski", "target_entity": "MCP server", "relation_type": "member_of"}
+    ]
+}

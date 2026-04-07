@@ -1,0 +1,20 @@
+{
+    "input": "Title: [RFC] Replace TaskIQ with Celery for task queue\nAuthor: Dmitri Volkov\nLabels: rfc, infrastructure\nStatus: Open for discussion until May 15\n\nBody:\nProposal: migrate from TaskIQ to Celery 5.x for the background task queue. Motivation: TaskIQ has limited documentation and no Redis Streams support.\n\nPros: mature ecosystem, Redis Streams support, built-in retry logic.\nCons: heavier dependency, different API.\n\nPrimary reviewer: Hana Novak (Platform). Secondary: Arjun Singh (Backend).\n\nDecision expected by May 15.",
+    "source_type": "github",
+    "expected_entities": [
+        {"name": "Dmitri Volkov", "entity_type": "person"},
+        {"name": "Hana Novak", "entity_type": "person"},
+        {"name": "Arjun Singh", "entity_type": "person"},
+        {"name": "Platform", "entity_type": "team"},
+        {"name": "Backend", "entity_type": "team"},
+        {"name": "task queue migration", "entity_type": "decision"}
+    ],
+    "expected_claims": [
+        {"entity": "task queue migration", "predicate": "deadline", "value": "2026-05-15", "value_type": "date"},
+        {"entity": "task queue migration", "predicate": "status", "value": "open for discussion", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Dmitri Volkov", "target_entity": "task queue migration", "relation_type": "member_of"},
+        {"source_entity": "Hana Novak", "target_entity": "Platform", "relation_type": "member_of"}
+    ]
+}

@@ -1,0 +1,23 @@
+{
+    "input": "Engineering Sync — April 14, 2026\nAttendees: Dmitri Volkov (Backend Lead), Hana Novak (Platform Lead), Yuki Tanaka (QA)\n\nDmitri: Search latency is still above target — p99 at 420ms vs 200ms goal. Root cause: missing index on entity_type_id. Fix in progress, ETA April 16.\nHana: Platform stability is good. Deploying pgvector 0.7.0 tomorrow. Rollback plan in place.\nYuki: Regression test suite pass rate is 94%. Target is 99%. Two flaky tests left to fix — owner: Dmitri.",
+    "source_type": "meeting",
+    "expected_entities": [
+        {"name": "Dmitri Volkov", "entity_type": "person"},
+        {"name": "Hana Novak", "entity_type": "person"},
+        {"name": "Yuki Tanaka", "entity_type": "person"},
+        {"name": "search latency fix", "entity_type": "project"},
+        {"name": "pgvector 0.7.0", "entity_type": "project"},
+        {"name": "regression test suite", "entity_type": "project"}
+    ],
+    "expected_claims": [
+        {"entity": "search latency fix", "predicate": "deadline", "value": "2026-04-16", "value_type": "date"},
+        {"entity": "search latency fix", "predicate": "owner", "value": "Dmitri Volkov", "value_type": "entity_ref"},
+        {"entity": "regression test suite", "predicate": "status", "value": "94% pass rate", "value_type": "text"},
+        {"entity": "Dmitri Volkov", "predicate": "role", "value": "Backend Lead", "value_type": "text"},
+        {"entity": "Hana Novak", "predicate": "role", "value": "Platform Lead", "value_type": "text"}
+    ],
+    "expected_relations": [
+        {"source_entity": "Dmitri Volkov", "target_entity": "search latency fix", "relation_type": "member_of"},
+        {"source_entity": "Hana Novak", "target_entity": "pgvector 0.7.0", "relation_type": "member_of"}
+    ]
+}

@@ -210,8 +210,8 @@ async def test_require_scope_raises_403_when_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_local_uses_parameterized_query() -> None:
-    """Regression: SET LOCAL must use bound params, not f-string interpolation."""
+async def test_set_local_validates_uuid() -> None:
+    """Regression: SET LOCAL must re-parse workspace_id as UUID to prevent injection."""
     from alayaos_api.deps import get_workspace_session
 
     valid_key, _raw_key = _valid_api_key()
@@ -224,7 +224,24 @@ async def test_set_local_uses_parameterized_query() -> None:
 
     call_args = session.execute.call_args
     assert call_args is not None
-    sql_text = call_args[0][0]
-    assert ":wid" in str(sql_text)
-    params = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("params", {})
-    assert params.get("wid") == str(valid_key.workspace_id)
+    sql_text = str(call_args[0][0])
+    # Must contain the validated UUID, not a :wid placeholder
+    assert str(valid_key.workspace_id) in sql_text
+    # Must NOT contain raw injection-prone patterns
+    assert "f'" not in sql_text  # no raw f-string leaking through
+
+
+@pytest.mark.asyncio
+async def test_set_local_rejects_malicious_workspace_id() -> None:
+    """Regression: malicious workspace_id triggers ValueError from uuid.UUID()."""
+    from alayaos_api.deps import get_workspace_session
+
+    valid_key, _raw_key = _valid_api_key()
+    # Inject a malicious value that is NOT a valid UUID
+    valid_key.workspace_id = "'; DROP TABLE workspaces; --"
+
+    session = AsyncMock()
+
+    gen = get_workspace_session(session=session, api_key=valid_key)
+    with pytest.raises(ValueError):
+        await gen.__anext__()

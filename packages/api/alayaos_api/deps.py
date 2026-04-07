@@ -1,6 +1,7 @@
 """Dependency injection for FastAPI routes."""
 
 import hashlib
+import uuid
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
@@ -85,10 +86,10 @@ async def get_workspace_session(
     api_key: Annotated[APIKey, Depends(get_api_key)],
 ) -> AsyncGenerator[AsyncSession]:
     """Set RLS workspace_id and yield the session."""
-    await session.execute(
-        text("SET LOCAL app.workspace_id = :wid"),
-        {"wid": str(api_key.workspace_id)},
-    )
+    # Re-parse to guarantee valid UUID (defense-in-depth against injection).
+    # Bound params not used: asyncpg extended protocol rejects params in SET.
+    validated_wid = str(uuid.UUID(str(api_key.workspace_id)))
+    await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
     yield session
 
 

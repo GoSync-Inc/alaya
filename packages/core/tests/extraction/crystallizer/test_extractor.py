@@ -235,7 +235,9 @@ async def test_verifier_returns_changed_true_when_result_differs() -> None:
 
     # Register a non-default response for the verify call
     initial = ExtractionResult()
+    chunk_text = "Alice leads the project."
     user_text = (
+        f"Original text:\n{chunk_text}\n\n"
         f"You previously extracted:\n{initial.model_dump_json(indent=2)}\n\n"
         "Review the original text and correct any:\n"
         "- False entities (not actually mentioned)\n"
@@ -257,7 +259,7 @@ async def test_verifier_returns_changed_true_when_result_differs() -> None:
 
     verifier = CrystallizerVerifier(llm=llm)
     verified, changed, _usage = await verifier.verify(
-        chunk_text="Alice leads the project.",
+        chunk_text=chunk_text,
         system_prompt="system prompt",
         initial_result=initial,
     )

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from pydantic import BaseModel
+from pydantic_core import PydanticUndefined
 
 from alayaos_core.llm.interface import LLMUsage, T
 
@@ -57,9 +58,10 @@ class FakeLLMAdapter:
         # Build a minimal valid instance using model defaults
         fields = response_model.model_fields
         data: dict = {}
-        for name, field in fields.items():
-            if field.default is not None:
-                data[name] = field.default
-            elif field.default_factory is not None:
-                data[name] = field.default_factory()
+        for name, field_info in fields.items():
+            if field_info.default is not PydanticUndefined and field_info.default is not None:
+                data[name] = field_info.default
+            elif field_info.default_factory is not None:
+                data[name] = field_info.default_factory()
+            # Skip required fields with no default — let model_validate handle them
         return data

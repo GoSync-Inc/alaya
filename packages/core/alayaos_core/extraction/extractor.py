@@ -1,9 +1,14 @@
 """LLM extractor with structured prompt boundary and optional gleaning."""
 
+import re
+
 from alayaos_core.extraction.preprocessor import Chunk
 from alayaos_core.extraction.sanitizer import sanitize
 from alayaos_core.extraction.schemas import ExtractionResult
 from alayaos_core.llm.interface import LLMServiceInterface, LLMUsage
+
+# Strip XML-like tags from entity names to prevent prompt boundary injection
+_XML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 class Extractor:
@@ -33,9 +38,10 @@ class Extractor:
 
         existing_str = ""
         if existing_entities:
+            safe_entities = [_XML_TAG_RE.sub("", e) for e in existing_entities]
             existing_str = f"""
 <existing_entities>
-{chr(10).join(existing_entities)}
+{chr(10).join(safe_entities)}
 </existing_entities>"""
 
         return f"""<instructions>
@@ -64,10 +70,11 @@ Predicates:
         """Extract from a single chunk."""
         sanitized = sanitize(chunk.text)
 
-        # Add prior entities header if available
+        # Add prior entities header if available (escape XML tags for safety)
         prior_header = ""
         if chunk.prior_entities:
-            prior_header = f"<prior_entities>{', '.join(chunk.prior_entities)}</prior_entities>\n"
+            safe_prior = [_XML_TAG_RE.sub("", e) for e in chunk.prior_entities]
+            prior_header = f"<prior_entities>{', '.join(safe_prior)}</prior_entities>\n"
 
         user_message = f"{prior_header}<data>{sanitized}</data>"
 
@@ -88,12 +95,17 @@ Predicates:
         if not self._gleaning_enabled or token_count < self._gleaning_min_tokens:
             return result, usage
 
-        # Gleaning: ask for missed items
+        # Gleaning: re-send data with prior results for context
+        sanitized = sanitize(chunk.text)
+        prior_json = result.model_dump_json()
+        gleaning_text = (
+            f"<data>{sanitized}</data>\n\n"
+            f"<prior_extraction>{prior_json}</prior_extraction>\n\n"
+            "Review the data again. Are there any entities, relations, or claims you missed? "
+            "Only output NEW items not already in the prior_extraction block."
+        )
         gleaning_result, gleaning_usage = await self._llm.extract(
-            text=(
-                "Review the data again. Are there any entities, relations, or claims you missed? "
-                "Only output NEW items not already in the previous extraction."
-            ),
+            text=gleaning_text,
             system_prompt=system_prompt,
             response_model=ExtractionResult,
         )

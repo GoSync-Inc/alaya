@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from structlog.contextvars import bind_contextvars
 
 from alayaos_core.models.api_key import APIKey
 from alayaos_core.repositories.api_key import APIKeyRepository
@@ -90,6 +91,7 @@ async def get_workspace_session(
     # Bound params not used: asyncpg extended protocol rejects params in SET.
     validated_wid = str(uuid.UUID(str(api_key.workspace_id)))
     await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
+    bind_contextvars(workspace_id=validated_wid)
     yield session
 
 

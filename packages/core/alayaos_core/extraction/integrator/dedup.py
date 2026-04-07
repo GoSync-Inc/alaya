@@ -38,9 +38,8 @@ class EntityDeduplicator:
 
         from rapidfuzz import fuzz, process
 
-        # Build name→entity mapping
+        # Use index-based lookup to handle same-name entities correctly
         names = [e.name for e in scoreable]
-        id_by_name: dict[str, EntityWithContext] = {e.name: e for e in scoreable}
 
         pairs: list[DuplicatePair] = []
         seen: set[frozenset] = set()
@@ -59,8 +58,8 @@ class EntityDeduplicator:
             # Precompute transliterated form for this entity
             translit_entity = transliterate_name(entity.name)
 
-            for candidate_name, score_raw, _idx in matches:
-                candidate = id_by_name[candidate_name]
+            for _candidate_name, score_raw, idx in matches:
+                candidate = scoreable[idx]
 
                 # Skip self
                 if candidate.id == entity.id:

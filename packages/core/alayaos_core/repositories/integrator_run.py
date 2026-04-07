@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
@@ -63,7 +63,7 @@ class IntegratorRunRepository(BaseRepository):
         if error_message is not None:
             run.error_message = error_message
         if status in ("completed", "failed"):
-            run.completed_at = datetime.now(timezone.utc)
+            run.completed_at = datetime.now(UTC)
         await self.session.flush()
         return run
 

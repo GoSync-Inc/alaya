@@ -1,7 +1,5 @@
 """Anthropic LLM adapter using tool-based structured output."""
 
-import json
-
 import anthropic
 
 from alayaos_core.llm.interface import LLMUsage, T

@@ -74,7 +74,10 @@ async def test_job_write_calls_rls_context():
         with (
             patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
             patch("alayaos_core.extraction.pipeline.run_write", new_callable=AsyncMock, return_value=None),
-            patch("alayaos_core.worker.tasks.Settings", MagicMock(return_value=MagicMock(ANTHROPIC_API_KEY=MagicMock(get_secret_value=lambda: "")))),
+            patch(
+                "alayaos_core.worker.tasks.Settings",
+                MagicMock(return_value=MagicMock(ANTHROPIC_API_KEY=MagicMock(get_secret_value=lambda: ""))),
+            ),
         ):
             await worker_tasks.job_write.original_func(extraction_run_id, workspace_id)
     finally:

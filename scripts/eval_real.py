@@ -185,7 +185,7 @@ async def process_jsonl(file_path: Path, source_type: str = "manual"):
             continue
 
         try:
-            result, usage = await run_extraction(text.replace('\x00', ''), src_type, str(event_id)[:8])
+            result, usage = await run_extraction(text.replace("\x00", ""), src_type, str(event_id)[:8])
             print_results(result, usage, f"event_{i + 1}_{event_id[:8]}")
             save_results(result, usage, f"event_{i + 1}_{event_id[:8]}")
 
@@ -262,7 +262,7 @@ async def main():
                 print(f"  ERROR processing {f.name}: {e}")
 
         print(f"\n{'=' * 60}")
-        print(f"  BATCH SUMMARY")
+        print("  BATCH SUMMARY")
         print(f"  Files: {len(files)}")
         print(f"  Entities: {all_entities}")
         print(f"  Claims: {all_claims}")

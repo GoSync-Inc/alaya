@@ -85,7 +85,10 @@ async def get_workspace_session(
     api_key: Annotated[APIKey, Depends(get_api_key)],
 ) -> AsyncGenerator[AsyncSession]:
     """Set RLS workspace_id and yield the session."""
-    await session.execute(text(f"SET LOCAL app.workspace_id = '{api_key.workspace_id}'"))
+    await session.execute(
+        text("SET LOCAL app.workspace_id = :wid"),
+        {"wid": str(api_key.workspace_id)},
+    )
     yield session
 
 

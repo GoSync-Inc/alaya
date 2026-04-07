@@ -55,6 +55,14 @@ class Preprocessor:
         current_text = ""
 
         for para in paragraphs:
+            # If a single paragraph exceeds budget, split it by sentences/tokens
+            if self.count_tokens(para) > self._max_tokens:
+                if current_text:
+                    chunks.append(current_text)
+                    current_text = ""
+                chunks.extend(self._split_oversized(para))
+                continue
+
             candidate = current_text + "\n\n" + para if current_text else para
             if self.count_tokens(candidate) > self._max_tokens and current_text:
                 chunks.append(current_text)
@@ -76,6 +84,15 @@ class Preprocessor:
             )
             for i, c in enumerate(chunks)
         ]
+
+    def _split_oversized(self, text: str) -> list[str]:
+        """Split a single oversized paragraph by hard token boundary."""
+        tokens = self._encoder.encode(text)
+        parts: list[str] = []
+        for i in range(0, len(tokens), self._max_tokens):
+            part_tokens = tokens[i : i + self._max_tokens]
+            parts.append(self._encoder.decode(part_tokens))
+        return parts
 
     def _chunk_slack(self, text: str, source_id: str) -> list[Chunk]:
         """Slack: split by thread boundaries (---) or by tokens."""

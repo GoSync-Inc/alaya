@@ -16,6 +16,8 @@ class EntityRepository(BaseRepository):
         name: str,
         description: str | None = None,
         properties: dict | None = None,
+        aliases: list[str] | None = None,
+        extraction_run_id: uuid.UUID | None = None,
     ) -> L1Entity:
         entity = L1Entity(
             workspace_id=workspace_id,
@@ -23,6 +25,8 @@ class EntityRepository(BaseRepository):
             name=name,
             description=description,
             properties=properties or {},
+            aliases=aliases or [],
+            extraction_run_id=extraction_run_id,
         )
         self.session.add(entity)
         await self.session.flush()

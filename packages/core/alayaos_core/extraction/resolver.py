@@ -131,8 +131,30 @@ async def resolve_entity(
                     candidate_id=str(best_id),
                     score=best_score,
                 )
+                # Fall through to create, but record the LLM rejection in the decision
+                entity_type_id = await entity_type_resolver(extracted.entity_type, workspace_id, session)
+                new_entity = await entity_repo.create(
+                    workspace_id=workspace_id,
+                    entity_type_id=entity_type_id,
+                    name=extracted.name,
+                    aliases=extracted.aliases,
+                    extraction_run_id=run_id,
+                )
+                entity_index[normalized] = new_entity.id
+                for alias in extracted.aliases:
+                    alias_index[normalize_name(alias)] = new_entity.id
+                return (
+                    new_entity.id,
+                    True,
+                    {
+                        "tier": "llm",
+                        "action": "rejected",
+                        "score": best_score,
+                        "candidate_entity_id": str(best_id),
+                    },
+                )
 
-    # Create new entity
+    # Create new entity (no fuzzy match found at all)
     entity_type_id = await entity_type_resolver(extracted.entity_type, workspace_id, session)
     new_entity = await entity_repo.create(
         workspace_id=workspace_id,
@@ -201,12 +223,17 @@ async def resolve_batch(
     entity_index: dict[str, uuid.UUID] = {}
     alias_index: dict[str, uuid.UUID] = {}
 
-    # Load existing entities for this workspace
-    entities, _, _ = await entity_repo.list(limit=200)
-    for entity in entities:
-        entity_index[normalize_name(entity.name)] = entity.id
-        for alias in entity.aliases or []:
-            alias_index[normalize_name(alias)] = entity.id
+    # Load ALL existing entities for this workspace (paginate through all)
+    cursor = None
+    while True:
+        batch, next_cursor, has_more = await entity_repo.list(limit=200, cursor=cursor)
+        for entity in batch:
+            entity_index[normalize_name(entity.name)] = entity.id
+            for alias in entity.aliases or []:
+                alias_index[normalize_name(alias)] = entity.id
+        if not has_more:
+            break
+        cursor = next_cursor
 
     entity_name_to_id: dict[str, uuid.UUID] = {}
     resolver_decisions: list[dict] = []

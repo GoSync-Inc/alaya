@@ -16,6 +16,27 @@ archives:
         format: zip
 checksum:
   name_template: checksums.txt
+brews:
+  - repository:
+      owner: GoSync-Inc
+      name: homebrew-alaya
+    homepage: https://github.com/GoSync-Inc/alaya
+    description: "Alaya — corporate memory CLI"
+    license: BUSL-1.1
+    install: |
+      bin.install "alaya"
+    test: |
+      system "#{bin}/alaya", "--version"
+
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    args:
+      - "sign-blob"
+      - "--yes"
+      - "${artifact}"
+      - "--output-signature=${signature}"
+
 changelog:
   sort: asc
   filters:

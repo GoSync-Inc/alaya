@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: SecretStr = SecretStr("")
     ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
 
+    # LLM Fallback
+    LLM_FALLBACK_PROVIDERS: list[str] = []  # e.g. ["fake"] for testing
+
     # Extraction Pipeline
     EXTRACTION_MAX_INPUT_CHARS: int = 100_000
     EXTRACTION_GLEANING_MIN_TOKENS: int = 2000

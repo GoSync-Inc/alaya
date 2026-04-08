@@ -19,6 +19,7 @@ packages = []
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+addopts = "-m 'not integration'"
 markers = [
     "integration: requires real PostgreSQL and Redis",
 ]

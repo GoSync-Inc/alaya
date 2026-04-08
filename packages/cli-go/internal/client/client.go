@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/GoSync-Inc/alaya/packages/cli-go/internal/apierror"
 )
 
 type Client struct {
@@ -42,7 +44,7 @@ func (c *Client) Get(path string) ([]byte, error) {
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(data))
+		return nil, apierror.New(resp.StatusCode, string(data))
 	}
 
 	return data, nil
@@ -73,7 +75,7 @@ func (c *Client) Post(path string, body interface{}) ([]byte, error) {
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(data))
+		return nil, apierror.New(resp.StatusCode, string(data))
 	}
 
 	return data, nil
@@ -98,7 +100,7 @@ func (c *Client) Delete(path string) ([]byte, error) {
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("API error (%d): %s", resp.StatusCode, string(data))
+		return nil, apierror.New(resp.StatusCode, string(data))
 	}
 
 	return data, nil

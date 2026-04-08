@@ -2,9 +2,12 @@ package client
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/GoSync-Inc/alaya/packages/cli-go/internal/apierror"
 )
 
 func TestNew(t *testing.T) {
@@ -139,6 +142,63 @@ func TestGet_ErrorStatus(t *testing.T) {
 	_, err := c.Get("/entities/missing")
 	if err == nil {
 		t.Fatal("expected error for 404 response")
+	}
+}
+
+func TestGet_Returns_APIError_404(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"not found"}`))
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, "ak_test")
+	_, err := c.Get("/entities/missing")
+	var apiErr *apierror.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *apierror.APIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != 404 {
+		t.Errorf("expected status 404, got %d", apiErr.StatusCode)
+	}
+	if apiErr.ExitCode != apierror.ExitNotFound {
+		t.Errorf("expected ExitNotFound (%d), got %d", apierror.ExitNotFound, apiErr.ExitCode)
+	}
+}
+
+func TestPost_Returns_APIError_401(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"unauthorized"}`))
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, "bad_key")
+	_, err := c.Post("/search", map[string]string{})
+	var apiErr *apierror.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *apierror.APIError, got %T: %v", err, err)
+	}
+	if apiErr.ExitCode != apierror.ExitAuth {
+		t.Errorf("expected ExitAuth (%d), got %d", apierror.ExitAuth, apiErr.ExitCode)
+	}
+}
+
+func TestDelete_Returns_APIError_429(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		w.Write([]byte(`{"error":"rate limited"}`))
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, "ak_test")
+	_, err := c.Delete("/api-keys/ak_prefix")
+	var apiErr *apierror.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *apierror.APIError, got %T: %v", err, err)
+	}
+	if apiErr.ExitCode != apierror.ExitRateLimit {
+		t.Errorf("expected ExitRateLimit (%d), got %d", apierror.ExitRateLimit, apiErr.ExitCode)
 	}
 }
 

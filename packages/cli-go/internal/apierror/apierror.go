@@ -1,6 +1,7 @@
 package apierror
 
 import (
+	"context"
 	"errors"
 	"fmt"
 )
@@ -42,7 +43,7 @@ func New(statusCode int, body string) *APIError {
 // Returns ExitGeneric for unknown errors and nil.
 func ExitCodeFrom(err error) int {
 	if err == nil {
-		return ExitGeneric
+		return 0
 	}
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
@@ -55,6 +56,9 @@ func ExitCodeFrom(err error) int {
 }
 
 func isTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
 	var netErr interface{ Timeout() bool }
 	return errors.As(err, &netErr) && netErr.Timeout()
 }

@@ -100,6 +100,23 @@ func TestLoad_MissingFileUsesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoad_PermissionDeniedReturnsError(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgFile, []byte("server_url: http://test\n"), 0o000); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+	// Skip on systems where root can read any file
+	if os.Getuid() == 0 {
+		t.Skip("running as root; permission check not applicable")
+	}
+
+	_, err := LoadFromPath(cfgFile)
+	if err == nil {
+		t.Fatal("expected error for permission denied, got nil")
+	}
+}
+
 func TestLoad_InvalidYAMLReturnsError(t *testing.T) {
 	dir := t.TempDir()
 	cfgFile := filepath.Join(dir, "config.yaml")

@@ -162,14 +162,72 @@ async def run_write(
             await release_workspace_lock(redis, str(event.workspace_id), token)
 
 
-async def run_enrich(run_id: uuid.UUID, session: AsyncSession) -> None:
-    """Job 3: Enrich stub — mark entities as needing embedding."""
+async def run_enrich(
+    run_id: uuid.UUID,
+    session: AsyncSession,
+    embedding_service=None,
+) -> None:
+    """Job 3: Enrich — generate embeddings for entities and claims from this extraction run."""
+    from sqlalchemy import select
+
+    from alayaos_core.models.claim import L2Claim
+    from alayaos_core.models.entity import L1Entity
+    from alayaos_core.models.vector import VectorChunk
+
     run_repo = ExtractionRunRepository(session)
     run = await run_repo.get_by_id(run_id)
     if not run or run.status != "completed":
         return
+
+    if embedding_service is None:
+        log.info("enrich_no_embedding_service", run_id=str(run_id))
+        return
+
     await run_repo.update_status(run.id, "enriching")
-    # Actual embedding deferred to Run 3
-    log.info("enrich_stub_completed", run_id=str(run_id))
-    # Return to completed (enrich is a no-op stub for now)
+
+    ws_id = run.workspace_id
+
+    # Load entities created by this run
+    entity_stmt = select(L1Entity).where(L1Entity.workspace_id == ws_id, L1Entity.extraction_run_id == run_id)
+    entities = list((await session.execute(entity_stmt)).scalars().all())
+
+    claim_stmt = select(L2Claim).where(L2Claim.workspace_id == ws_id, L2Claim.extraction_run_id == run_id)
+    claims = list((await session.execute(claim_stmt)).scalars().all())
+
+    # Build text representations
+    texts: list[str] = []
+    source_info: list[dict] = []
+
+    for entity in entities:
+        text = f"{entity.name}: {entity.description or ''}"
+        texts.append(text)
+        source_info.append({"source_type": "entity", "source_id": entity.id, "content": text})
+
+    for claim in claims:
+        text = f"{claim.predicate}: {claim.value}"
+        texts.append(text)
+        source_info.append({"source_type": "claim", "source_id": claim.id, "content": text})
+
+    if not texts:
+        log.info("enrich_nothing_to_embed", run_id=str(run_id))
+        await run_repo.update_status(run.id, "completed")
+        return
+
+    # Batch embed
+    embeddings = await embedding_service.embed_texts(texts)
+
+    # Create VectorChunk rows
+    for info, embedding in zip(source_info, embeddings, strict=True):
+        chunk = VectorChunk(
+            workspace_id=ws_id,
+            source_type=info["source_type"],
+            source_id=info["source_id"],
+            chunk_index=0,
+            content=info["content"],
+            embedding=embedding,
+        )
+        session.add(chunk)
+
+    await session.flush()
+    log.info("enrich_completed", run_id=str(run_id), chunks_created=len(texts))
     await run_repo.update_status(run.id, "completed")

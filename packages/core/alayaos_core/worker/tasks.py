@@ -434,15 +434,24 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
     }
 
 
-@broker.task(timeout=60, retry_on_error=True, max_retries=2)
+@broker.task(timeout=120, retry_on_error=True, max_retries=2)
 async def job_enrich(extraction_run_id: str, workspace_id: str) -> dict:
-    """Job 3: Enrich — embedding stub (deferred to Run 3)."""
+    """Job 3: Enrich — generate embeddings for extracted entities and claims."""
     from alayaos_core.extraction.pipeline import run_enrich
+    from alayaos_core.services.embedding import FakeEmbeddingService, FastEmbedService
+
+    settings = Settings()
+
+    # Use FastEmbed in production, fake for dev/test
+    if settings.FEATURE_FLAG_VECTOR_SEARCH:
+        embedding_service = FastEmbedService(settings.EMBEDDING_MODEL, settings.EMBEDDING_DIMENSIONS)
+    else:
+        embedding_service = FakeEmbeddingService(settings.EMBEDDING_DIMENSIONS)
 
     factory = _session_factory()
     async with factory() as session, session.begin():
         await _set_workspace_context(session, workspace_id)
-        await run_enrich(uuid.UUID(extraction_run_id), session)
+        await run_enrich(uuid.UUID(extraction_run_id), session, embedding_service=embedding_service)
 
     return {"extraction_run_id": extraction_run_id, "status": "enriched"}
 

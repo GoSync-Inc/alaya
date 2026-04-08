@@ -242,3 +242,301 @@ async def test_ask_validates_citations_and_drops_hallucinated():
     assert len(result.citations) == 1
     assert result.citations[0].entity_id == real_entity_id
     assert result.tokens_used == 150
+
+
+# ---- Test _estimate_tokens ----
+
+
+def test_estimate_tokens_empty_string():
+    from alayaos_core.services.ask import _estimate_tokens
+
+    assert _estimate_tokens("") == 0
+
+
+def test_estimate_tokens_reasonable_estimate():
+    from alayaos_core.services.ask import _estimate_tokens
+
+    # 40 chars of English text should give ~10 tokens (40 // 4)
+    text = "a" * 40
+    assert _estimate_tokens(text) == 10
+
+
+def test_estimate_tokens_longer_text():
+    from alayaos_core.services.ask import _estimate_tokens
+
+    # 400 chars → ~100 tokens
+    text = "x" * 400
+    assert _estimate_tokens(text) == 100
+
+
+# ---- Test token budget enforcement ----
+
+
+@pytest.mark.asyncio
+async def test_ask_small_context_all_evidence_included():
+    """When all evidence fits in budget, all items are returned."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from alayaos_core.llm.interface import LLMUsage
+    from alayaos_core.schemas.search import EvidenceUnit, SearchResponse
+    from alayaos_core.services.ask import AskResponseModel, ask
+
+    ws = uuid.uuid4()
+    entity_id = uuid.uuid4()
+
+    # Small evidence items (short content) — will fit in budget
+    evidence = [
+        EvidenceUnit(
+            source_type="entity",
+            source_id=uuid.uuid4(),
+            content="Short content A",
+            score=0.9,
+            channels=["fts"],
+        ),
+        EvidenceUnit(
+            source_type="entity",
+            source_id=uuid.uuid4(),
+            content="Short content B",
+            score=0.8,
+            channels=["fts"],
+        ),
+    ]
+    search_response = SearchResponse(
+        query="test?",
+        results=evidence,
+        total=2,
+        channels_used=["fts"],
+        elapsed_ms=1,
+    )
+
+    fake_response = AskResponseModel(
+        answer="Both A and B are relevant.",
+        answerable=True,
+        citations=[],
+    )
+    usage = LLMUsage(tokens_in=50, tokens_out=20, tokens_cached=0, cost_usd=0.001)
+
+    mock_llm = MagicMock()
+    mock_llm.extract = AsyncMock(return_value=(fake_response, usage))
+    mock_session = MagicMock()
+
+    import alayaos_core.services.ask as ask_module
+
+    original_search = ask_module.hybrid_search
+    ask_module.hybrid_search = AsyncMock(return_value=search_response)
+
+    try:
+        result = await ask(
+            session=mock_session,
+            question="test?",
+            workspace_id=ws,
+            llm=mock_llm,
+        )
+    finally:
+        ask_module.hybrid_search = original_search
+
+    # Both evidence items should be included since they're small
+    assert len(result.evidence) == 2
+
+
+@pytest.mark.asyncio
+async def test_ask_large_context_truncated_to_budget():
+    """When evidence exceeds token budget, only fitting items are returned."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from alayaos_core.llm.interface import LLMUsage
+    from alayaos_core.schemas.search import EvidenceUnit, SearchResponse
+    from alayaos_core.services.ask import AskResponseModel, ask
+
+    ws = uuid.uuid4()
+
+    # Each evidence item has ~700 tokens (2800 chars). 10 items = 7000 tokens, exceeds budget of ~6000
+    large_content = "x" * 2800
+    evidence = [
+        EvidenceUnit(
+            source_type="claim",
+            source_id=uuid.uuid4(),
+            content=large_content,
+            score=0.9,
+            channels=["vector"],
+        )
+        for _ in range(10)
+    ]
+    search_response = SearchResponse(
+        query="test?",
+        results=evidence,
+        total=10,
+        channels_used=["vector"],
+        elapsed_ms=1,
+    )
+
+    fake_response = AskResponseModel(
+        answer="Some answer.",
+        answerable=True,
+        citations=[],
+    )
+    usage = LLMUsage(tokens_in=100, tokens_out=50, tokens_cached=0, cost_usd=0.001)
+
+    mock_llm = MagicMock()
+    mock_llm.extract = AsyncMock(return_value=(fake_response, usage))
+    mock_session = MagicMock()
+
+    import alayaos_core.services.ask as ask_module
+
+    original_search = ask_module.hybrid_search
+    ask_module.hybrid_search = AsyncMock(return_value=search_response)
+
+    try:
+        result = await ask(
+            session=mock_session,
+            question="test?",
+            workspace_id=ws,
+            llm=mock_llm,
+        )
+    finally:
+        ask_module.hybrid_search = original_search
+
+    # Should be truncated — not all 10 items fit
+    assert len(result.evidence) < 10
+    # At least 1 item must always be included
+    assert len(result.evidence) >= 1
+
+
+@pytest.mark.asyncio
+async def test_ask_always_includes_at_least_one_evidence():
+    """Even if the first evidence item exceeds budget, it is still included."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from alayaos_core.llm.interface import LLMUsage
+    from alayaos_core.schemas.search import EvidenceUnit, SearchResponse
+    from alayaos_core.services.ask import AskResponseModel, ask
+
+    ws = uuid.uuid4()
+
+    # Single enormous evidence item — way over any budget
+    enormous_content = "y" * 100_000  # ~25000 tokens
+    evidence = [
+        EvidenceUnit(
+            source_type="claim",
+            source_id=uuid.uuid4(),
+            content=enormous_content,
+            score=0.9,
+            channels=["vector"],
+        )
+    ]
+    search_response = SearchResponse(
+        query="test?",
+        results=evidence,
+        total=1,
+        channels_used=["vector"],
+        elapsed_ms=1,
+    )
+
+    fake_response = AskResponseModel(
+        answer="Best effort answer.",
+        answerable=True,
+        citations=[],
+    )
+    usage = LLMUsage(tokens_in=500, tokens_out=50, tokens_cached=0, cost_usd=0.01)
+
+    mock_llm = MagicMock()
+    mock_llm.extract = AsyncMock(return_value=(fake_response, usage))
+    mock_session = MagicMock()
+
+    import alayaos_core.services.ask as ask_module
+
+    original_search = ask_module.hybrid_search
+    ask_module.hybrid_search = AsyncMock(return_value=search_response)
+
+    try:
+        result = await ask(
+            session=mock_session,
+            question="test?",
+            workspace_id=ws,
+            llm=mock_llm,
+        )
+    finally:
+        ask_module.hybrid_search = original_search
+
+    # Must always include at least 1 even if it busts budget
+    assert len(result.evidence) == 1
+
+
+@pytest.mark.asyncio
+async def test_ask_citations_validated_against_included_evidence_only():
+    """Citations from excluded (budget-cut) evidence units are dropped."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from alayaos_core.llm.interface import LLMUsage
+    from alayaos_core.schemas.search import EvidenceUnit, SearchResponse
+    from alayaos_core.services.ask import AskCitation, AskResponseModel, ask
+
+    ws = uuid.uuid4()
+    included_entity_id = uuid.uuid4()
+    excluded_entity_id = uuid.uuid4()
+
+    # 8 large items (~700 tokens each) fill the budget (~5600 tokens), leaving no room for the
+    # excluded entity item which comes last. Budget is ~5983 tokens.
+    large_content = "z" * 2800  # ~700 tokens each
+
+    evidence = [
+        EvidenceUnit(
+            source_type="entity",
+            source_id=included_entity_id,
+            content=large_content,
+            score=0.99,
+            channels=["fts"],
+            entity_id=included_entity_id,
+        )
+        for _ in range(8)
+    ] + [
+        EvidenceUnit(
+            source_type="entity",
+            source_id=excluded_entity_id,
+            content=large_content,
+            score=0.5,
+            channels=["vector"],
+            entity_id=excluded_entity_id,
+        )
+        for _ in range(2)
+    ]
+
+    search_response = SearchResponse(
+        query="who?",
+        results=evidence,
+        total=10,
+        channels_used=["fts", "vector"],
+        elapsed_ms=1,
+    )
+
+    fake_response = AskResponseModel(
+        answer="Answer using included and excluded.",
+        answerable=True,
+        citations=[
+            AskCitation(entity_id=included_entity_id, snippet="included entity"),
+            AskCitation(entity_id=excluded_entity_id, snippet="excluded entity"),
+        ],
+    )
+    usage = LLMUsage(tokens_in=100, tokens_out=50, tokens_cached=0, cost_usd=0.001)
+
+    mock_llm = MagicMock()
+    mock_llm.extract = AsyncMock(return_value=(fake_response, usage))
+    mock_session = MagicMock()
+
+    import alayaos_core.services.ask as ask_module
+
+    original_search = ask_module.hybrid_search
+    ask_module.hybrid_search = AsyncMock(return_value=search_response)
+
+    try:
+        result = await ask(
+            session=mock_session,
+            question="who?",
+            workspace_id=ws,
+            llm=mock_llm,
+        )
+    finally:
+        ask_module.hybrid_search = original_search
+
+    # Only citation for included entity should survive
+    assert all(c.entity_id == included_entity_id for c in result.citations)

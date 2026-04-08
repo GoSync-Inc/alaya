@@ -96,8 +96,11 @@ async def ask(
         max_tokens=settings.ASK_MAX_OUTPUT_TOKENS,
     )
 
+    # Collect valid IDs from all evidence (including chunk-sourced with entity_id/claim_id)
     valid_entity_ids = {u.source_id for u in evidence if u.source_type == "entity"}
+    valid_entity_ids |= {u.entity_id for u in evidence if u.entity_id is not None}
     valid_claim_ids = {u.source_id for u in evidence if u.source_type == "claim"}
+    valid_claim_ids |= {u.claim_id for u in evidence if u.claim_id is not None}
     validated_citations = []
     for c in response.citations:
         if c.entity_id and c.entity_id not in valid_entity_ids:

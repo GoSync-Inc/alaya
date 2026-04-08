@@ -37,6 +37,7 @@ def create_app() -> FastAPI:
     from alayaos_api.middleware import register_error_handlers
     from alayaos_api.routers import (
         api_keys,
+        ask,
         chunks,
         claims,
         entities,
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
     app.include_router(integrator_runs.router, prefix="/api/v1", tags=["integrator-runs"])
     app.include_router(tree.router, prefix="/api/v1", tags=["tree"])
     app.include_router(search.router, prefix="/api/v1", tags=["search"])
+    app.include_router(ask.router, prefix="/api/v1", tags=["ask"])
 
     return app
 

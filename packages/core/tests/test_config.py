@@ -98,3 +98,35 @@ def test_settings_tree_config() -> None:
 def test_settings_feature_flag_vector_search() -> None:
     s = Settings()
     assert s.FEATURE_FLAG_VECTOR_SEARCH is False
+
+
+def test_settings_has_embedding_config() -> None:
+    s = Settings()
+    assert s.EMBEDDING_MODEL == "intfloat/multilingual-e5-large"
+    assert s.EMBEDDING_DIMENSIONS == 1024
+    assert s.EMBEDDING_BATCH_SIZE == 64
+
+
+def test_settings_has_search_config() -> None:
+    s = Settings()
+    assert s.SEARCH_RRF_K == 60
+    assert s.SEARCH_MAX_RESULTS == 20
+    assert s.SEARCH_DEFAULT_LIMIT == 10
+
+
+def test_settings_has_ask_config() -> None:
+    s = Settings()
+    assert s.ASK_MAX_CONTEXT_TOKENS == 8192
+    assert s.ASK_RATE_LIMIT_PER_MINUTE == 10
+    assert s.ASK_RATE_LIMIT_PER_HOUR == 100
+
+
+def test_settings_has_tree_config() -> None:
+    s = Settings()
+    assert s.TREE_MAX_DEPTH == 10
+    assert s.TREE_MAX_CLAIMS_PER_BRIEF == 50
+
+
+def test_settings_vector_search_disabled_by_default() -> None:
+    s = Settings()
+    assert s.FEATURE_FLAG_VECTOR_SEARCH is False

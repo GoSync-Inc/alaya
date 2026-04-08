@@ -16,8 +16,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    conn = op.get_bind()
-    conn.execution_options(isolation_level="AUTOCOMMIT")
+    # End Alembic's transaction so CREATE INDEX CONCURRENTLY can run
+    op.execute("COMMIT")
 
     op.execute(
         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_vc_embedding_hnsw "

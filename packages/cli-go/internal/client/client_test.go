@@ -100,6 +100,48 @@ func TestSearch(t *testing.T) {
 	}
 }
 
+func TestGet_Success(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		if r.Header.Get("X-Api-Key") != "ak_test" {
+			t.Errorf("missing or wrong X-Api-Key header")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id":"abc"}`))
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, "ak_test")
+	data, err := c.Get("/entities/abc")
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if result["id"] != "abc" {
+		t.Errorf("unexpected response body: %v", result)
+	}
+}
+
+func TestGet_ErrorStatus(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error":"not found"}`))
+	}))
+	defer ts.Close()
+
+	c := New(ts.URL, "ak_test")
+	_, err := c.Get("/entities/missing")
+	if err == nil {
+		t.Fatal("expected error for 404 response")
+	}
+}
+
 func TestAsk(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

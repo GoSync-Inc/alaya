@@ -61,6 +61,11 @@ class FakeLLMAdapter:
             "engineering": 0.3,
             "knowledge": 0.2,
         },
+        "AskResponseModel": {
+            "answer": "Based on the available context, here is what I found.",
+            "answerable": True,
+            "citations": [],
+        },
     }
 
     @classmethod

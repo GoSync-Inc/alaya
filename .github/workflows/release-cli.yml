@@ -1,0 +1,26 @@
+name: Release CLI
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+defaults:
+  run:
+    working-directory: packages/cli-go
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: '~> v2'
+          args: release --clean
+          workdir: packages/cli-go
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

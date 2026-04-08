@@ -1,0 +1,21 @@
+name: CLI CI
+on:
+  push:
+    branches: [main, 'feat/*']
+    paths: ['packages/cli-go/**']
+  pull_request:
+    paths: ['packages/cli-go/**']
+defaults:
+  run:
+    working-directory: packages/cli-go
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - run: go build ./cmd/alaya/
+      - run: go test ./...
+      - run: go vet ./...

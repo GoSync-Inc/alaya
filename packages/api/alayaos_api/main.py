@@ -49,6 +49,7 @@ def create_app() -> FastAPI:
         pipeline_traces,
         predicates,
         relations,
+        tree,
         workspaces,
     )
 
@@ -68,6 +69,7 @@ def create_app() -> FastAPI:
     app.include_router(chunks.router, prefix="/api/v1", tags=["chunks"])
     app.include_router(pipeline_traces.router, prefix="/api/v1", tags=["pipeline-traces"])
     app.include_router(integrator_runs.router, prefix="/api/v1", tags=["integrator-runs"])
+    app.include_router(tree.router, prefix="/api/v1", tags=["tree"])
 
     return app
 

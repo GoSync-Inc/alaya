@@ -1,7 +1,7 @@
-# STUB — no repository until Run 3
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,3 +19,7 @@ class L3TreeNode(Base, TimestampMixin):
     entity_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("l1_entities.id"), nullable=True)
     content: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    is_dirty: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    markdown_cache: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_rebuilt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    summary: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")

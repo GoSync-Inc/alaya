@@ -2,8 +2,18 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ARRAY, Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import (
+    ARRAY,
+    Boolean,
+    Computed,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from alayaos_core.models.base import Base, TimestampMixin
@@ -39,6 +49,14 @@ class L1Entity(Base, TimestampMixin):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     aliases: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
     extraction_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    tsv: Mapped[None] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('simple', coalesce(name, '') || ' ' || coalesce(description, ''))",
+            persisted=True,
+        ),
+        nullable=True,
+    )
 
     entity_type: Mapped["EntityTypeDefinition"] = relationship("EntityTypeDefinition", lazy="raise")
     external_ids: Mapped[list["EntityExternalId"]] = relationship(

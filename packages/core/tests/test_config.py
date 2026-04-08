@@ -60,3 +60,41 @@ def test_settings_worker_config() -> None:
     s = Settings()
     assert s.WORKER_CONCURRENCY == 4
     assert s.WORKER_EXTRACT_TIMEOUT == 120
+
+
+def test_settings_embedding_config() -> None:
+    s = Settings()
+    assert s.EMBEDDING_MODEL == "intfloat/multilingual-e5-large"
+    assert s.EMBEDDING_DIMENSIONS == 1024
+    assert s.EMBEDDING_BATCH_SIZE == 64
+
+
+def test_settings_search_config() -> None:
+    s = Settings()
+    assert s.SEARCH_HNSW_EF_SEARCH == 100
+    assert s.SEARCH_RRF_K == 60
+    assert s.SEARCH_MAX_RESULTS == 20
+    assert s.SEARCH_DEFAULT_LIMIT == 10
+
+
+def test_settings_ask_config() -> None:
+    s = Settings()
+    assert s.ASK_MODEL == "claude-sonnet-4-6-20250514"
+    assert s.ASK_MAX_CONTEXT_TOKENS == 8192
+    assert s.ASK_MAX_OUTPUT_TOKENS == 2048
+    assert s.ASK_MAX_RESULTS_FOR_LLM == 10
+    assert s.ASK_RATE_LIMIT_PER_MINUTE == 10
+    assert s.ASK_RATE_LIMIT_PER_HOUR == 100
+
+
+def test_settings_tree_config() -> None:
+    s = Settings()
+    assert s.TREE_BRIEFING_MODEL == "claude-sonnet-4-6-20250514"
+    assert s.TREE_BRIEFING_CACHE_TTL == 900
+    assert s.TREE_MAX_DEPTH == 10
+    assert s.TREE_MAX_CLAIMS_PER_BRIEF == 50
+
+
+def test_settings_feature_flag_vector_search() -> None:
+    s = Settings()
+    assert s.FEATURE_FLAG_VECTOR_SEARCH is False

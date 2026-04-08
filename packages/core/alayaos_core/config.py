@@ -59,5 +59,31 @@ class Settings(BaseSettings):
     INTEGRATOR_DEDUP_THRESHOLD: float = 0.85
     INTEGRATOR_DEDUP_AMBIGUOUS_LOW: float = 0.70
 
+    # Embedding
+    EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large"
+    EMBEDDING_DIMENSIONS: int = 1024
+    EMBEDDING_BATCH_SIZE: int = 64
+
+    # Search
+    SEARCH_HNSW_EF_SEARCH: int = 100
+    SEARCH_RRF_K: int = 60
+    SEARCH_MAX_RESULTS: int = 20
+    SEARCH_DEFAULT_LIMIT: int = 10
+
+    # Q&A (Ask)
+    ASK_MODEL: str = "claude-sonnet-4-6-20250514"
+    ASK_MAX_CONTEXT_TOKENS: int = 8192
+    ASK_MAX_OUTPUT_TOKENS: int = 2048
+    ASK_MAX_RESULTS_FOR_LLM: int = 10
+    ASK_RATE_LIMIT_PER_MINUTE: int = 10
+    ASK_RATE_LIMIT_PER_HOUR: int = 100
+
+    # Knowledge Tree
+    TREE_BRIEFING_MODEL: str = "claude-sonnet-4-6-20250514"
+    TREE_BRIEFING_CACHE_TTL: int = 900  # 15 minutes
+    TREE_MAX_DEPTH: int = 10
+    TREE_MAX_CLAIMS_PER_BRIEF: int = 50
+
     # Feature flags
     FEATURE_FLAG_USE_CORTEX: bool = True  # Cortex pipeline enabled (FakeLLM returns realistic DomainScores)
+    FEATURE_FLAG_VECTOR_SEARCH: bool = False  # Enable after embedding backfill

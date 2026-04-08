@@ -19,6 +19,7 @@ dependencies = [
     "tiktoken>=0.9",
     "dateparser>=1.2",
     "transliterate>=1.10",
+    "fastembed>=0.4",
 ]
 
 [project.optional-dependencies]

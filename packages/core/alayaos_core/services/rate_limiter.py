@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
+import os
 import time
 from typing import TYPE_CHECKING
 
+import structlog
+
 if TYPE_CHECKING:
     import redis.asyncio as aioredis
+
+log = structlog.get_logger()
 
 # Lua script runs atomically inside Redis (single-threaded eval).
 # Arguments:
 #   KEYS[1]  — the sorted-set key
 #   ARGV[1]  — window_start  (now - window_seconds, as float string)
-#   ARGV[2]  — now           (current timestamp, as float string)
-#   ARGV[3]  — limit         (integer)
-#   ARGV[4]  — window_seconds (TTL, integer)
+#   ARGV[2]  — member        (unique member string: "<timestamp_ns>:<random_hex>")
+#   ARGV[3]  — now           (current timestamp, as float string — used as score)
+#   ARGV[4]  — limit         (integer)
+#   ARGV[5]  — window_seconds (TTL, integer)
 #
 # Returns a three-element array: {count, allowed, oldest_score}
 #   allowed == 1  → request permitted
@@ -23,17 +29,18 @@ if TYPE_CHECKING:
 _RATE_LIMIT_LUA = """
 local key          = KEYS[1]
 local window_start = tonumber(ARGV[1])
-local now          = tonumber(ARGV[2])
-local limit        = tonumber(ARGV[3])
-local ttl          = tonumber(ARGV[4])
+local member       = ARGV[2]
+local now          = tonumber(ARGV[3])
+local limit        = tonumber(ARGV[4])
+local ttl          = tonumber(ARGV[5])
 
 redis.call('ZREMRANGEBYSCORE', key, '-inf', window_start)
-redis.call('ZADD', key, now, tostring(now))
+redis.call('ZADD', key, now, member)
 local count = redis.call('ZCARD', key)
 redis.call('EXPIRE', key, ttl)
 
 if count > limit then
-    redis.call('ZREM', key, tostring(now))
+    redis.call('ZREM', key, member)
     local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
     local oldest_score = 0
     if #oldest > 0 then
@@ -58,16 +65,22 @@ class RateLimiterService:
         now = time.time()
         window_start = now - window_seconds
         redis_key = f"ratelimit:{key}"
+        member = f"{time.time_ns()}:{os.urandom(4).hex()}"
 
-        result: list[int] = await self._redis.eval(
-            _RATE_LIMIT_LUA,
-            1,
-            redis_key,
-            str(window_start),
-            str(now),
-            str(limit),
-            str(window_seconds),
-        )
+        try:
+            result: list[int] = await self._redis.eval(
+                _RATE_LIMIT_LUA,
+                1,
+                redis_key,
+                str(window_start),
+                member,
+                str(now),
+                str(limit),
+                str(window_seconds),
+            )
+        except Exception:
+            log.warning("rate_limiter_redis_error", key=key)
+            return True, None
 
         _count, allowed_flag, oldest_score = result[0], result[1], result[2]
 
@@ -75,6 +88,6 @@ class RateLimiterService:
             return True, None
 
         # Compute retry_after from oldest entry's score
-        retry_after = int(window_seconds - (now - oldest_score)) + 1 if oldest_score else window_seconds
+        retry_after = int(window_seconds - (now - oldest_score)) + 1 if oldest_score > 0 else window_seconds
 
         return False, max(retry_after, 1)

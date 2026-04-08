@@ -73,8 +73,28 @@ async def hybrid_search(
             if "entity_name" not in entry["channels"]:
                 entry["channels"].append("entity_name")
 
-    # Sort by RRF score and limit
-    sorted_results = sorted(all_results.values(), key=lambda x: x["rrf_score"], reverse=True)[:limit]
+    # Sort by RRF score
+    sorted_results = sorted(all_results.values(), key=lambda x: x["rrf_score"], reverse=True)
+
+    # Filter by entity_types if provided (post-RRF to preserve correct scoring)
+    if entity_types:
+        entity_ids = [r["source_id"] for r in sorted_results if r["source_type"] == "entity"]
+        if entity_ids:
+            type_sql = text("""
+                SELECT e.id, et.slug FROM l1_entities e
+                JOIN entity_type_definitions et ON et.id = e.entity_type_id AND et.workspace_id = e.workspace_id
+                WHERE e.id = ANY(:ids) AND e.workspace_id = :ws_id
+            """)
+            type_result = await session.execute(type_sql, {"ids": entity_ids, "ws_id": workspace_id})
+            entity_type_map = {row["id"]: row["slug"] for row in type_result.mappings()}
+            sorted_results = [
+                r
+                for r in sorted_results
+                if r["source_type"] != "entity" or entity_type_map.get(r["source_id"]) in entity_types
+            ]
+
+    # Apply limit
+    sorted_results = sorted_results[:limit]
 
     elapsed_ms = int((time.monotonic() - start) * 1000)
 
@@ -111,10 +131,10 @@ async def _vector_search(
     await session.execute(text(f"SET LOCAL hnsw.ef_search = {ef}"))
     sql = text("""
         SELECT
-            vc.id AS source_id,
+            vc.source_id AS source_id,
             vc.source_type,
             vc.content,
-            vc.source_id AS ref_id,
+            vc.id AS chunk_id,
             1 - (vc.embedding <=> :embedding::halfvec) AS similarity
         FROM vector_chunks vc
         WHERE vc.workspace_id = :ws_id
@@ -129,9 +149,9 @@ async def _vector_search(
                 "source_type": row["source_type"],
                 "source_id": row["source_id"],
                 "content": row["content"],
-                "entity_id": row["ref_id"] if row["source_type"] == "entity" else None,
+                "entity_id": row["source_id"] if row["source_type"] == "entity" else None,
                 "entity_name": None,
-                "claim_id": row["ref_id"] if row["source_type"] == "claim" else None,
+                "claim_id": row["source_id"] if row["source_type"] == "claim" else None,
             }
         )
     return rows
@@ -141,7 +161,7 @@ async def _fts_search(session: AsyncSession, query: str, workspace_id: uuid.UUID
     """Full-text search on vector_chunks and l1_entities tsvector columns."""
     sql = text("""
         WITH chunk_fts AS (
-            SELECT vc.id AS source_id, 'chunk' AS source_type, vc.content,
+            SELECT vc.source_id AS source_id, vc.source_type AS source_type, vc.content,
                    vc.source_id AS ref_id, vc.source_type AS ref_type,
                    ts_rank(vc.tsv, websearch_to_tsquery('simple', :query)) AS rank
             FROM vector_chunks vc

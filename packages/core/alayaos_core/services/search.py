@@ -106,6 +106,8 @@ async def _vector_search(
     session: AsyncSession, query_embedding: list[float], workspace_id: uuid.UUID, limit: int
 ) -> list[dict]:
     """Vector similarity search using pgvector HNSW cosine."""
+    settings = Settings()
+    await session.execute(text("SET LOCAL hnsw.ef_search = :ef"), {"ef": settings.SEARCH_HNSW_EF_SEARCH})
     sql = text("""
         SELECT
             vc.id AS source_id,

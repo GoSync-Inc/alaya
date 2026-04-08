@@ -85,3 +85,16 @@ class TreeNodeRepository(BaseRepository):
             .values(is_dirty=True)
         )
         await self.session.execute(stmt)
+
+    async def mark_workspace_dirty(self) -> int:
+        """Mark all entity-linked tree nodes in workspace as dirty. Returns count."""
+        stmt = (
+            update(L3TreeNode)
+            .where(
+                self._ws_filter(L3TreeNode),
+                L3TreeNode.entity_id.isnot(None),
+            )
+            .values(is_dirty=True)
+        )
+        result = await self.session.execute(stmt)
+        return result.rowcount

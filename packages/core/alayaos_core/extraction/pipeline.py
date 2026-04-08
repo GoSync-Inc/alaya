@@ -152,6 +152,18 @@ async def run_write(
     try:
         await run_repo.update_status(run.id, "writing")
         counters = await atomic_write(extraction_result, event, run, session, llm, redis=redis)
+
+        # Wire tree dirty flags — mark entity-linked nodes as needing rebuild
+        try:
+            from alayaos_core.repositories.tree import TreeNodeRepository
+
+            tree_repo = TreeNodeRepository(session, event.workspace_id)
+            dirty_count = await tree_repo.mark_workspace_dirty()
+            if dirty_count:
+                log.info("tree_dirty_flagged", run_id=str(run_id), count=dirty_count)
+        except Exception:
+            log.warning("tree_dirty_flag_failed", run_id=str(run_id))
+
         await run_repo.update_status(run.id, "completed")
         return counters
     except Exception as e:

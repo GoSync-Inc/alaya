@@ -1,8 +1,10 @@
 """Ask (Q&A) endpoint."""
 
+import contextlib
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +12,7 @@ from alayaos_api.deps import get_api_key, get_workspace_session
 from alayaos_core.config import Settings
 from alayaos_core.models.api_key import APIKey
 from alayaos_core.services.ask import AskResult, ask
+from alayaos_core.services.rate_limiter import RateLimiterService
 
 router = APIRouter()
 
@@ -27,6 +30,17 @@ async def ask_endpoint(
 ):
     settings = Settings()
 
+    # Rate limiting: 10/min per key for /ask
+    redis_client = None
+    with contextlib.suppress(Exception):
+        redis_client = aioredis.from_url(settings.REDIS_URL)
+    limiter = RateLimiterService(redis=redis_client)
+    allowed, retry_after = await limiter.check(f"{api_key.prefix}:ask", settings.ASK_RATE_LIMIT_PER_MINUTE, 60)
+    if not allowed:
+        if redis_client:
+            await redis_client.aclose()
+        raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(retry_after)})
+
     if settings.ANTHROPIC_API_KEY.get_secret_value():
         from alayaos_core.llm.anthropic import AnthropicAdapter
 
@@ -42,7 +56,7 @@ async def ask_endpoint(
 
         embedding_service = FastEmbedService(settings.EMBEDDING_MODEL, settings.EMBEDDING_DIMENSIONS)
 
-    return await ask(
+    result = await ask(
         session=session,
         question=body.question,
         workspace_id=api_key.workspace_id,
@@ -50,3 +64,8 @@ async def ask_endpoint(
         embedding_service=embedding_service,
         max_results=body.max_results,
     )
+
+    if redis_client:
+        await redis_client.aclose()
+
+    return result

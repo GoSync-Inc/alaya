@@ -282,7 +282,6 @@ async def test_ask_small_context_all_evidence_included():
     from alayaos_core.services.ask import AskResponseModel, ask
 
     ws = uuid.uuid4()
-    entity_id = uuid.uuid4()
 
     # Small evidence items (short content) — will fit in budget
     evidence = [
@@ -342,7 +341,7 @@ async def test_ask_small_context_all_evidence_included():
 @pytest.mark.asyncio
 async def test_ask_large_context_truncated_to_budget():
     """When evidence exceeds token budget, only fitting items are returned."""
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import AsyncMock, MagicMock
 
     from alayaos_core.llm.interface import LLMUsage
     from alayaos_core.schemas.search import EvidenceUnit, SearchResponse
@@ -477,7 +476,7 @@ async def test_ask_citations_validated_against_included_evidence_only():
 
     # 8 large items (~700 tokens each) fill the budget (~5600 tokens), leaving no room for the
     # excluded entity item which comes last. Budget is ~5983 tokens.
-    large_content = "z" * 2800  # ~700 tokens each
+    large_content = "z" * 30000  # ~7500 tokens each — exceeds remaining budget after first item
 
     evidence = [
         EvidenceUnit(

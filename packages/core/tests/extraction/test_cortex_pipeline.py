@@ -125,7 +125,7 @@ async def test_cortex_pipeline_creates_chunks_and_traces() -> None:
 
 @pytest.mark.asyncio
 async def test_cortex_pipeline_crystal_selection_all_skipped_at_high_threshold() -> None:
-    """FakeLLM returns all 0.0 scores; with threshold=0.5 all chunks are NOT crystal."""
+    """FakeLLM returns realistic scores (max 0.6); with threshold=0.9 all chunks are NOT crystal."""
     from alayaos_core.worker import tasks as worker_tasks
 
     workspace_id = str(uuid.uuid4())
@@ -156,7 +156,7 @@ async def test_cortex_pipeline_crystal_selection_all_skipped_at_high_threshold()
 
     try:
         with (
-            patch("alayaos_core.worker.tasks.Settings", return_value=_mock_settings(threshold=0.5)),
+            patch("alayaos_core.worker.tasks.Settings", return_value=_mock_settings(threshold=0.9)),
             patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
             patch("alayaos_core.repositories.event.EventRepository", return_value=mock_event_repo),
             patch("alayaos_core.repositories.extraction_run.ExtractionRunRepository", return_value=mock_run_repo),
@@ -167,7 +167,7 @@ async def test_cortex_pipeline_crystal_selection_all_skipped_at_high_threshold()
     finally:
         worker_tasks._set_workspace_context = original_rls  # type: ignore[assignment]
 
-    # FakeLLMAdapter returns all 0.0 → threshold=0.5 → no crystal chunks
+    # FakeLLM returns max 0.6 → threshold=0.9 → no crystal chunks
     assert result["chunks_crystal"] == 0
     assert result["chunks_total"] >= 1
     # Run counters were updated on the run object
@@ -236,7 +236,7 @@ async def test_cortex_pipeline_empty_event_no_crystal_chunks() -> None:
 
     try:
         with (
-            patch("alayaos_core.worker.tasks.Settings", return_value=_mock_settings(threshold=0.5)),
+            patch("alayaos_core.worker.tasks.Settings", return_value=_mock_settings(threshold=0.9)),
             patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
             patch("alayaos_core.repositories.event.EventRepository", return_value=mock_event_repo),
             patch("alayaos_core.repositories.extraction_run.ExtractionRunRepository", return_value=mock_run_repo),

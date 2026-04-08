@@ -3,6 +3,7 @@
 import hashlib
 import json
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
@@ -52,9 +53,24 @@ class FakeLLMAdapter:
         usage = LLMUsage(tokens_in=100, tokens_out=50, tokens_cached=0, cost_usd=0.0)
         return result, usage
 
-    @staticmethod
-    def _default_response(response_model: type[BaseModel]) -> dict:
+    # Model-specific overrides for realistic fake responses
+    _MODEL_OVERRIDES: ClassVar[dict[str, dict]] = {
+        "DomainScores": {
+            "project": 0.6,
+            "people": 0.4,
+            "engineering": 0.3,
+            "knowledge": 0.2,
+        },
+    }
+
+    @classmethod
+    def _default_response(cls, response_model: type[BaseModel]) -> dict:
         """Return empty/minimal valid response for any Pydantic model."""
+        # Check for model-specific overrides (e.g., DomainScores needs non-zero values)
+        model_name = response_model.__name__
+        if model_name in cls._MODEL_OVERRIDES:
+            return cls._MODEL_OVERRIDES[model_name]
+
         # Build a minimal valid instance using model defaults
         fields = response_model.model_fields
         data: dict = {}

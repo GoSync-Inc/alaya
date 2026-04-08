@@ -225,9 +225,20 @@ async def test_full_pipeline_no_crystal_chunks_completes_run():
     mock_job_crystallize = AsyncMock()
     mock_job_crystallize.kiq = AsyncMock()
 
+    # Use high threshold (0.9) so FakeLLM's max score (0.6) produces no crystal chunks
+    mock_settings = MagicMock()
+    mock_settings.ANTHROPIC_API_KEY = MagicMock(get_secret_value=lambda: "")
+    mock_settings.CORTEX_CLASSIFIER_MODEL = "fake"
+    mock_settings.CORTEX_MAX_CHUNK_TOKENS = 3000
+    mock_settings.CORTEX_CRYSTAL_THRESHOLD = 0.9
+    mock_settings.CORTEX_TRUNCATION_TOKENS = 800
+    mock_settings.FEATURE_FLAG_USE_CORTEX = True
+    mock_settings.REDIS_URL = "redis://localhost:6379/0"
+
     with (
         patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
         patch("alayaos_core.worker.tasks._set_workspace_context", new=AsyncMock()),
+        patch("alayaos_core.worker.tasks.Settings", return_value=mock_settings),
         patch("alayaos_core.repositories.event.EventRepository", return_value=mock_event_repo),
         patch("alayaos_core.repositories.extraction_run.ExtractionRunRepository", return_value=mock_run_repo),
         patch("alayaos_core.repositories.chunk.ChunkRepository", return_value=mock_chunk_repo),
@@ -239,7 +250,7 @@ async def test_full_pipeline_no_crystal_chunks_completes_run():
 
         result = await job_cortex(str(event_id), str(run_id), str(workspace_id))
 
-    # job_crystallize should NOT have been enqueued
+    # job_crystallize should NOT have been enqueued (threshold=0.9 > max score 0.6)
     mock_job_crystallize.kiq.assert_not_called()
     assert result["chunks_crystal"] == 0
 

@@ -144,12 +144,11 @@ async def test_verify_not_changed_when_response_same() -> None:
     classifier = CortexClassifier(llm)
     chunk = make_chunk("Hello there!")
 
-    # FakeLLMAdapter default: all 0.0 for DomainScores
-    initial = DomainScores()  # all 0.0
+    # FakeLLMAdapter now returns realistic DomainScores by default.
+    # Use those same defaults as initial so verify sees no change.
+    initial = DomainScores(project=0.6, people=0.4, engineering=0.3, knowledge=0.2)
 
-    # Don't register any special response — FakeLLMAdapter returns defaults (all 0.0)
     _, changed, _ = await classifier.verify(chunk, initial)
-    # Both initial and verify return all zeros → changed=False
     assert changed is False
 
 

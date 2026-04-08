@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/GoSync-Inc/alaya/packages/cli-go/internal/auth"
+	"github.com/GoSync-Inc/alaya/packages/cli-go/internal/client"
 	"github.com/GoSync-Inc/alaya/packages/cli-go/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -30,7 +33,21 @@ var setupAgentCmd = &cobra.Command{
 		}
 		apiKey, err := auth.GetAPIKey()
 		if err != nil {
-			return fmt.Errorf("authenticate first: alaya auth login")
+			// No stored key — try creating one via bootstrap key
+			bootstrapKey := os.Getenv("ALAYA_BOOTSTRAP_KEY")
+			if bootstrapKey == "" {
+				return fmt.Errorf("no API key found. Run 'alaya auth login' or set ALAYA_BOOTSTRAP_KEY to create one automatically")
+			}
+			fmt.Println("No API key found. Creating one via bootstrap key...")
+			newKey, createErr := createAPIKeyViaBootstrap(baseURL, bootstrapKey)
+			if createErr != nil {
+				return fmt.Errorf("create API key: %w", createErr)
+			}
+			if storeErr := auth.SetAPIKey(newKey); storeErr != nil {
+				return fmt.Errorf("store API key: %w", storeErr)
+			}
+			fmt.Println("API key created and stored.")
+			apiKey = newKey
 		}
 		switch strings.ToLower(setupProfile) {
 		case "claude-code":
@@ -54,4 +71,26 @@ func init() {
 	rootCmd.AddCommand(setupCmd)
 	setupCmd.AddCommand(setupAgentCmd)
 	setupAgentCmd.Flags().StringVar(&setupProfile, "profile", "generic", "Agent profile (claude-code|codex|cursor|generic)")
+}
+
+// createAPIKeyViaBootstrap calls POST /api-keys using the bootstrap key and returns the raw key.
+func createAPIKeyViaBootstrap(baseURL, bootstrapKey string) (string, error) {
+	c := client.New(baseURL, bootstrapKey)
+	data, err := c.Post("/api-keys", map[string]interface{}{
+		"name":   "cli-agent",
+		"scopes": []string{"read", "write"},
+	})
+	if err != nil {
+		return "", err
+	}
+	var resp struct {
+		RawKey string `json:"raw_key"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return "", fmt.Errorf("parse key response: %w", err)
+	}
+	if resp.RawKey == "" {
+		return "", fmt.Errorf("server did not return raw_key in response")
+	}
+	return resp.RawKey, nil
 }

@@ -17,26 +17,29 @@ packages/
 ├── core/                           # Brain: models, schemas, repositories, services
 │   └── alayaos_core/
 │       ├── models/                 # SQLAlchemy 2.0 (16 files: 10 full + 6 stubs)
-│       ├── schemas/                # Pydantic schemas (7 files)
-│       ├── repositories/           # Async repos with cursor pagination (10 files)
-│       ├── services/               # workspace (seed), api_key (generate/verify)
+│       ├── schemas/                # Pydantic schemas (13 files)
+│       ├── repositories/           # Async repos with cursor pagination (12 files)
+│       ├── services/               # workspace (seed), api_key (generate/verify), entity_cache (Redis)
 │       ├── extraction/             # Sanitizer, extractor, pipeline, resolver, writer
+│       │   ├── cortex/             # Chunker + classifier (L0 → L0Chunk)
+│       │   ├── crystallizer/       # LLM extractor + verifier (L0Chunk → claims)
+│       │   └── integrator/         # Dedup, enricher, date normalizer, KG integration
 │       ├── llm/                    # LLMServiceInterface + Anthropic/Fake adapters
-│       ├── worker/                 # TaskIQ broker + 3-job pipeline tasks
+│       ├── worker/                 # TaskIQ broker + multi-job pipeline tasks
 │       └── config.py               # pydantic-settings (DATABASE_URL, REDIS_URL, ENV)
 ├── api/                            # REST API (FastAPI)
 │   └── alayaos_api/
 │       ├── main.py                 # App factory + lifespan
 │       ├── deps.py                 # Auth, session, scope dependencies
 │       ├── middleware.py           # Error envelope, request ID
-│       └── routers/                # 12 routers: health, workspaces, entities, claims, etc.
+│       └── routers/                # 14 routers: health, workspaces, entities, claims, chunks, pipeline_traces, integrator_runs, etc.
 ├── cli/                            # Placeholder (Run 4)
 └── connectors/                     # Placeholder (Run 5)
 alembic/                            # Migrations (001: 18 tables + RLS, 002: auth bypass, 004: intelligence pipeline)
 docker/                             # seed.py, init-db.sql, Caddyfile
 ```
 
-**Data flow:** Sources -> L0 Events -> Extraction -> L1 Entities + L2 Claims -> L3 Knowledge Tree -> CLI/MCP/API
+**Data flow:** Sources -> L0 Events -> Cortex (chunk + classify) -> Crystallizer (LLM extract) -> Write (resolve + persist) -> Integrator (dedup + enrich) -> L1 Entities + L2 Claims -> L3 Knowledge Tree -> CLI/MCP/API
 
 ## Commands
 
@@ -51,7 +54,7 @@ docker compose up -d             # Start all services
 docker compose up postgres redis # Start only DB + cache
 just check                       # Lint + format + typecheck + tests
 just smoke                       # Docker smoke test
-taskiq worker alayaos_core.worker.tasks:broker  # Start extraction worker
+taskiq worker alayaos_core.worker.tasks:broker  # Start pipeline worker (job_extract, job_write, job_cortex, job_crystallize, job_enrich, job_integrate, job_check_integrator)
 ```
 
 ## Verification
@@ -94,7 +97,7 @@ Core predicates: 20 seeded per workspace (deadline, status, owner, role, title, 
 Core entity types: 10 seeded per workspace (person, project, team, document, decision, meeting, etc.)
 Claims and relations carry `extraction_run_id` for full provenance tracing.
 
-## API Endpoints (30 total)
+## API Endpoints (37 total)
 
 Health: `/health/live`, `/health/ready`
 Workspaces: POST, GET, GET/{id}, PATCH/{id} — bootstrap key required for create
@@ -107,6 +110,9 @@ Claims: GET, GET/{id}, GET (by entity)
 Relations: GET, GET/{id}
 Extraction Runs: GET, GET/{id}
 Ingestion: POST `/ingest` — trigger extraction pipeline
+Chunks: GET (event_id, processing_stage, is_crystal filters), GET/{id}
+Pipeline Traces: GET /events/{id}/trace
+Integrator Runs: GET, GET/{id}, POST /trigger
 
 ## Security (CRITICAL)
 

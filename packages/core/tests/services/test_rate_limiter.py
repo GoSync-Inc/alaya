@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -73,6 +73,38 @@ async def test_expired_entries_cleaned_allows_new_request() -> None:
     allowed, retry = await limiter.check("user:expired", 5, 60)
     assert allowed is True
     assert retry is None
+
+
+@pytest.mark.asyncio
+async def test_redis_error_fails_open() -> None:
+    """If Redis raises an exception, the limiter allows the request (fail-open)."""
+    redis = MagicMock()
+    redis.eval = AsyncMock(side_effect=ConnectionError("redis down"))
+    limiter = RateLimiterService(redis=redis)
+    allowed, retry = await limiter.check("user:1", 5, 60)
+    assert allowed is True
+    assert retry is None
+
+
+@pytest.mark.asyncio
+async def test_unique_members_no_collision() -> None:
+    """Each call passes a unique member to Redis eval (no timestamp collision)."""
+    call_members: list[str] = []
+
+    async def capture_eval(script: str, numkeys: int, *args: str) -> list[int]:
+        # args: redis_key, window_start, member, now, limit, window_seconds
+        call_members.append(args[2])  # member is ARGV[2] → args index 2
+        return [1, 1, 0]
+
+    redis = MagicMock()
+    redis.eval = AsyncMock(side_effect=capture_eval)
+    limiter = RateLimiterService(redis=redis)
+
+    await limiter.check("user:1", 5, 60)
+    await limiter.check("user:1", 5, 60)
+
+    assert len(call_members) == 2
+    assert call_members[0] != call_members[1]
 
 
 @pytest.mark.asyncio

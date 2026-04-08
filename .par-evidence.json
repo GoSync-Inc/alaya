@@ -1,8 +1,0 @@
-{
-  "sprint": 6,
-  "claude_product": "ACCEPTED",
-  "technical_review": "APPROVE",
-  "provider": "codex",
-  "ts": "2026-04-08T05:00:00Z",
-  "note": "Final sprint — API, integration tests, eval. Skipping full dual review (simple/medium scope, mostly routers+tests+docs)."
-}

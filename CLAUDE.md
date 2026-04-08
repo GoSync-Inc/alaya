@@ -16,14 +16,20 @@ Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · 
 packages/
 ├── core/                           # Brain: models, schemas, repositories, services
 │   └── alayaos_core/
-│       ├── models/                 # SQLAlchemy 2.0 (16 files: 10 full + 6 stubs)
-│       ├── schemas/                # Pydantic schemas (13 files)
-│       ├── repositories/           # Async repos with cursor pagination (12 files)
+│       ├── models/                 # SQLAlchemy 2.0 (18 files)
+│       ├── schemas/                # Pydantic schemas (15 files)
+│       ├── repositories/           # Async repos with cursor pagination (14 files)
 │       ├── services/               # workspace (seed), api_key (generate/verify), entity_cache (Redis)
-│       ├── extraction/             # Sanitizer, extractor, pipeline, resolver, writer
-│       │   ├── cortex/             # Chunker + classifier (L0 → L0Chunk)
-│       │   ├── crystallizer/       # LLM extractor + verifier (L0Chunk → claims)
-│       │   └── integrator/         # Dedup, enricher, date normalizer, KG integration
+│       ├── extraction/             # Multi-stage intelligence pipeline
+│       │   ├── cortex/             # Chunker + classifier (L0 → L0Chunks with domain scores)
+│       │   ├── crystallizer/       # LLM extractor + verifier (L0Chunks → claims with confidence tiers)
+│       │   ├── integrator/         # Dedup, enricher, date normalizer, KG integration engine
+│       │   ├── pipeline.py         # Orchestration: run_extraction, run_write, run_enrich, should_extract
+│       │   ├── monitoring.py       # Structlog anomaly detection events
+│       │   ├── writer.py           # Atomic persist, dirty-set trigger, workspace lock
+│       │   ├── resolver.py         # 3-tier entity resolution with transliteration
+│       │   ├── sanitizer.py        # Input sanitization (NFKC, injection detection)
+│       │   └── schemas.py          # ExtractionResult, ExtractedEntity, ExtractedClaim
 │       ├── llm/                    # LLMServiceInterface + Anthropic/Fake adapters
 │       ├── worker/                 # TaskIQ broker + multi-job pipeline tasks
 │       └── config.py               # pydantic-settings (DATABASE_URL, REDIS_URL, ENV)
@@ -97,7 +103,7 @@ Core predicates: 20 seeded per workspace (deadline, status, owner, role, title, 
 Core entity types: 10 seeded per workspace (person, project, team, document, decision, meeting, etc.)
 Claims and relations carry `extraction_run_id` for full provenance tracing.
 
-## API Endpoints (37 total)
+## API Endpoints (36 total)
 
 Health: `/health/live`, `/health/ready`
 Workspaces: POST, GET, GET/{id}, PATCH/{id} — bootstrap key required for create
@@ -127,7 +133,9 @@ Integrator Runs: GET, GET/{id}, POST /trigger
 ## LLM Architecture (Run 2+)
 
 Model-agnostic: `LLMServiceInterface` with provider adapters.
-Config: `EXTRACTION_LLM_PROVIDER=anthropic|openai|ollama|vllm`
+- `AnthropicAdapter`: Production provider (Haiku for classification, Sonnet for extraction/integration)
+- `FakeLLMAdapter`: Deterministic test responses with domain-specific overrides
+Config: per-stage model selection via `CORTEX_CLASSIFIER_MODEL`, `CRYSTALLIZER_MODEL`, `INTEGRATOR_MODEL`.
 Provider-specific features preserved — no lowest common denominator.
 
-<!-- updated-by-superflow:2026-04-07 -->
+<!-- updated-by-superflow:2026-04-08 -->

@@ -23,7 +23,7 @@ Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `
 
 ### Packages
 
-- **`packages/core/`** — Domain logic: models (16), schemas (13), repositories (12), extraction pipeline (cortex/crystallizer/integrator sub-packages), LLM adapters, worker tasks. Zero framework dependencies.
+- **`packages/core/`** — Domain logic: models (18), schemas (15), repositories (14), extraction pipeline (cortex/crystallizer/integrator sub-packages), LLM adapters, worker tasks. Zero framework dependencies.
 - **`packages/api/`** — FastAPI REST API + MCP server. Depends on core.
 - **`packages/cli/`** — CLI (Run 4, placeholder).
 - **`packages/connectors/`** — Source connectors (Run 5, placeholder).
@@ -35,7 +35,7 @@ Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `
 3. **Pydantic validators** — All LLM output validated before persistence: script tag rejection, control char stripping, confidence bounds [0, 1], length limits.
 4. **Job arg safety** — TaskIQ tasks accept only string IDs (`event_id`, `extraction_run_id`, `workspace_id`).
 
-## API Endpoints (37 total)
+## API Endpoints (36 total)
 
 ```
 GET  /health/live
@@ -90,7 +90,7 @@ Tenant isolation via PostgreSQL RLS (`SET LOCAL app.workspace_id`). Composite FK
 ## LLM Integration
 
 - **Model-agnostic** via `LLMServiceInterface`. Anthropic Claude is primary; OpenAI/Ollama/vllm planned.
-- Config: `EXTRACTION_LLM_PROVIDER=anthropic|openai|ollama|vllm`
+- Per-stage model config: `CORTEX_CLASSIFIER_MODEL`, `CRYSTALLIZER_MODEL`, `INTEGRATOR_MODEL`
 - Structured output extraction using provider-native tool-call / JSON mode.
 - `FakeLLMAdapter` for deterministic testing.
 
@@ -104,4 +104,4 @@ Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · 
 - [CLAUDE.md](./CLAUDE.md): Development guide, architecture rules, security policy
 - [CHANGELOG](./CHANGELOG.md)
 
-<!-- updated-by-superflow:2026-04-07 -->
+<!-- updated-by-superflow:2026-04-08 -->

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 import structlog
 
@@ -20,17 +20,18 @@ class EmbeddingServiceInterface(Protocol):
 class FastEmbedService:
     """ONNX-based embedding via FastEmbed. CPU-only, no PyTorch."""
 
+    _model_cache: ClassVar[dict[str, object]] = {}
+
     def __init__(self, model_name: str, dimensions: int) -> None:
         self._model_name = model_name
         self._dimensions = dimensions
-        self._model = None
 
     def _get_model(self):
-        if self._model is None:
+        if self._model_name not in self._model_cache:
             from fastembed import TextEmbedding
 
-            self._model = TextEmbedding(model_name=self._model_name)
-        return self._model
+            self._model_cache[self._model_name] = TextEmbedding(model_name=self._model_name)
+        return self._model_cache[self._model_name]
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         model = self._get_model()

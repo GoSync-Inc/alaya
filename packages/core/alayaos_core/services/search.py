@@ -107,7 +107,8 @@ async def _vector_search(
 ) -> list[dict]:
     """Vector similarity search using pgvector HNSW cosine."""
     settings = Settings()
-    await session.execute(text("SET LOCAL hnsw.ef_search = :ef"), {"ef": settings.SEARCH_HNSW_EF_SEARCH})
+    ef = int(settings.SEARCH_HNSW_EF_SEARCH)
+    await session.execute(text(f"SET LOCAL hnsw.ef_search = {ef}"))
     sql = text("""
         SELECT
             vc.id AS source_id,

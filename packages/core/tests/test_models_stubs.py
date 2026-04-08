@@ -10,6 +10,7 @@ from alayaos_core.models.acl import (
 )
 from alayaos_core.models.audit import AuditLog
 from alayaos_core.models.claim import ClaimSource, L2Claim
+from alayaos_core.models.entity import L1Entity
 from alayaos_core.models.relation import L1Relation, RelationSource
 from alayaos_core.models.tree import L3TreeNode
 from alayaos_core.models.vector import VectorChunk
@@ -141,6 +142,16 @@ def test_claim_source_columns() -> None:
     assert {"id", "claim_id", "event_id", "created_at"}.issubset(cols)
 
 
+# ─── L1Entity tsvector ───────────────────────────────────────────────────────
+
+
+def test_l1_entity_tsv_column() -> None:
+    """tsv column must be present on L1Entity."""
+    mapper = inspect(L1Entity)
+    cols = {c.key for c in mapper.columns}
+    assert "tsv" in cols
+
+
 # ─── L3TreeNode ──────────────────────────────────────────────────────────────
 
 
@@ -173,6 +184,21 @@ def test_l3_tree_node_has_unique_constraint() -> None:
 # ─── VectorChunk ─────────────────────────────────────────────────────────────
 
 
+def test_l3_tree_node_new_columns() -> None:
+    mapper = inspect(L3TreeNode)
+    cols = {c.key for c in mapper.columns}
+    assert {"is_dirty", "markdown_cache", "last_rebuilt_at", "summary"}.issubset(cols)
+
+
+def test_l3_tree_node_is_dirty_not_nullable() -> None:
+    mapper = inspect(L3TreeNode)
+    col = mapper.columns["is_dirty"]
+    assert col.nullable is False
+
+
+# ─── VectorChunk ─────────────────────────────────────────────────────────────
+
+
 def test_vector_chunk_tablename() -> None:
     assert VectorChunk.__tablename__ == "vector_chunks"
 
@@ -192,13 +218,21 @@ def test_vector_chunk_columns() -> None:
     }.issubset(cols)
 
 
+def test_vector_chunk_tsv_column() -> None:
+    """tsv column must be present and server-generated."""
+    mapper = inspect(VectorChunk)
+    cols = {c.key for c in mapper.columns}
+    assert "tsv" in cols
+
+
 def test_vector_chunk_embedding_column() -> None:
-    """embedding column must exist and use pgvector Vector type."""
-    from pgvector.sqlalchemy import Vector
+    """embedding column must exist and use pgvector HALFVEC type with 1024 dims."""
+    from pgvector.sqlalchemy import HALFVEC
 
     mapper = inspect(VectorChunk)
     col = mapper.columns["embedding"]
-    assert isinstance(col.type, Vector)
+    assert isinstance(col.type, HALFVEC)
+    assert col.type.dim == 1024
 
 
 # ─── AuditLog ─────────────────────────────────────────────────────────────────

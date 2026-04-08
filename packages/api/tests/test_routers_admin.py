@@ -46,15 +46,30 @@ def make_app_with_mock_session(api_key: APIKey):
         session = AsyncMock()
         yield session
 
-    from alayaos_api.deps import get_api_key, get_session, get_workspace_session
+    from alayaos_api.deps import get_api_key, get_session, get_workspace_session, require_scope
+    from alayaos_api.routers.admin import get_embedding_service
+    from alayaos_core.services.embedding import FakeEmbeddingService
 
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_api_key] = override_api_key
     app.dependency_overrides[get_workspace_session] = override_workspace_session
+    # Override require_scope("admin") by overriding get_api_key (used inside require_scope)
+    # get_api_key is already overridden above, so require_scope will pass for admin keys.
+    app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
     return app
 
 
 class TestBackfillEmbeddings:
+    def test_backfill_requires_admin_scope(self) -> None:
+        """Endpoint returns 403 when key lacks admin scope."""
+        api_key = make_api_key(scopes=["read", "write"])
+        app = make_app_with_mock_session(api_key)
+
+        client = TestClient(app)
+        response = client.post("/admin/backfill-embeddings", json={})
+
+        assert response.status_code == 403
+
     def test_backfill_returns_200_with_counts(self) -> None:
         """Endpoint returns processed/failed/total counts."""
         api_key = make_api_key()
@@ -62,7 +77,7 @@ class TestBackfillEmbeddings:
 
         # Mock the session execute calls:
         # First call returns rows (chunks needing embedding)
-        # Second call is the UPDATE
+        # Second call is the UPDATE (via begin_nested savepoint)
         chunk_id = uuid.uuid4()
         mock_row = MagicMock()
         mock_row.id = chunk_id
@@ -75,6 +90,11 @@ class TestBackfillEmbeddings:
 
         session_mock = AsyncMock()
         session_mock.execute = AsyncMock(side_effect=[fetch_result, update_result])
+        # begin_nested returns an async context manager
+        nested_cm = AsyncMock()
+        nested_cm.__aenter__ = AsyncMock(return_value=nested_cm)
+        nested_cm.__aexit__ = AsyncMock(return_value=False)
+        session_mock.begin_nested = MagicMock(return_value=nested_cm)
 
         async def override_session():
             yield session_mock
@@ -82,12 +102,6 @@ class TestBackfillEmbeddings:
         from alayaos_api.deps import get_session
 
         app.dependency_overrides[get_session] = override_session
-
-        from alayaos_core.services.embedding import FakeEmbeddingService
-
-        from alayaos_api.routers.admin import get_embedding_service
-
-        app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
 
         client = TestClient(app)
         response = client.post("/admin/backfill-embeddings", json={})
@@ -116,12 +130,6 @@ class TestBackfillEmbeddings:
 
         app.dependency_overrides[get_session] = override_session
 
-        from alayaos_core.services.embedding import FakeEmbeddingService
-
-        from alayaos_api.routers.admin import get_embedding_service
-
-        app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
-
         client = TestClient(app)
         response = client.post("/admin/backfill-embeddings", json={})
 
@@ -140,7 +148,8 @@ class TestBackfillEmbeddings:
         fetch_result.all.return_value = []
 
         session_mock = AsyncMock()
-        session_mock.execute = AsyncMock(return_value=fetch_result)
+        # First call: SET LOCAL; second call: SELECT
+        session_mock.execute = AsyncMock(side_effect=[MagicMock(), fetch_result])
 
         async def override_session():
             yield session_mock
@@ -148,12 +157,6 @@ class TestBackfillEmbeddings:
         from alayaos_api.deps import get_session
 
         app.dependency_overrides[get_session] = override_session
-
-        from alayaos_core.services.embedding import FakeEmbeddingService
-
-        from alayaos_api.routers.admin import get_embedding_service
-
-        app.dependency_overrides[get_embedding_service] = lambda: FakeEmbeddingService()
 
         client = TestClient(app)
         ws_id = str(uuid.uuid4())
@@ -163,5 +166,25 @@ class TestBackfillEmbeddings:
         )
 
         assert response.status_code == 200
-        # Verify execute was called (filtered query ran)
-        session_mock.execute.assert_called_once()
+        # Two execute calls: SET LOCAL + SELECT
+        assert session_mock.execute.call_count == 2
+
+    def test_backfill_batch_size_upper_bound(self) -> None:
+        """batch_size > 200 is rejected with 422."""
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+
+        client = TestClient(app)
+        response = client.post("/admin/backfill-embeddings", json={"batch_size": 201})
+
+        assert response.status_code in (400, 422)
+
+    def test_backfill_batch_size_lower_bound(self) -> None:
+        """batch_size < 1 is rejected with 400 or 422."""
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+
+        client = TestClient(app)
+        response = client.post("/admin/backfill-embeddings", json={"batch_size": 0})
+
+        assert response.status_code in (400, 422)

@@ -75,9 +75,6 @@ class RateLimiterService:
             return True, None
 
         # Compute retry_after from oldest entry's score
-        if oldest_score:
-            retry_after = int(window_seconds - (now - oldest_score)) + 1
-        else:
-            retry_after = window_seconds
+        retry_after = int(window_seconds - (now - oldest_score)) + 1 if oldest_score else window_seconds
 
         return False, max(retry_after, 1)

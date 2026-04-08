@@ -121,7 +121,7 @@ def _sanitize_context(text: str) -> str:
     patterns = [
         r"<system>.*?</system>",
         r"<assistant>.*?</assistant>",
-        r"(?i)ignore\s+(previous|above|all)\s+instructions?",
+        r"(?i)ignore\s+(all\s+)?(previous|above|all)\s+instructions?",
         r"(?i)you\s+are\s+(now|a)\s+",
     ]
     for pattern in patterns:

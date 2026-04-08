@@ -35,7 +35,7 @@ Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `
 3. **Pydantic validators** — All LLM output validated before persistence: script tag rejection, control char stripping, confidence bounds [0, 1], length limits.
 4. **Job arg safety** — TaskIQ tasks accept only string IDs (`event_id`, `extraction_run_id`, `workspace_id`).
 
-## API Endpoints (36 total)
+## API Endpoints (41 total)
 
 ```
 GET  /health/live
@@ -74,6 +74,11 @@ GET  /events/{id}/trace   — pipeline execution trace
 GET  /integrator-runs
 GET  /integrator-runs/{id}
 POST /integrator-runs/trigger
+POST /search              — hybrid 3-channel RRF search
+POST /ask                 — LLM Q&A with citation validation
+GET  /tree                — knowledge tree root
+GET  /tree/{path}         — tree node (auto-rebuild if dirty)
+POST /tree/export         — export subtree as markdown
 ```
 
 ## Data Model
@@ -94,9 +99,21 @@ Tenant isolation via PostgreSQL RLS (`SET LOCAL app.workspace_id`). Composite FK
 - Structured output extraction using provider-native tool-call / JSON mode.
 - `FakeLLMAdapter` for deterministic testing.
 
+## Search & Q&A
+
+- **Hybrid search** (`POST /search`): 3-channel Reciprocal Rank Fusion — vector (pgvector HNSW cosine), FTS (websearch_to_tsquery), entity name (pg_trgm similarity). Evidence-first response with source attribution.
+- **Q&A** (`POST /ask`): Search → token budget → XML prompt → LLM → citation validation. Prompt injection protection via context sanitization.
+- **Knowledge tree** (`GET /tree/{path}`): Materialized briefing layer with dirty-flag rebuild, LLM synthesis with 6s timeout + raw claims fallback.
+- **Embedding pipeline**: FastEmbed (multilingual-e5-large, 1024d halfvec), batch backfill via job_enrich.
+
+## Go CLI
+
+Single-binary CLI at `packages/cli-go/`. Commands: search, ask, entity, claim, tree, ingest, key, workspace, setup agent.
+Dual-mode output (human/JSON). OS keyring auth. `alaya setup agent --profile claude-code` generates MCP config.
+
 ## Stack
 
-Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · Redis · TaskIQ · Anthropic SDK · Typer + Rich
+Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · Redis · TaskIQ · Anthropic SDK · Go (Cobra CLI) · FastEmbed
 
 ## Source
 

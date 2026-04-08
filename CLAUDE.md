@@ -8,7 +8,7 @@ Alaya is an open-source corporate memory platform (BSL 1.1). It ingests data fro
 
 ## Stack
 
-Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · Redis · TaskIQ · Anthropic SDK · Typer + Rich
+Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · Redis · TaskIQ · Anthropic SDK · Go (Cobra CLI) · FastEmbed
 
 ## Project Structure
 
@@ -39,7 +39,8 @@ packages/
 │       ├── deps.py                 # Auth, session, scope dependencies
 │       ├── middleware.py           # Error envelope, request ID
 │       └── routers/                # 14 routers: health, workspaces, entities, claims, chunks, pipeline_traces, integrator_runs, etc.
-├── cli/                            # Placeholder (Run 4)
+├── cli/                            # Python CLI placeholder
+├── cli-go/                         # Go CLI (Cobra): search, ask, tree, entity, claim, ingest, key, setup agent
 └── connectors/                     # Placeholder (Run 5)
 alembic/                            # Migrations (001: 18 tables + RLS, 002: auth bypass, 004: intelligence pipeline)
 docker/                             # seed.py, init-db.sql, Caddyfile
@@ -103,7 +104,7 @@ Core predicates: 20 seeded per workspace (deadline, status, owner, role, title, 
 Core entity types: 10 seeded per workspace (person, project, team, document, decision, meeting, etc.)
 Claims and relations carry `extraction_run_id` for full provenance tracing.
 
-## API Endpoints (36 total)
+## API Endpoints (41 total)
 
 Health: `/health/live`, `/health/ready`
 Workspaces: POST, GET, GET/{id}, PATCH/{id} — bootstrap key required for create
@@ -119,6 +120,9 @@ Ingestion: POST `/ingest` — trigger extraction pipeline
 Chunks: GET (event_id, processing_stage, is_crystal filters), GET/{id}
 Pipeline Traces: GET /events/{id}/trace
 Integrator Runs: GET, GET/{id}, POST /trigger
+Search: POST /search — hybrid 3-channel RRF (vector + FTS + entity name)
+Ask: POST /ask — LLM Q&A with citation validation
+Tree: GET /tree, GET /tree/{path}, POST /tree/export
 
 ## Security (CRITICAL)
 

@@ -7,6 +7,7 @@ import time
 import uuid
 
 import structlog
+from sqlalchemy import text
 
 from alayaos_core.extraction.integrator.dedup import EntityDeduplicator
 from alayaos_core.extraction.integrator.enricher import EntityEnricher
@@ -207,6 +208,9 @@ class IntegratorEngine:
     async def _merge_duplicates(self, pairs, workspace_id: uuid.UUID, session) -> int:
         """Merge duplicate entity pairs: keep entity_a, soft-delete entity_b, merge aliases.
 
+        Also reassigns claims, relations, and vector_chunks from entity_b to entity_a
+        before soft-deleting entity_b, so no data is orphaned.
+
         Returns the number of pairs successfully merged.
         """
         merged = 0
@@ -215,11 +219,54 @@ class IntegratorEngine:
             entity_a = await self.entity_repo.get_by_id(pair.entity_a_id)
             if not entity_a or not entity_b:
                 continue
-            # Merge aliases: union of both alias lists + entity_b's name as an alias
+            # Step 1: Merge aliases — union of both alias lists + entity_b's name as an alias
             new_aliases = list(set(list(entity_a.aliases or []) + list(entity_b.aliases or []) + [entity_b.name]))
             await self.entity_repo.update(entity_a.id, aliases=new_aliases)
-            # Soft-delete entity_b so it is no longer active in the graph
-            await self.entity_repo.update(entity_b.id, is_deleted=True)
+            # Step 2: Reassign claims from entity_b to entity_a
+            await session.execute(
+                text(
+                    "UPDATE l2_claims SET entity_id = :a_id"
+                    " WHERE entity_id = :b_id AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            # Step 3: Reassign relations where entity_b is the source
+            await session.execute(
+                text(
+                    "UPDATE l1_relations SET source_entity_id = :a_id"
+                    " WHERE source_entity_id = :b_id AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            # Step 4: Reassign relations where entity_b is the target
+            await session.execute(
+                text(
+                    "UPDATE l1_relations SET target_entity_id = :a_id"
+                    " WHERE target_entity_id = :b_id AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            # Step 5: Remove self-referential relations created by the reassignment above
+            await session.execute(
+                text(
+                    "DELETE FROM l1_relations"
+                    " WHERE source_entity_id = :a_id AND target_entity_id = :a_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "ws_id": workspace_id},
+            )
+            # Step 6: Reassign entity vector_chunks from entity_b to entity_a
+            await session.execute(
+                text(
+                    "UPDATE vector_chunks SET source_id = :a_id"
+                    " WHERE source_id = :b_id AND source_type = 'entity' AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            # Step 7: Record provenance and soft-delete entity_b
+            props = dict(entity_b.properties or {})
+            props["merged_into"] = str(entity_a.id)
+            await self.entity_repo.update(entity_b.id, is_deleted=True, properties=props)
             merged += 1
         return merged
 

@@ -425,6 +425,324 @@ async def test_merge_duplicates_soft_deletes_entity_b_and_merges_aliases():
 
 
 @pytest.mark.asyncio
+async def test_merge_reassigns_claims():
+    """_merge_duplicates reassigns entity_b's claims to entity_a via raw SQL."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+
+    ws_id = uuid.uuid4()
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_a = MagicMock()
+    entity_a.id = entity_a_id
+    entity_a.name = "Alice Smith"
+    entity_a.aliases = []
+    entity_a.properties = {}
+
+    entity_b = MagicMock()
+    entity_b.id = entity_b_id
+    entity_b.name = "Alice Smyth"
+    entity_b.aliases = []
+    entity_b.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.update = AsyncMock(return_value=None)
+
+    async def get_by_id(eid):
+        if eid == entity_a_id:
+            return entity_a
+        if eid == entity_b_id:
+            return entity_b
+        return None
+
+    entity_repo.get_by_id = get_by_id
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=AsyncMock(),
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="Alice Smith",
+        entity_b_name="Alice Smyth",
+        score=0.92,
+        method="fuzzy",
+    )
+
+    session = AsyncMock()
+    await engine._merge_duplicates([pair], ws_id, session)
+
+    # session.execute must be called with an UPDATE l2_claims statement
+    executed_sqls = [str(call.args[0]) for call in session.execute.call_args_list]
+    claims_reassign = [s for s in executed_sqls if "l2_claims" in s and "entity_id" in s]
+    assert claims_reassign, "Expected UPDATE l2_claims to reassign claims to entity_a"
+
+
+@pytest.mark.asyncio
+async def test_merge_reassigns_relations():
+    """_merge_duplicates reassigns both source and target relations from entity_b to entity_a."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+
+    ws_id = uuid.uuid4()
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_a = MagicMock()
+    entity_a.id = entity_a_id
+    entity_a.name = "Alice"
+    entity_a.aliases = []
+    entity_a.properties = {}
+
+    entity_b = MagicMock()
+    entity_b.id = entity_b_id
+    entity_b.name = "Alice B"
+    entity_b.aliases = []
+    entity_b.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.update = AsyncMock(return_value=None)
+
+    async def get_by_id(eid):
+        if eid == entity_a_id:
+            return entity_a
+        if eid == entity_b_id:
+            return entity_b
+        return None
+
+    entity_repo.get_by_id = get_by_id
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=AsyncMock(),
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="Alice",
+        entity_b_name="Alice B",
+        score=0.91,
+        method="fuzzy",
+    )
+
+    session = AsyncMock()
+    await engine._merge_duplicates([pair], ws_id, session)
+
+    executed_sqls = [str(call.args[0]) for call in session.execute.call_args_list]
+    source_reassign = [s for s in executed_sqls if "l1_relations" in s and "source_entity_id" in s]
+    target_reassign = [s for s in executed_sqls if "l1_relations" in s and "target_entity_id" in s]
+    assert source_reassign, "Expected UPDATE l1_relations source_entity_id reassignment"
+    assert target_reassign, "Expected UPDATE l1_relations target_entity_id reassignment"
+
+
+@pytest.mark.asyncio
+async def test_merge_removes_self_referential_relations():
+    """_merge_duplicates deletes self-referential relations on entity_a after reassignment."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+
+    ws_id = uuid.uuid4()
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_a = MagicMock()
+    entity_a.id = entity_a_id
+    entity_a.name = "Alice"
+    entity_a.aliases = []
+    entity_a.properties = {}
+
+    entity_b = MagicMock()
+    entity_b.id = entity_b_id
+    entity_b.name = "Alice B"
+    entity_b.aliases = []
+    entity_b.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.update = AsyncMock(return_value=None)
+
+    async def get_by_id(eid):
+        if eid == entity_a_id:
+            return entity_a
+        if eid == entity_b_id:
+            return entity_b
+        return None
+
+    entity_repo.get_by_id = get_by_id
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=AsyncMock(),
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="Alice",
+        entity_b_name="Alice B",
+        score=0.91,
+        method="fuzzy",
+    )
+
+    session = AsyncMock()
+    await engine._merge_duplicates([pair], ws_id, session)
+
+    executed_sqls = [str(call.args[0]) for call in session.execute.call_args_list]
+    self_ref_delete = [
+        s for s in executed_sqls
+        if "DELETE" in s and "l1_relations" in s and "source_entity_id" in s and "target_entity_id" in s
+    ]
+    assert self_ref_delete, "Expected DELETE of self-referential relations on entity_a"
+
+
+@pytest.mark.asyncio
+async def test_merge_updates_vector_chunks():
+    """_merge_duplicates updates vector_chunks source_id from entity_b to entity_a."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+
+    ws_id = uuid.uuid4()
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_a = MagicMock()
+    entity_a.id = entity_a_id
+    entity_a.name = "Alice"
+    entity_a.aliases = []
+    entity_a.properties = {}
+
+    entity_b = MagicMock()
+    entity_b.id = entity_b_id
+    entity_b.name = "Alice B"
+    entity_b.aliases = []
+    entity_b.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.update = AsyncMock(return_value=None)
+
+    async def get_by_id(eid):
+        if eid == entity_a_id:
+            return entity_a
+        if eid == entity_b_id:
+            return entity_b
+        return None
+
+    entity_repo.get_by_id = get_by_id
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=AsyncMock(),
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="Alice",
+        entity_b_name="Alice B",
+        score=0.91,
+        method="fuzzy",
+    )
+
+    session = AsyncMock()
+    await engine._merge_duplicates([pair], ws_id, session)
+
+    executed_sqls = [str(call.args[0]) for call in session.execute.call_args_list]
+    chunk_reassign = [s for s in executed_sqls if "vector_chunks" in s and "source_id" in s]
+    assert chunk_reassign, "Expected UPDATE vector_chunks to reassign source_id to entity_a"
+
+
+@pytest.mark.asyncio
+async def test_merge_records_merged_into():
+    """_merge_duplicates stores merged_into=entity_a.id in entity_b's properties before soft-delete."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+
+    ws_id = uuid.uuid4()
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_a = MagicMock()
+    entity_a.id = entity_a_id
+    entity_a.name = "Alice"
+    entity_a.aliases = []
+    entity_a.properties = {}
+
+    entity_b = MagicMock()
+    entity_b.id = entity_b_id
+    entity_b.name = "Alice B"
+    entity_b.aliases = []
+    entity_b.properties = {"existing": "value"}
+
+    entity_repo = AsyncMock()
+    entity_repo.update = AsyncMock(return_value=None)
+
+    async def get_by_id(eid):
+        if eid == entity_a_id:
+            return entity_a
+        if eid == entity_b_id:
+            return entity_b
+        return None
+
+    entity_repo.get_by_id = get_by_id
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=AsyncMock(),
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="Alice",
+        entity_b_name="Alice B",
+        score=0.91,
+        method="fuzzy",
+    )
+
+    session = AsyncMock()
+    await engine._merge_duplicates([pair], ws_id, session)
+
+    # The call that soft-deletes entity_b must also carry merged_into in properties
+    delete_calls = [
+        call for call in entity_repo.update.call_args_list
+        if call.kwargs.get("is_deleted") is True and call.args[0] == entity_b_id
+    ]
+    assert delete_calls, "entity_b must be soft-deleted"
+    props = delete_calls[0].kwargs.get("properties", {})
+    assert props.get("merged_into") == str(entity_a_id), (
+        f"expected merged_into={entity_a_id}, got properties={props}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_merge_duplicates_skips_missing_entities():
     """_merge_duplicates skips pair if either entity is missing."""
     from alayaos_core.extraction.integrator.engine import IntegratorEngine

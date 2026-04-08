@@ -550,8 +550,14 @@ async def test_merge_reassigns_relations():
 
 
 @pytest.mark.asyncio
-async def test_merge_removes_self_referential_relations():
-    """_merge_duplicates deletes self-referential relations on entity_a after reassignment."""
+async def test_merge_prevents_self_referential_relations_not_broad_delete():
+    """_merge_duplicates prevents self-referential relations by filtering during reassignment.
+
+    Specifically:
+    - b→a relations (would become a→a) are deleted directly instead of being reassigned
+    - a→b relations (would become a→a) are deleted directly instead of being reassigned
+    - Pre-existing self-refs on entity_a (a→a before the merge) must NOT be touched
+    """
     from alayaos_core.extraction.integrator.engine import IntegratorEngine
     from alayaos_core.extraction.integrator.schemas import DuplicatePair
 
@@ -606,11 +612,102 @@ async def test_merge_removes_self_referential_relations():
     await engine._merge_duplicates([pair], ws_id, session)
 
     executed_sqls = [str(call.args[0]) for call in session.execute.call_args_list]
-    self_ref_delete = [
+
+    # The UPDATE for source reassignment must have target_entity_id != :a_id guard
+    source_updates = [s for s in executed_sqls if "UPDATE l1_relations" in s and "source_entity_id" in s]
+    assert source_updates, "Expected UPDATE l1_relations source_entity_id reassignment"
+    assert any("target_entity_id != :a_id" in s for s in source_updates), (
+        "Source UPDATE must skip rows where target=a_id to prevent self-refs"
+    )
+
+    # The UPDATE for target reassignment must have source_entity_id != :a_id guard
+    target_updates = [s for s in executed_sqls if "UPDATE l1_relations" in s and "target_entity_id" in s]
+    assert target_updates, "Expected UPDATE l1_relations target_entity_id reassignment"
+    assert any("source_entity_id != :a_id" in s for s in target_updates), (
+        "Target UPDATE must skip rows where source=a_id to prevent self-refs"
+    )
+
+    # There must be specific DELETE statements for would-be self-refs (b→a and a→b)
+    self_ref_deletes = [
         s for s in executed_sqls
-        if "DELETE" in s and "l1_relations" in s and "source_entity_id" in s and "target_entity_id" in s
+        if "DELETE FROM l1_relations" in s and ":b_id" in s
     ]
-    assert self_ref_delete, "Expected DELETE of self-referential relations on entity_a"
+    assert self_ref_deletes, "Expected targeted DELETEs for would-be self-referential relations"
+
+    # The broad DELETE (source=a AND target=a without referencing b_id) must NOT appear
+    broad_delete = [
+        s for s in executed_sqls
+        if "DELETE FROM l1_relations" in s
+        and "source_entity_id = :a_id AND target_entity_id = :a_id" in s
+        and ":b_id" not in s
+    ]
+    assert not broad_delete, (
+        "Broad self-ref DELETE (source=a AND target=a) must not exist — it nukes pre-existing self-refs"
+    )
+
+
+@pytest.mark.asyncio
+async def test_merge_deduplicates_relations_after_reassignment():
+    """_merge_duplicates deduplicates relations on entity_a after reassignment."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+
+    ws_id = uuid.uuid4()
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_a = MagicMock()
+    entity_a.id = entity_a_id
+    entity_a.name = "Alice"
+    entity_a.aliases = []
+    entity_a.properties = {}
+
+    entity_b = MagicMock()
+    entity_b.id = entity_b_id
+    entity_b.name = "Alice B"
+    entity_b.aliases = []
+    entity_b.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.update = AsyncMock(return_value=None)
+
+    async def get_by_id(eid):
+        if eid == entity_a_id:
+            return entity_a
+        if eid == entity_b_id:
+            return entity_b
+        return None
+
+    entity_repo.get_by_id = get_by_id
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=AsyncMock(),
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="Alice",
+        entity_b_name="Alice B",
+        score=0.91,
+        method="fuzzy",
+    )
+
+    session = AsyncMock()
+    await engine._merge_duplicates([pair], ws_id, session)
+
+    executed_sqls = [str(call.args[0]) for call in session.execute.call_args_list]
+    dedup_sql = [
+        s for s in executed_sqls
+        if "ROW_NUMBER" in s and "PARTITION BY" in s and "l1_relations" in s
+    ]
+    assert dedup_sql, "Expected relation dedup SQL using ROW_NUMBER OVER PARTITION BY"
 
 
 @pytest.mark.asyncio

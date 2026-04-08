@@ -230,28 +230,55 @@ class IntegratorEngine:
                 ),
                 {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
             )
-            # Step 3: Reassign relations where entity_b is the source
+            # Step 3: Reassign relations where entity_b is the source (skip would-be self-refs)
             await session.execute(
                 text(
                     "UPDATE l1_relations SET source_entity_id = :a_id"
-                    " WHERE source_entity_id = :b_id AND workspace_id = :ws_id"
+                    " WHERE source_entity_id = :b_id AND target_entity_id != :a_id"
+                    " AND workspace_id = :ws_id"
                 ),
                 {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
             )
-            # Step 4: Reassign relations where entity_b is the target
-            await session.execute(
-                text(
-                    "UPDATE l1_relations SET target_entity_id = :a_id"
-                    " WHERE target_entity_id = :b_id AND workspace_id = :ws_id"
-                ),
-                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
-            )
-            # Step 5: Remove self-referential relations created by the reassignment above
+            # Delete b→a relations that would become self-referential
             await session.execute(
                 text(
                     "DELETE FROM l1_relations"
-                    " WHERE source_entity_id = :a_id AND target_entity_id = :a_id"
+                    " WHERE source_entity_id = :b_id AND target_entity_id = :a_id"
                     " AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            # Step 4: Reassign relations where entity_b is the target (skip would-be self-refs)
+            await session.execute(
+                text(
+                    "UPDATE l1_relations SET target_entity_id = :a_id"
+                    " WHERE target_entity_id = :b_id AND source_entity_id != :a_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            # Delete a→b relations that would become self-referential
+            await session.execute(
+                text(
+                    "DELETE FROM l1_relations"
+                    " WHERE source_entity_id = :a_id AND target_entity_id = :b_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            # Step 5: Deduplicate relations on entity_a (same source, target, relation_type)
+            await session.execute(
+                text(
+                    "DELETE FROM l1_relations WHERE id IN ("
+                    "  SELECT id FROM ("
+                    "    SELECT id, ROW_NUMBER() OVER ("
+                    "      PARTITION BY workspace_id, source_entity_id, target_entity_id, relation_type"
+                    "      ORDER BY created_at"
+                    "    ) AS rn FROM l1_relations"
+                    "    WHERE (source_entity_id = :a_id OR target_entity_id = :a_id)"
+                    "    AND workspace_id = :ws_id"
+                    "  ) ranked WHERE rn > 1"
+                    ")"
                 ),
                 {"a_id": entity_a.id, "ws_id": workspace_id},
             )

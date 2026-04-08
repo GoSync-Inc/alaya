@@ -43,10 +43,10 @@ func doIngest(content, sourceType string) error {
 		return err
 	}
 	body := map[string]string{
-		"content":     content,
+		"text":        content,
 		"source_type": sourceType,
 	}
-	data, err := c.Post("/ingest", body)
+	data, err := c.Post("/ingest/text", body)
 	if err != nil {
 		return err
 	}

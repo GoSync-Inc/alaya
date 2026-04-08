@@ -1,6 +1,7 @@
 package apierror
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -73,8 +74,15 @@ func TestExitCodeFrom_GenericError(t *testing.T) {
 
 func TestExitCodeFrom_Nil(t *testing.T) {
 	code := ExitCodeFrom(nil)
-	if code != ExitGeneric {
-		t.Errorf("expected %d for nil, got %d", ExitGeneric, code)
+	if code != 0 {
+		t.Errorf("expected 0 for nil, got %d", code)
+	}
+}
+
+func TestExitCodeFrom_ContextDeadlineExceeded(t *testing.T) {
+	code := ExitCodeFrom(context.DeadlineExceeded)
+	if code != ExitTimeout {
+		t.Errorf("expected %d for context.DeadlineExceeded, got %d", ExitTimeout, code)
 	}
 }
 

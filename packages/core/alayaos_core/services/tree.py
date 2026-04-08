@@ -80,8 +80,8 @@ class TreeService:
             await self._session.flush()
             return
 
-        # Load entity + claims for briefing
-        entity_stmt = select(L1Entity).where(L1Entity.id == node.entity_id)
+        # Load entity with FOR UPDATE to prevent concurrent rebuilds
+        entity_stmt = select(L1Entity).where(L1Entity.id == node.entity_id).with_for_update()
         entity = (await self._session.execute(entity_stmt)).scalar_one_or_none()
         if not entity:
             node.is_dirty = False

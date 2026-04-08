@@ -51,6 +51,12 @@ class EntityTypeRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_all(self) -> list[EntityTypeDefinition]:
+        """Get all entity types in workspace (no pagination)."""
+        stmt = select(EntityTypeDefinition).where(self._ws_filter(EntityTypeDefinition))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def list(
         self,
         cursor: str | None = None,

@@ -28,9 +28,9 @@ def _make_redis(lua_result: list[int]) -> MagicMock:
 @pytest.mark.asyncio
 async def test_rate_limiter_no_redis_always_allows() -> None:
     limiter = RateLimiterService(redis=None)
-    allowed, _retry = await limiter.check("key", 1, 60)
+    allowed, retry_after = await limiter.check("key", 1, 60)
     assert allowed is True
-    assert retry is None
+    assert retry_after is None
 
 
 # ---------------------------------------------------------------------------
@@ -44,9 +44,9 @@ async def test_under_limit_allowed() -> None:
     # Lua returns [count, allowed_flag, oldest_score]
     redis = _make_redis([1, 1, 0])
     limiter = RateLimiterService(redis=redis)
-    allowed, _retry = await limiter.check("user:1", 5, 60)
+    allowed, retry_after = await limiter.check("user:1", 5, 60)
     assert allowed is True
-    assert retry is None
+    assert retry_after is None
     redis.eval.assert_awaited_once()
 
 
@@ -57,10 +57,10 @@ async def test_at_limit_last_request_denied() -> None:
     # but we simulate the script returning allowed=0
     redis = _make_redis([6, 0, 30])
     limiter = RateLimiterService(redis=redis)
-    allowed, _retry = await limiter.check("user:1", 5, 60)
+    allowed, retry_after = await limiter.check("user:1", 5, 60)
     assert allowed is False
-    assert retry is not None
-    assert retry >= 1
+    assert retry_after is not None
+    assert retry_after >= 1
     redis.eval.assert_awaited_once()
 
 
@@ -70,9 +70,9 @@ async def test_expired_entries_cleaned_allows_new_request() -> None:
     # Simulate that after cleanup count is 1 (only the new entry)
     redis = _make_redis([1, 1, 0])
     limiter = RateLimiterService(redis=redis)
-    allowed, _retry = await limiter.check("user:expired", 5, 60)
+    allowed, retry_after = await limiter.check("user:expired", 5, 60)
     assert allowed is True
-    assert retry is None
+    assert retry_after is None
 
 
 @pytest.mark.asyncio
@@ -81,9 +81,9 @@ async def test_redis_error_fails_open() -> None:
     redis = MagicMock()
     redis.eval = AsyncMock(side_effect=ConnectionError("redis down"))
     limiter = RateLimiterService(redis=redis)
-    allowed, _retry = await limiter.check("user:1", 5, 60)
+    allowed, retry_after = await limiter.check("user:1", 5, 60)
     assert allowed is True
-    assert retry is None
+    assert retry_after is None
 
 
 @pytest.mark.asyncio
@@ -116,7 +116,7 @@ async def test_denied_entry_removed_count_stays_at_limit() -> None:
     # and the caller never sees an inflated count.
     redis = _make_redis([limit + 1, 0, 30])
     limiter = RateLimiterService(redis=redis)
-    allowed, _retry = await limiter.check("user:full", limit, 60)
+    allowed, _retry_after = await limiter.check("user:full", limit, 60)
     assert allowed is False
     # Crucially: no second call to redis (e.g. zrem) — removal is inside the Lua script
     assert redis.eval.await_count == 1

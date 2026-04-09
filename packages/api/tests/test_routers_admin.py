@@ -46,7 +46,7 @@ def make_app_with_mock_session(api_key: APIKey):
         session = AsyncMock()
         yield session
 
-    from alayaos_api.deps import get_api_key, get_session, get_workspace_session, require_scope
+    from alayaos_api.deps import get_api_key, get_session, get_workspace_session
     from alayaos_api.routers.admin import get_embedding_service
     from alayaos_core.services.embedding import FakeEmbeddingService
 

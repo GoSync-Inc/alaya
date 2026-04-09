@@ -224,10 +224,7 @@ class IntegratorEngine:
             await self.entity_repo.update(entity_a.id, aliases=new_aliases)
             # Step 2: Reassign claims from entity_b to entity_a
             await session.execute(
-                text(
-                    "UPDATE l2_claims SET entity_id = :a_id"
-                    " WHERE entity_id = :b_id AND workspace_id = :ws_id"
-                ),
+                text("UPDATE l2_claims SET entity_id = :a_id WHERE entity_id = :b_id AND workspace_id = :ws_id"),
                 {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
             )
             # Step 3: Reassign relations where entity_b is the source (skip would-be self-refs)

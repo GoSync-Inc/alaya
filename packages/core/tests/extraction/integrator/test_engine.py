@@ -628,15 +628,13 @@ async def test_merge_prevents_self_referential_relations_not_broad_delete():
     )
 
     # There must be specific DELETE statements for would-be self-refs (b→a and a→b)
-    self_ref_deletes = [
-        s for s in executed_sqls
-        if "DELETE FROM l1_relations" in s and ":b_id" in s
-    ]
+    self_ref_deletes = [s for s in executed_sqls if "DELETE FROM l1_relations" in s and ":b_id" in s]
     assert self_ref_deletes, "Expected targeted DELETEs for would-be self-referential relations"
 
     # The broad DELETE (source=a AND target=a without referencing b_id) must NOT appear
     broad_delete = [
-        s for s in executed_sqls
+        s
+        for s in executed_sqls
         if "DELETE FROM l1_relations" in s
         and "source_entity_id = :a_id AND target_entity_id = :a_id" in s
         and ":b_id" not in s
@@ -703,10 +701,7 @@ async def test_merge_deduplicates_relations_after_reassignment():
     await engine._merge_duplicates([pair], ws_id, session)
 
     executed_sqls = [str(call.args[0]) for call in session.execute.call_args_list]
-    dedup_sql = [
-        s for s in executed_sqls
-        if "ROW_NUMBER" in s and "PARTITION BY" in s and "l1_relations" in s
-    ]
+    dedup_sql = [s for s in executed_sqls if "ROW_NUMBER" in s and "PARTITION BY" in s and "l1_relations" in s]
     assert dedup_sql, "Expected relation dedup SQL using ROW_NUMBER OVER PARTITION BY"
 
 
@@ -829,14 +824,13 @@ async def test_merge_records_merged_into():
 
     # The call that soft-deletes entity_b must also carry merged_into in properties
     delete_calls = [
-        call for call in entity_repo.update.call_args_list
+        call
+        for call in entity_repo.update.call_args_list
         if call.kwargs.get("is_deleted") is True and call.args[0] == entity_b_id
     ]
     assert delete_calls, "entity_b must be soft-deleted"
     props = delete_calls[0].kwargs.get("properties", {})
-    assert props.get("merged_into") == str(entity_a_id), (
-        f"expected merged_into={entity_a_id}, got properties={props}"
-    )
+    assert props.get("merged_into") == str(entity_a_id), f"expected merged_into={entity_a_id}, got properties={props}"
 
 
 @pytest.mark.asyncio

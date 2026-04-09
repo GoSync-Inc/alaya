@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from pydantic import BaseModel
-from pydantic import SecretStr
+from pydantic import BaseModel, SecretStr
 
 from alayaos_core.llm.fake import FakeLLMAdapter
 from alayaos_core.llm.interface import LLMUsage
@@ -42,7 +41,7 @@ async def test_primary_succeeds_no_fallback_called() -> None:
     fallback = _make_mock_adapter(result=SimpleModel(name="fallback", value=99))
 
     adapter = FallbackLLMAdapter(primary=primary, fallbacks=[fallback])
-    result, usage = await adapter.extract("text", "sys", SimpleModel)
+    result, _usage = await adapter.extract("text", "sys", SimpleModel)
 
     assert result.name == "primary"
     assert result.value == 10
@@ -59,7 +58,7 @@ async def test_primary_fails_fallback_called() -> None:
     fallback = _make_mock_adapter(result=SimpleModel(name="fallback", value=99))
 
     adapter = FallbackLLMAdapter(primary=primary, fallbacks=[fallback])
-    result, usage = await adapter.extract("text", "sys", SimpleModel)
+    result, _usage = await adapter.extract("text", "sys", SimpleModel)
 
     assert result.name == "fallback"
     assert result.value == 99
@@ -90,12 +89,12 @@ def _make_settings(**kwargs):
     """Build a minimal Settings-like object via MagicMock."""
     from alayaos_core.config import Settings
 
-    defaults = dict(
-        EXTRACTION_LLM_PROVIDER="fake",
-        LLM_FALLBACK_PROVIDERS=[],
-        ANTHROPIC_API_KEY=SecretStr("test-key"),
-        ANTHROPIC_MODEL="claude-sonnet-4-20250514",
-    )
+    defaults = {
+        "EXTRACTION_LLM_PROVIDER": "fake",
+        "LLM_FALLBACK_PROVIDERS": [],
+        "ANTHROPIC_API_KEY": SecretStr("test-key"),
+        "ANTHROPIC_MODEL": "claude-sonnet-4-20250514",
+    }
     defaults.update(kwargs)
     s = MagicMock(spec=Settings)
     for k, v in defaults.items():
@@ -106,7 +105,6 @@ def _make_settings(**kwargs):
 def test_factory_creates_fake() -> None:
     """Factory returns FakeLLMAdapter when provider='fake'."""
     from alayaos_core.llm.factory import create_llm_service
-    from alayaos_core.llm.fake import FakeLLMAdapter
 
     settings = _make_settings(EXTRACTION_LLM_PROVIDER="fake", LLM_FALLBACK_PROVIDERS=[])
     service = create_llm_service(settings)
@@ -115,8 +113,8 @@ def test_factory_creates_fake() -> None:
 
 def test_factory_creates_anthropic() -> None:
     """Factory returns AnthropicAdapter when provider='anthropic'."""
-    from alayaos_core.llm.factory import create_llm_service
     from alayaos_core.llm.anthropic import AnthropicAdapter
+    from alayaos_core.llm.factory import create_llm_service
 
     settings = _make_settings(EXTRACTION_LLM_PROVIDER="anthropic", LLM_FALLBACK_PROVIDERS=[])
     service = create_llm_service(settings)

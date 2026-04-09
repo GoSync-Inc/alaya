@@ -67,11 +67,7 @@ async def backfill_embeddings(
         )
     else:
         result = await session.execute(
-            text(
-                "SELECT id, content FROM vector_chunks"
-                " WHERE embedding IS NULL"
-                " LIMIT :batch_size"
-            ),
+            text("SELECT id, content FROM vector_chunks WHERE embedding IS NULL LIMIT :batch_size"),
             {"batch_size": request.batch_size},
         )
 
@@ -96,9 +92,7 @@ async def backfill_embeddings(
         try:
             async with session.begin_nested():
                 await session.execute(
-                    text(
-                        "UPDATE vector_chunks SET embedding = :embedding WHERE id = :id"
-                    ),
+                    text("UPDATE vector_chunks SET embedding = :embedding WHERE id = :id"),
                     {"embedding": str(embedding), "id": chunk_id},
                 )
             processed += 1

@@ -1,4 +1,5 @@
 """LLM adapter with automatic fallback across providers."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

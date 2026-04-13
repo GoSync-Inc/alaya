@@ -81,7 +81,7 @@ def test_settings_search_config() -> None:
 
 def test_settings_ask_config() -> None:
     s = Settings()
-    assert s.ASK_MODEL == "claude-sonnet-4-6-20250514"
+    assert s.ASK_MODEL == "claude-sonnet-4-6"
     assert s.ASK_MAX_CONTEXT_TOKENS == 8192
     assert s.ASK_MAX_OUTPUT_TOKENS == 2048
     assert s.ASK_MAX_RESULTS_FOR_LLM == 10
@@ -91,7 +91,7 @@ def test_settings_ask_config() -> None:
 
 def test_settings_tree_config() -> None:
     s = Settings()
-    assert s.TREE_BRIEFING_MODEL == "claude-sonnet-4-6-20250514"
+    assert s.TREE_BRIEFING_MODEL == "claude-sonnet-4-6"
     assert s.TREE_BRIEFING_CACHE_TTL == 900
     assert s.TREE_MAX_DEPTH == 10
     assert s.TREE_MAX_CLAIMS_PER_BRIEF == 50

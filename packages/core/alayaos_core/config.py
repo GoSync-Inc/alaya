@@ -52,12 +52,12 @@ class Settings(BaseSettings):
     CORTEX_TRUNCATION_TOKENS: int = 800
 
     # Crystallizer
-    CRYSTALLIZER_MODEL: str = "claude-sonnet-4-6-20250514"
+    CRYSTALLIZER_MODEL: str = "claude-sonnet-4-6"
     CRYSTALLIZER_CONFIDENCE_HIGH: float = 0.8  # Spec: high tier >= 0.8
     CRYSTALLIZER_CONFIDENCE_LOW: float = 0.6  # Spec: medium tier >= 0.6, low < 0.6
 
     # Integrator
-    INTEGRATOR_MODEL: str = "claude-sonnet-4-6-20250514"
+    INTEGRATOR_MODEL: str = "claude-sonnet-4-6"
     INTEGRATOR_BATCH_SIZE: int = 20
     INTEGRATOR_DIRTY_SET_THRESHOLD: int = 10
     INTEGRATOR_MAX_WAIT_SECONDS: int = 1800
@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     SEARCH_DEFAULT_LIMIT: int = 10
 
     # Q&A (Ask)
-    ASK_MODEL: str = "claude-sonnet-4-6-20250514"
+    ASK_MODEL: str = "claude-sonnet-4-6"
     ASK_MAX_CONTEXT_TOKENS: int = 8192
     ASK_MAX_OUTPUT_TOKENS: int = 2048
     ASK_MAX_RESULTS_FOR_LLM: int = 10
@@ -86,7 +86,7 @@ class Settings(BaseSettings):
     ASK_RATE_LIMIT_PER_HOUR: int = 100
 
     # Knowledge Tree
-    TREE_BRIEFING_MODEL: str = "claude-sonnet-4-6-20250514"
+    TREE_BRIEFING_MODEL: str = "claude-sonnet-4-6"
     TREE_BRIEFING_CACHE_TTL: int = 900  # 15 minutes
     TREE_MAX_DEPTH: int = 10
     TREE_MAX_CLAIMS_PER_BRIEF: int = 50

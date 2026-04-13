@@ -1,5 +1,6 @@
 """Health check endpoints."""
 
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -12,6 +13,11 @@ from alayaos_core.config import Settings
 router = APIRouter(tags=["health"])
 
 
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
 @router.get("/health/live")
 async def health_live():
     return {"status": "ok"}
@@ -19,7 +25,7 @@ async def health_live():
 
 @router.get("/health/ready")
 async def health_ready(session: Annotated[AsyncSession, Depends(get_session)]):
-    settings = Settings()
+    settings = get_settings()
     checks = {}
 
     # Database

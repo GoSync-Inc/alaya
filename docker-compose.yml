@@ -63,9 +63,13 @@ services:
   worker:
     build: .
     command: ["taskiq", "worker", "alayaos_core.worker.tasks:broker"]
+    env_file:
+      - path: .env
+        required: false
     environment:
-      - ALAYA_DATABASE_URL=postgresql+asyncpg://alaya:alaya@postgres:5432/alaya
-      - ALAYA_REDIS_URL=redis://redis:6379/0
+      ALAYA_DATABASE_URL: ${ALAYA_DATABASE_URL:-postgresql+asyncpg://alaya:alaya@postgres:5432/alaya}
+      ALAYA_REDIS_URL: ${ALAYA_REDIS_URL:-redis://redis:6379/0}
+      ALAYA_ENV: ${ALAYA_ENV:-dev}
     depends_on:
       postgres:
         condition: service_healthy

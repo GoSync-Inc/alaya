@@ -70,7 +70,7 @@ class EventRepository(BaseRepository):
             "updated_at": func.now(),
         }
         if metadata is not None:
-            update_set["event_metadata"] = stmt.excluded.event_metadata
+            update_set["metadata"] = stmt.excluded["metadata"]
 
         stmt = stmt.on_conflict_do_update(
             constraint="uq_l0_events_ws_src",

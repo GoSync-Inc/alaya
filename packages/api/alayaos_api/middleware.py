@@ -7,7 +7,10 @@ import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.datastructures import URL, Headers
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import RedirectResponse
 from structlog.contextvars import bind_contextvars, clear_contextvars
 
 
@@ -20,6 +23,50 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
+
+
+class EnvelopeTrustedHostMiddleware(TrustedHostMiddleware):
+    async def __call__(self, scope, receive, send) -> None:
+        if self.allow_any or scope["type"] not in ("http", "websocket"):  # pragma: no cover
+            await self.app(scope, receive, send)
+            return
+
+        headers = Headers(scope=scope)
+        host = headers.get("host", "").split(":")[0]
+        is_valid_host = False
+        found_www_redirect = False
+        for pattern in self.allowed_hosts:
+            if host == pattern or (pattern.startswith("*") and host.endswith(pattern[1:])):
+                is_valid_host = True
+                break
+            if "www." + host == pattern:
+                found_www_redirect = True
+
+        if is_valid_host:
+            await self.app(scope, receive, send)
+            return
+
+        if found_www_redirect and self.www_redirect:
+            url = URL(scope=scope)
+            redirect_url = url.replace(netloc="www." + url.netloc)
+            response = RedirectResponse(url=str(redirect_url))
+            await response(scope, receive, send)
+            return
+
+        request_id = scope.get("state", {}).get("request_id")
+        response = JSONResponse(
+            status_code=400,
+            content={
+                "error": {
+                    "code": "validation.invalid_host",
+                    "message": "Invalid host header.",
+                    "hint": None,
+                    "docs": None,
+                    "request_id": request_id,
+                }
+            },
+        )
+        await response(scope, receive, send)
 
 
 def _sanitize_validation_errors(errors: list[dict]) -> str:

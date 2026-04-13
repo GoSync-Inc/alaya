@@ -59,13 +59,14 @@ def test_search_response_schema():
 
 
 @pytest.mark.asyncio
-async def test_rate_limiter_allows_within_limit():
+async def test_rate_limiter_fails_closed_without_redis():
+    """RUN5.05: rate limiter must fail closed when Redis is unavailable."""
     from alayaos_core.services.rate_limiter import RateLimiterService
 
     limiter = RateLimiterService(redis=None)
-    allowed, retry = await limiter.check("test_key", 10, 60)
-    assert allowed is True
-    assert retry is None
+    decision = await limiter.check("test_key", 10, 60)
+    assert decision.allowed is False
+    assert decision.backend_available is False
 
 
 def test_evidence_unit_channels_validation():

@@ -71,10 +71,14 @@ def test_sanitize_context_strips_ignore_pattern():
     assert "[REDACTED]" in result
 
 
-async def test_rate_limiter_no_redis_passthrough():
-    """Rate limiter with no Redis should always allow."""
+async def test_rate_limiter_no_redis_fails_closed():
+    """RUN5.05: rate limiter must fail closed when Redis is unavailable.
+
+    Was previously a "passthrough" (allow-all) — that was the SBP-002 bug.
+    """
     from alayaos_core.services.rate_limiter import RateLimiterService
 
     limiter = RateLimiterService(redis=None)
-    allowed, _retry = await limiter.check("key", 1, 60)
-    assert allowed is True
+    decision = await limiter.check("key", 1, 60)
+    assert decision.allowed is False
+    assert decision.backend_available is False

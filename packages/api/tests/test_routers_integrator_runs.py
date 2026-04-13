@@ -162,6 +162,32 @@ class TestIntegratorRunsRouter:
         assert str(WS_ID) in sql_clause.text
         mock_job.kiq.assert_awaited_once_with(str(WS_ID), str(run.id))
 
+    def test_trigger_integrator_run_marks_failed_when_enqueue_fails(self) -> None:
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        run = make_integrator_run()
+
+        with (
+            patch("alayaos_api.routers.integrator_runs.IntegratorRunRepository") as mock_cls,
+            patch("alayaos_core.worker.tasks.job_integrate") as mock_job,
+        ):
+            repo = AsyncMock()
+            repo.create = AsyncMock(return_value=run)
+            repo.update_status = AsyncMock(return_value=run)
+            mock_cls.return_value = repo
+            mock_job.kiq = AsyncMock(side_effect=RuntimeError("broker unavailable"))
+
+            client = TestClient(app)
+            response = client.post("/api/v1/integrator-runs/trigger", headers={"X-Api-Key": RAW_KEY})
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "service.integrator_enqueue_failed"
+        repo.update_status.assert_awaited_once_with(
+            run.id,
+            "failed",
+            error_message="broker unavailable",
+        )
+
     def test_trigger_requires_admin_scope(self) -> None:
         """Trigger endpoint requires admin scope."""
         api_key = make_api_key(scopes=["read"])

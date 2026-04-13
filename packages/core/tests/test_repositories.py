@@ -1,7 +1,7 @@
 """Tests for all repositories using mocked AsyncSession."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -1066,3 +1066,52 @@ class TestIntegratorRunRepository:
         assert result is not None
         assert result.status == "completed"
         assert result.error_message is None
+
+    @pytest.mark.asyncio
+    async def test_update_status_sets_completed_at_for_skipped(self) -> None:
+        from alayaos_core.repositories.integrator_run import IntegratorRunRepository
+
+        ws_id = uuid.uuid4()
+        run = self._make_run(ws_id)
+        run.status = "running"
+        run.error_message = None
+        run.completed_at = None
+        session = make_session()
+        session.execute.return_value = make_result(run)
+        repo = IntegratorRunRepository(session, ws_id)
+
+        result = await repo.update_status(run.id, "skipped")
+
+        assert result is not None
+        assert result.status == "skipped"
+        assert result.completed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_mark_stale_running_failed(self) -> None:
+        from alayaos_core.models.integrator_run import IntegratorRun
+        from alayaos_core.repositories.integrator_run import IntegratorRunRepository
+
+        ws_id = uuid.uuid4()
+        stale_run = IntegratorRun(
+            id=uuid.uuid4(),
+            workspace_id=ws_id,
+            trigger="job_integrate",
+            scope_description="test",
+            status="running",
+        )
+        stale_run.started_at = datetime.now(UTC) - timedelta(hours=1)
+        stale_run.completed_at = None
+
+        session = make_session()
+        session.execute.return_value = make_scalar_result([stale_run])
+        repo = IntegratorRunRepository(session, ws_id)
+
+        reaped = await repo.mark_stale_running_failed(
+            started_before=datetime.now(UTC) - timedelta(minutes=5),
+            error_message="stuck integrator run exceeded 900s",
+        )
+
+        assert reaped == 1
+        assert stale_run.status == "failed"
+        assert stale_run.error_message == "stuck integrator run exceeded 900s"
+        assert stale_run.completed_at is not None

@@ -2,6 +2,7 @@
 
 import contextlib
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import redis.asyncio as aioredis
 from sqlalchemy import text
@@ -13,6 +14,7 @@ from alayaos_core.repositories.claim import ClaimRepository
 from alayaos_core.repositories.entity import EntityRepository
 from alayaos_core.repositories.integrator_run import IntegratorRunRepository
 from alayaos_core.repositories.relation import RelationRepository
+from alayaos_core.repositories.workspace import WorkspaceRepository
 from alayaos_core.services.entity_cache import EntityCacheService
 from alayaos_core.worker.broker import broker
 
@@ -66,6 +68,35 @@ async def _create_integrator_run(
             llm_model=llm_model,
         )
         return run.id
+
+
+async def _reap_stuck_integrator_runs(factory, *, stuck_after_seconds: int) -> int:
+    started_before = datetime.now(UTC) - timedelta(seconds=stuck_after_seconds)
+    reason = f"stuck integrator run exceeded {stuck_after_seconds}s"
+    workspace_ids: list[uuid.UUID] = []
+
+    async with factory() as session:
+        workspace_repo = WorkspaceRepository(session)
+        cursor: str | None = None
+        while True:
+            workspaces, next_cursor, has_more = await workspace_repo.list(cursor=cursor, limit=200)
+            workspace_ids.extend(workspace.id for workspace in workspaces)
+            if not has_more:
+                break
+            cursor = next_cursor
+
+    reaped = 0
+    for workspace_id in workspace_ids:
+        async with factory() as session, session.begin():
+            workspace_id_str = str(workspace_id)
+            await _set_workspace_context(session, workspace_id_str)
+            run_repo = IntegratorRunRepository(session, workspace_id)
+            reaped += await run_repo.mark_stale_running_failed(
+                started_before=started_before,
+                error_message=reason,
+            )
+
+    return reaped
 
 
 @broker.task(timeout=120, retry_on_error=True, max_retries=3)
@@ -594,7 +625,12 @@ async def job_check_integrator() -> dict:
 
     settings = Settings()
     redis_client = aioredis.from_url(settings.REDIS_URL)
+    factory = _session_factory()
     try:
+        reaped = await _reap_stuck_integrator_runs(
+            factory,
+            stuck_after_seconds=getattr(settings, "INTEGRATOR_STUCK_RUN_SECONDS", 900),
+        )
         cursor = 0
         triggered: list[str] = []
         while True:
@@ -621,6 +657,6 @@ async def job_check_integrator() -> dict:
                     triggered.append(workspace_id)
             if cursor == 0:
                 break
-        return {"triggered": triggered, "status": "checked"}
+        return {"triggered": triggered, "reaped": reaped, "status": "checked"}
     finally:
         await redis_client.aclose()

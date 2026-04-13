@@ -64,7 +64,7 @@ class IntegratorRunRepository(BaseRepository):
             run.error_message = error_message
         else:
             run.error_message = None
-        if status in ("completed", "failed"):
+        if status in ("completed", "failed", "skipped"):
             run.completed_at = datetime.now(UTC)
         await self.session.flush()
         return run
@@ -96,3 +96,34 @@ class IntegratorRunRepository(BaseRepository):
         run.duration_ms = duration_ms
         await self.session.flush()
         return run
+
+    async def mark_stale_running_failed(
+        self,
+        *,
+        started_before: datetime,
+        error_message: str,
+        exclude_run_id: uuid.UUID | None = None,
+    ) -> int:
+        stmt = (
+            select(IntegratorRun)
+            .where(self._ws_filter(IntegratorRun))
+            .where(IntegratorRun.status == "running")
+            .where(IntegratorRun.completed_at.is_(None))
+            .where(IntegratorRun.started_at < started_before)
+        )
+        if exclude_run_id is not None:
+            stmt = stmt.where(IntegratorRun.id != exclude_run_id)
+
+        result = await self.session.execute(stmt)
+        runs = list(result.scalars().all())
+        if not runs:
+            return 0
+
+        completed_at = datetime.now(UTC)
+        for run in runs:
+            run.status = "failed"
+            run.error_message = error_message
+            run.completed_at = completed_at
+
+        await self.session.flush()
+        return len(runs)

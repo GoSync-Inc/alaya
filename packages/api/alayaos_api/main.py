@@ -55,7 +55,10 @@ def create_app() -> FastAPI:
 
         app.add_middleware(EnvelopeTrustedHostMiddleware, allowed_hosts=settings.TRUSTED_HOSTS)
     elif settings.ENV == "production":
-        log.warning("trusted_hosts_not_configured_for_production")
+        log.warning(
+            "trusted_hosts_not_configured_for_production",
+            message="Host validation is not configured for production. Set ALAYA_TRUSTED_HOSTS or enforce trusted hosts at ingress.",
+        )
 
     from alayaos_api.middleware import register_error_handlers
     from alayaos_api.routers import (

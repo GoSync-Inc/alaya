@@ -37,6 +37,8 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 
 class EnvelopeTrustedHostMiddleware(TrustedHostMiddleware):
+    # NOTE: We intentionally mirror Starlette's host validation flow here so we can
+    # preserve the Alaya error envelope. Keep behavior aligned with upstream changes.
     async def __call__(self, scope, receive, send) -> None:
         if self.allow_any or scope["type"] not in ("http", "websocket"):  # pragma: no cover
             await self.app(scope, receive, send)
@@ -44,8 +46,9 @@ class EnvelopeTrustedHostMiddleware(TrustedHostMiddleware):
 
         clear_contextvars()
         headers = Headers(scope=scope)
-        request_id = headers.get("x-request-id", str(uuid.uuid4()))
-        scope.setdefault("state", {})["request_id"] = request_id
+        state = scope.setdefault("state", {})
+        request_id = state.get("request_id") or headers.get("x-request-id", str(uuid.uuid4()))
+        state.setdefault("request_id", request_id)
         bind_contextvars(request_id=request_id)
         host = headers.get("host", "").split(":")[0]
         is_valid_host = False
@@ -68,7 +71,7 @@ class EnvelopeTrustedHostMiddleware(TrustedHostMiddleware):
             await response(scope, receive, send)
             return
 
-        request_id = scope.get("state", {}).get("request_id")
+        request_id = state.get("request_id")
         response = JSONResponse(
             status_code=400,
             content={

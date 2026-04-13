@@ -6,7 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import redis.asyncio as aioredis
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from taskiq.events import TaskiqEvents
 
 from alayaos_core.config import Settings
 from alayaos_core.extraction.integrator.engine import IntegratorEngine
@@ -17,6 +18,9 @@ from alayaos_core.repositories.relation import RelationRepository
 from alayaos_core.repositories.workspace import WorkspaceRepository
 from alayaos_core.services.entity_cache import EntityCacheService
 from alayaos_core.worker.broker import broker
+
+_engine: AsyncEngine | None = None
+_session_factory_cached: async_sessionmaker[AsyncSession] | None = None
 
 
 async def _set_workspace_context(session: AsyncSession, workspace_id: str) -> None:
@@ -30,10 +34,37 @@ async def _set_workspace_context(session: AsyncSession, workspace_id: str) -> No
     await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
 
 
-def _session_factory():
-    settings = Settings()
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
-    return async_sessionmaker(engine, expire_on_commit=False)
+def _get_session_factory() -> async_sessionmaker[AsyncSession]:
+    global _engine, _session_factory_cached
+
+    if _session_factory_cached is None:
+        settings = Settings()
+        _engine = create_async_engine(settings.DATABASE_URL, echo=False)
+        _session_factory_cached = async_sessionmaker(_engine, expire_on_commit=False)
+
+    return _session_factory_cached
+
+
+def _session_factory() -> async_sessionmaker[AsyncSession]:
+    """Compatibility shim for existing tests and call sites."""
+    return _get_session_factory()
+
+
+async def close_worker_resources() -> None:
+    global _engine, _session_factory_cached
+
+    engine = _engine
+    try:
+        if engine is not None:
+            await engine.dispose()
+    finally:
+        _engine = None
+        _session_factory_cached = None
+
+
+@broker.on_event(TaskiqEvents.WORKER_SHUTDOWN)
+async def _close_worker_resources_on_shutdown(_state) -> None:
+    await close_worker_resources()
 
 
 async def _mark_integrator_run_failed(

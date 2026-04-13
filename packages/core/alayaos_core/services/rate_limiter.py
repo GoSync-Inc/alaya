@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import structlog
@@ -53,14 +54,21 @@ return {count, 1, 0}
 """
 
 
+@dataclass(slots=True)
+class RateLimitDecision:
+    allowed: bool
+    retry_after: int | None = None
+    backend_available: bool = True
+
+
 class RateLimiterService:
     def __init__(self, redis: aioredis.Redis | None = None) -> None:
         self._redis = redis
 
-    async def check(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int | None]:
-        """Check rate limit. Returns (allowed, retry_after_seconds)."""
+    async def check(self, key: str, limit: int, window_seconds: int) -> RateLimitDecision:
+        """Check rate limit and report whether the backend was available."""
         if self._redis is None:
-            return True, None
+            return RateLimitDecision(allowed=False, retry_after=None, backend_available=False)
 
         now = time.time()
         window_start = now - window_seconds
@@ -80,14 +88,14 @@ class RateLimiterService:
             )
         except Exception:
             log.warning("rate_limiter_redis_error", key=key)
-            return True, None
+            return RateLimitDecision(allowed=False, retry_after=None, backend_available=False)
 
         _count, allowed_flag, oldest_score = result[0], result[1], result[2]
 
         if allowed_flag == 1:
-            return True, None
+            return RateLimitDecision(allowed=True, retry_after=None, backend_available=True)
 
         # Compute retry_after from oldest entry's score
         retry_after = int(window_seconds - (now - oldest_score)) + 1 if oldest_score > 0 else window_seconds
 
-        return False, max(retry_after, 1)
+        return RateLimitDecision(allowed=False, retry_after=max(retry_after, 1), backend_available=True)

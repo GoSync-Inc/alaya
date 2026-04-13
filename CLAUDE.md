@@ -75,6 +75,11 @@ Run before every commit:
 | Logic changes | `uv run pytest` |
 | All of the above | `uv run ruff check . && uv run pyright && uv run pytest` |
 
+## Production Config Notes
+
+- `ALAYA_API_DOCS_ENABLED` defaults to disabled in production when unset.
+- `ALAYA_TRUSTED_HOSTS` should be configured to the public hostnames served by ingress/Caddy, unless host validation is enforced upstream.
+
 ## Architecture Rules
 
 1. **`packages/core/`** has ZERO framework dependencies. No FastAPI, no HTTP, no CLI. Pure domain + business logic.

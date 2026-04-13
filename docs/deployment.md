@@ -32,6 +32,8 @@ On deploy:
    ALAYA_DATABASE_URL=postgresql+asyncpg://user:pass@db:5432/alaya
    ALAYA_REDIS_URL=redis://redis:6379/0
    ALAYA_ENV=production
+   ALAYA_API_DOCS_ENABLED=false
+   ALAYA_TRUSTED_HOSTS=["your-domain.com","www.your-domain.com"]
    ```
 4. Copy `docker/deploy.sh` to `/opt/alaya/deploy.sh` and make it executable:
    ```bash
@@ -84,3 +86,5 @@ docker logs -f alaya-blue  # or alaya-green
 # Health check
 curl https://your-domain.com/health/ready
 ```
+
+Production note: keep `ALAYA_TRUSTED_HOSTS` aligned with your ingress/Caddy hostnames. API docs default to disabled in production unless `ALAYA_API_DOCS_ENABLED=true`.

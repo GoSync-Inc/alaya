@@ -27,6 +27,13 @@ class WorkspaceRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_id_for_update(self, workspace_id: uuid.UUID) -> Workspace | None:
+        stmt = select(Workspace).where(Workspace.id == workspace_id).with_for_update()
+        result = self.session.execute(stmt)
+        if hasattr(result, "__await__"):
+            result = await result
+        return result.scalar_one_or_none()
+
     async def get_by_slug(self, slug: str) -> Workspace | None:
         stmt = select(Workspace).where(Workspace.slug == slug)
         result = await self.session.execute(stmt)

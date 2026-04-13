@@ -221,6 +221,56 @@ async def test_run_write_no_raw_extraction_fails() -> None:
     mock_run_repo.update_status.assert_called_with(run.id, "failed", error_message="no raw_extraction")
 
 
+@pytest.mark.asyncio
+async def test_run_write_locks_workspace_before_atomic_write() -> None:
+    """run_write must take the workspace row lock even when Redis is absent."""
+    from alayaos_core.extraction.pipeline import run_write
+
+    run_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+
+    run = _make_run(run_id=run_id, status="writing", event_id=event_id, raw_extraction={"entities": [], "relations": [], "claims": []})
+    run.workspace_id = workspace_id
+    event = _make_event(event_id=event_id, workspace_id=workspace_id)
+    workspace = MagicMock()
+    workspace.id = workspace_id
+
+    session = MagicMock()
+
+    mock_run_repo = AsyncMock()
+    mock_run_repo.get_by_id = AsyncMock(return_value=run)
+    mock_run_repo.update_status = AsyncMock()
+    mock_run_repo.update_counters = AsyncMock()
+    mock_run_repo.clear_raw_extraction = AsyncMock()
+
+    mock_event_repo = AsyncMock()
+    mock_event_repo.get_by_id = AsyncMock(return_value=event)
+
+    mock_ws_repo = AsyncMock()
+    mock_ws_repo.get_by_id_for_update = AsyncMock(return_value=workspace)
+
+    llm = AsyncMock()
+    atomic_write = AsyncMock(return_value={"entities_created": 0, "entities_merged": 0, "relations_created": 0, "claims_created": 0, "claims_superseded": 0})
+
+    with (
+        patch("alayaos_core.extraction.pipeline.ExtractionRunRepository", return_value=mock_run_repo),
+        patch("alayaos_core.extraction.pipeline.EventRepository", return_value=mock_event_repo),
+        patch("alayaos_core.extraction.pipeline.WorkspaceRepository", return_value=mock_ws_repo),
+        patch("alayaos_core.extraction.pipeline.atomic_write", new=atomic_write),
+    ):
+        result = await run_write(
+            run_id=run_id,
+            session=session,
+            llm=llm,
+            redis=None,
+        )
+
+    assert result is not None
+    mock_ws_repo.get_by_id_for_update.assert_awaited_once_with(workspace_id)
+    atomic_write.assert_awaited_once()
+
+
 # ─── workspace lock tests ─────────────────────────────────────────────────────
 
 

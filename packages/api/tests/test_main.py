@@ -78,7 +78,7 @@ def test_create_app_adds_trusted_host_middleware_when_configured(monkeypatch) ->
     monkeypatch.setenv("ALAYA_TRUSTED_HOSTS", '["api.example.com","testserver"]')
 
     app = create_app()
-    trusted_host = next((m for m in app.user_middleware if m.cls is TrustedHostMiddleware), None)
+    trusted_host = next((m for m in app.user_middleware if issubclass(m.cls, TrustedHostMiddleware)), None)
 
     assert trusted_host is not None
     assert trusted_host.kwargs["allowed_hosts"] == ["api.example.com", "testserver"]
@@ -87,4 +87,7 @@ def test_create_app_adds_trusted_host_middleware_when_configured(monkeypatch) ->
     blocked = TestClient(app, base_url="http://evil.example.com")
 
     assert allowed.get("/health/live").status_code == 200
-    assert blocked.get("/health/live").status_code == 400
+    blocked_response = blocked.get("/health/live")
+    assert blocked_response.status_code == 400
+    assert blocked_response.headers["content-type"].startswith("application/json")
+    assert blocked_response.json()["error"]["code"] == "validation.invalid_host"

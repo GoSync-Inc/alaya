@@ -8,6 +8,13 @@ from fastapi.testclient import TestClient
 from alayaos_api.routers.health import router
 
 
+def make_scalar_result(value):
+    result = MagicMock()
+    result.scalar_one.return_value = value
+    result.scalar_one_or_none.return_value = value
+    return result
+
+
 def make_test_app():
     app = FastAPI()
 
@@ -43,3 +50,42 @@ def test_health_live_no_auth_required() -> None:
     client = TestClient(app)
     response = client.get("/health/live")
     assert response.status_code == 200
+
+
+def test_health_ready_redacts_details_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("ALAYA_HEALTH_READY_VERBOSE", raising=False)
+    app, session_mock = make_test_app()
+    session_mock.execute.side_effect = [
+        MagicMock(),
+        make_scalar_result("0004"),
+        make_scalar_result(1),
+        make_scalar_result(0),
+    ]
+
+    client = TestClient(app)
+    response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_health_ready_includes_checks_when_verbose(monkeypatch) -> None:
+    monkeypatch.setenv("ALAYA_HEALTH_READY_VERBOSE", "true")
+    app, session_mock = make_test_app()
+    session_mock.execute.side_effect = [
+        MagicMock(),
+        make_scalar_result("0004"),
+        make_scalar_result(1),
+        make_scalar_result(0),
+    ]
+
+    client = TestClient(app)
+    response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["checks"]["database"] == "ok"
+    assert body["checks"]["migrations"] == "ok"
+    assert body["checks"]["seeds"] == "ok"
+    assert body["first_run"] is True

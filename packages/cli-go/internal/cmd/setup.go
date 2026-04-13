@@ -13,6 +13,9 @@ import (
 )
 
 var setupProfile string
+var setupShowSecret bool
+
+const storedKeyPlaceholder = "<stored in keyring; rerun with --show-secret to print>"
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
@@ -49,20 +52,7 @@ var setupAgentCmd = &cobra.Command{
 			fmt.Println("API key created and stored.")
 			apiKey = newKey
 		}
-		switch strings.ToLower(setupProfile) {
-		case "claude-code":
-			fmt.Printf("# Add to .claude/settings.json:\n")
-			fmt.Printf(`{"mcpServers":{"alaya":{"command":"alaya","args":["mcp"],"env":{"ALAYA_SERVER_URL":"%s","ALAYA_API_KEY":"%s"}}}}`, baseURL, apiKey)
-			fmt.Println()
-		case "codex":
-			fmt.Printf("export ALAYA_SERVER_URL=%s\nexport ALAYA_API_KEY=%s\n", baseURL, apiKey)
-		case "cursor":
-			fmt.Printf("# Add to .cursor/mcp.json:\n")
-			fmt.Printf(`{"mcpServers":{"alaya":{"command":"alaya","args":["mcp"],"env":{"ALAYA_SERVER_URL":"%s","ALAYA_API_KEY":"%s"}}}}`, baseURL, apiKey)
-			fmt.Println()
-		default:
-			fmt.Printf("ALAYA_SERVER_URL=%s\nALAYA_API_KEY=%s\nALAYA_API_BASE=%s/api/v1\n", baseURL, apiKey, baseURL)
-		}
+		fmt.Print(renderAgentSetup(setupProfile, baseURL, apiKey, setupShowSecret))
 		return nil
 	},
 }
@@ -71,6 +61,25 @@ func init() {
 	rootCmd.AddCommand(setupCmd)
 	setupCmd.AddCommand(setupAgentCmd)
 	setupAgentCmd.Flags().StringVar(&setupProfile, "profile", "generic", "Agent profile (claude-code|codex|cursor|generic)")
+	setupAgentCmd.Flags().BoolVar(&setupShowSecret, "show-secret", false, "Print the API key in generated output")
+}
+
+func renderAgentSetup(profile, baseURL, apiKey string, showSecret bool) string {
+	renderedKey := storedKeyPlaceholder
+	if showSecret {
+		renderedKey = apiKey
+	}
+
+	switch strings.ToLower(profile) {
+	case "claude-code":
+		return fmt.Sprintf("# Add to .claude/settings.json:\n{\"mcpServers\":{\"alaya\":{\"command\":\"alaya\",\"args\":[\"mcp\"],\"env\":{\"ALAYA_SERVER_URL\":\"%s\",\"ALAYA_API_KEY\":\"%s\"}}}}\n", baseURL, renderedKey)
+	case "codex":
+		return fmt.Sprintf("export ALAYA_SERVER_URL=%s\nexport ALAYA_API_KEY=%s\n", baseURL, renderedKey)
+	case "cursor":
+		return fmt.Sprintf("# Add to .cursor/mcp.json:\n{\"mcpServers\":{\"alaya\":{\"command\":\"alaya\",\"args\":[\"mcp\"],\"env\":{\"ALAYA_SERVER_URL\":\"%s\",\"ALAYA_API_KEY\":\"%s\"}}}}\n", baseURL, renderedKey)
+	default:
+		return fmt.Sprintf("ALAYA_SERVER_URL=%s\nALAYA_API_KEY=%s\nALAYA_API_BASE=%s/api/v1\n", baseURL, renderedKey, baseURL)
+	}
 }
 
 // createAPIKeyViaBootstrap calls POST /api-keys using the bootstrap key and returns the raw key.

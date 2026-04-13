@@ -39,10 +39,16 @@ coverage.xml
 
 # Claude Code (local only)
 .claude/
+.agents/
+AGENTS.md
 CLAUDE.local.md
 .superflow-state.json
 .par-evidence.json
 .worktrees/
+
+# Go build artifacts
+packages/cli-go/alaya
+packages/cli-go/dist/
 
 # Real data (NEVER commit — corporate data, API keys, eval results)
 data/

@@ -1,11 +1,14 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestCreateAPIKeyViaBootstrap_Success(t *testing.T) {
@@ -19,7 +22,9 @@ func TestCreateAPIKeyViaBootstrap_Success(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"raw_key": "ak_newly_created_key",
+			"data": map[string]interface{}{
+				"raw_key": "ak_newly_created_key",
+			},
 		})
 	}))
 	defer ts.Close()
@@ -50,9 +55,10 @@ func TestCreateAPIKeyViaBootstrap_MissingRawKey(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		// Response missing raw_key field
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"id": "key-uuid",
+			"data": map[string]interface{}{
+				"id": "key-uuid",
+			},
 		})
 	}))
 	defer ts.Close()
@@ -82,5 +88,31 @@ func TestRenderAgentSetup_IncludesSecretWhenOptedIn(t *testing.T) {
 
 	if !strings.Contains(output, "ALAYA_API_KEY=ak_super_secret") {
 		t.Fatalf("expected secret in output, got %q", output)
+	}
+}
+
+func TestWarnShowSecret_PrintsToStderr(t *testing.T) {
+	cmd := &cobra.Command{}
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+
+	if err := warnShowSecret(cmd, true); err != nil {
+		t.Fatalf("warnShowSecret() error: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "--show-secret prints the API key to stdout") {
+		t.Fatalf("expected warning on stderr, got %q", stderr.String())
+	}
+}
+
+func TestWarnShowSecret_SkipsWhenDisabled(t *testing.T) {
+	cmd := &cobra.Command{}
+	var stderr bytes.Buffer
+	cmd.SetErr(&stderr)
+
+	if err := warnShowSecret(cmd, false); err != nil {
+		t.Fatalf("warnShowSecret() error: %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got %q", stderr.String())
 	}
 }

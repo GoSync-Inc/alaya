@@ -1,10 +1,12 @@
 """Tests for health endpoints."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from alayaos_api.routers import health
 from alayaos_api.routers.health import router
 
 
@@ -54,6 +56,7 @@ def test_health_live_no_auth_required() -> None:
 
 def test_health_ready_redacts_details_by_default(monkeypatch) -> None:
     monkeypatch.delenv("ALAYA_HEALTH_READY_VERBOSE", raising=False)
+    health.get_settings.cache_clear()
     app, session_mock = make_test_app()
     session_mock.execute.side_effect = [
         MagicMock(),
@@ -71,6 +74,7 @@ def test_health_ready_redacts_details_by_default(monkeypatch) -> None:
 
 def test_health_ready_includes_checks_when_verbose(monkeypatch) -> None:
     monkeypatch.setenv("ALAYA_HEALTH_READY_VERBOSE", "true")
+    health.get_settings.cache_clear()
     app, session_mock = make_test_app()
     session_mock.execute.side_effect = [
         MagicMock(),
@@ -89,3 +93,31 @@ def test_health_ready_includes_checks_when_verbose(monkeypatch) -> None:
     assert body["checks"]["migrations"] == "ok"
     assert body["checks"]["seeds"] == "ok"
     assert body["first_run"] is True
+
+
+def test_health_ready_uses_cached_settings(monkeypatch) -> None:
+    settings_factory = MagicMock(return_value=SimpleNamespace(HEALTH_READY_VERBOSE=False))
+    monkeypatch.setattr(health, "Settings", settings_factory)
+    health.get_settings.cache_clear()
+
+    app, session_mock = make_test_app()
+    session_mock.execute.side_effect = [
+        MagicMock(),
+        make_scalar_result("0004"),
+        make_scalar_result(1),
+        make_scalar_result(0),
+        MagicMock(),
+        make_scalar_result("0004"),
+        make_scalar_result(1),
+        make_scalar_result(0),
+    ]
+
+    client = TestClient(app)
+    first = client.get("/health/ready")
+    second = client.get("/health/ready")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert settings_factory.call_count == 1
+
+    health.get_settings.cache_clear()

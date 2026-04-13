@@ -52,6 +52,9 @@ var setupAgentCmd = &cobra.Command{
 			fmt.Println("API key created and stored.")
 			apiKey = newKey
 		}
+		if err := warnShowSecret(cmd, setupShowSecret); err != nil {
+			return err
+		}
 		fmt.Print(renderAgentSetup(setupProfile, baseURL, apiKey, setupShowSecret))
 		return nil
 	},
@@ -82,6 +85,14 @@ func renderAgentSetup(profile, baseURL, apiKey string, showSecret bool) string {
 	}
 }
 
+func warnShowSecret(cmd *cobra.Command, showSecret bool) error {
+	if !showSecret {
+		return nil
+	}
+	_, err := fmt.Fprintln(cmd.ErrOrStderr(), "Warning: --show-secret prints the API key to stdout. Use only in a trusted terminal.")
+	return err
+}
+
 // createAPIKeyViaBootstrap calls POST /api-keys using the bootstrap key and returns the raw key.
 func createAPIKeyViaBootstrap(baseURL, bootstrapKey string) (string, error) {
 	c := client.New(baseURL, bootstrapKey)
@@ -93,13 +104,20 @@ func createAPIKeyViaBootstrap(baseURL, bootstrapKey string) (string, error) {
 		return "", err
 	}
 	var resp struct {
+		Data struct {
+			RawKey string `json:"raw_key"`
+		} `json:"data"`
 		RawKey string `json:"raw_key"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return "", fmt.Errorf("parse key response: %w", err)
 	}
-	if resp.RawKey == "" {
+	rawKey := resp.Data.RawKey
+	if rawKey == "" {
+		rawKey = resp.RawKey
+	}
+	if rawKey == "" {
 		return "", fmt.Errorf("server did not return raw_key in response")
 	}
-	return resp.RawKey, nil
+	return rawKey, nil
 }

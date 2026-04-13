@@ -86,6 +86,37 @@ Detailed implementation plan:
 
 ---
 
+## Run 5.2: Security Hardening (2026-04-13)
+
+Security report:
+`docs/audits/2026-04-13-security-best-practices.md`
+
+Detailed implementation plan:
+`docs/superflow/plans/2026-04-13-security-hardening.md`
+
+### P1 — Should fix next
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.04 | P1 | Memory-read endpoints must require read scope | `packages/api/alayaos_api/routers/search.py`, `packages/api/alayaos_api/routers/ask.py` | Fix `SBP-001`: enforce `require_scope("read")` and co-deliver the `key_prefix` runtime fix safely. |
+| RUN5.05 | P1 | Rate limiting must not fail open on Redis outages | `packages/core/alayaos_core/services/rate_limiter.py`, `packages/api/alayaos_api/routers/search.py`, `packages/api/alayaos_api/routers/ask.py` | Fix `SBP-002`: return explicit degraded/fail-closed behavior instead of silently allowing unthrottled expensive requests. |
+
+### P2 — Should fix soon
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.06 | P2 | Disable or protect OpenAPI/docs in production | `packages/api/alayaos_api/main.py`, `packages/core/alayaos_core/config.py` | Fix `SBP-003`: make docs exposure an explicit config choice rather than a production default. |
+| RUN5.07 | P2 | Add trusted host validation or document equivalent edge enforcement | `packages/api/alayaos_api/main.py`, `packages/core/alayaos_core/config.py` | Fix `SBP-004`: add `TrustedHostMiddleware` support and make the deployment expectation explicit. |
+
+### P3 — Nice to have after boundary hardening
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.08 | P3 | Reduce anonymous readiness detail leakage | `packages/api/alayaos_api/routers/health.py` | Fix `SBP-005`: keep health useful for operators while avoiding bootstrap and dependency-state disclosure by default. |
+| RUN5.09 | P3 | Redact CLI secret output by default | `packages/cli-go/internal/cmd/setup.go` | Fix `SBP-006`: avoid printing API keys to stdout unless the operator explicitly opts in. |
+
+---
+
 ## Run 4+: Future (from Master Plan)
 
 | Run | Scope | Status |

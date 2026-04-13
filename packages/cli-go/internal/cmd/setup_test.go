@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -59,5 +60,27 @@ func TestCreateAPIKeyViaBootstrap_MissingRawKey(t *testing.T) {
 	_, err := createAPIKeyViaBootstrap(ts.URL, "bootstrap_key_123")
 	if err == nil {
 		t.Fatal("expected error when raw_key is missing from response")
+	}
+}
+
+func TestRenderAgentSetup_RedactsSecretByDefault(t *testing.T) {
+	output := renderAgentSetup("generic", "https://alaya.example", "ak_super_secret", false)
+
+	if !strings.Contains(output, "ALAYA_SERVER_URL=https://alaya.example") {
+		t.Fatalf("expected server URL in output, got %q", output)
+	}
+	if !strings.Contains(output, "<stored in keyring; rerun with --show-secret to print>") {
+		t.Fatalf("expected redaction placeholder in output, got %q", output)
+	}
+	if strings.Contains(output, "ak_super_secret") {
+		t.Fatalf("expected secret to be redacted, got %q", output)
+	}
+}
+
+func TestRenderAgentSetup_IncludesSecretWhenOptedIn(t *testing.T) {
+	output := renderAgentSetup("codex", "https://alaya.example", "ak_super_secret", true)
+
+	if !strings.Contains(output, "ALAYA_API_KEY=ak_super_secret") {
+		t.Fatalf("expected secret in output, got %q", output)
 	}
 }

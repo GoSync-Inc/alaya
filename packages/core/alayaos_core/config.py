@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     DB_POOL_TIMEOUT: int = 30
     DB_ECHO: bool = False
     LOG_LEVEL: str = "INFO"
+    HEALTH_READY_VERBOSE: bool = False
 
     # LLM Provider
     EXTRACTION_LLM_PROVIDER: str = "anthropic"  # anthropic|openai|ollama|vllm

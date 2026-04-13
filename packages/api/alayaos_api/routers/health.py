@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from alayaos_api.deps import get_session
+from alayaos_core.config import Settings
 
 router = APIRouter(tags=["health"])
 
@@ -18,6 +19,7 @@ async def health_live():
 
 @router.get("/health/ready")
 async def health_ready(session: Annotated[AsyncSession, Depends(get_session)]):
+    settings = Settings()
     checks = {}
 
     # Database
@@ -57,4 +59,6 @@ async def health_ready(session: Annotated[AsyncSession, Depends(get_session)]):
     ok_checks = [v for v in checks.values() if v != "unavailable"]
     overall = "ok" if ok_checks and all(v == "ok" for v in ok_checks) else "degraded"
 
-    return {"status": overall, "checks": checks, "first_run": first_run}
+    if settings.HEALTH_READY_VERBOSE:
+        return {"status": overall, "checks": checks, "first_run": first_run}
+    return {"status": overall}

@@ -96,6 +96,19 @@ def test_create_app_adds_trusted_host_middleware_when_configured(monkeypatch) ->
     assert blocked_response.json()["error"]["request_id"] == blocked_response.headers["X-Request-ID"]
 
 
+def test_request_id_matches_error_envelope_for_allowed_host_errors(monkeypatch) -> None:
+    from alayaos_api.main import create_app
+
+    monkeypatch.setenv("ALAYA_TRUSTED_HOSTS", '["api.example.com","testserver"]')
+
+    app = create_app()
+    with TestClient(app, base_url="http://api.example.com") as client:
+        response = client.get("/api/v1/workspaces")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["request_id"] == response.headers["X-Request-ID"]
+
+
 def test_create_app_warns_when_production_has_no_trusted_hosts(monkeypatch) -> None:
     from alayaos_api.main import create_app
 
@@ -105,4 +118,7 @@ def test_create_app_warns_when_production_has_no_trusted_hosts(monkeypatch) -> N
     with patch("alayaos_api.main.log.warning") as mock_warning:
         create_app()
 
-    mock_warning.assert_called_once_with("trusted_hosts_not_configured_for_production")
+    mock_warning.assert_called_once_with(
+        "trusted_hosts_not_configured_for_production",
+        message="Host validation is not configured for production. Set ALAYA_TRUSTED_HOSTS or enforce trusted hosts at ingress.",
+    )

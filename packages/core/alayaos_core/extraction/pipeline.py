@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import uuid
 from typing import TYPE_CHECKING
 
@@ -159,9 +158,15 @@ async def run_write(
     # Optional Redis fast-path lock; correctness comes from the DB row lock.
     token = None
     if redis:
-        with contextlib.suppress(Exception):
+        try:
             token = await acquire_workspace_lock(redis, str(event.workspace_id))
-        if not token:
+        except Exception as exc:
+            log.warning(
+                "workspace_redis_lock_degraded",
+                workspace_id=str(event.workspace_id),
+                error=str(exc),
+            )
+        if token is None:
             log.info("workspace_redis_lock_unavailable", workspace_id=str(event.workspace_id))
 
     try:

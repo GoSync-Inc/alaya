@@ -82,6 +82,20 @@ class TestWorkspaceRepository:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_get_by_id_for_update_awaits_async_execute(self) -> None:
+        from alayaos_core.repositories.workspace import WorkspaceRepository
+
+        ws = Workspace(id=uuid.uuid4(), name="WS", slug="ws", settings={})
+        session = make_session()
+        session.execute.return_value = make_result(ws)
+        repo = WorkspaceRepository(session)
+
+        result = await repo.get_by_id_for_update(ws.id)
+
+        assert result is ws
+        session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_get_by_slug_found(self) -> None:
         from alayaos_core.repositories.workspace import WorkspaceRepository
 

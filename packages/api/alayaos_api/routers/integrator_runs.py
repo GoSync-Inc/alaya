@@ -36,6 +36,21 @@ def _not_found(run_id: str) -> HTTPException:
     )
 
 
+def _enqueue_failed() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "error": {
+                "code": "service.integrator_enqueue_failed",
+                "message": "Failed to enqueue integrator run.",
+                "hint": None,
+                "docs": None,
+                "request_id": None,
+            }
+        },
+    )
+
+
 @router.get("/integrator-runs")
 async def list_integrator_runs(
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
@@ -100,7 +115,12 @@ async def trigger_integrator_run(
         from alayaos_core.worker.tasks import job_integrate
 
         await job_integrate.kiq(str(api_key.workspace_id), str(run.id))
-    except Exception:
-        pass
+    except Exception as exc:
+        async with session_factory() as session, session.begin():
+            validated_wid = str(uuid.UUID(str(api_key.workspace_id)))
+            await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
+            repo = IntegratorRunRepository(session, api_key.workspace_id)
+            await repo.update_status(run.id, "failed", error_message=str(exc))
+        raise _enqueue_failed() from exc
 
     return data_response(IntegratorRunRead.model_validate(run))

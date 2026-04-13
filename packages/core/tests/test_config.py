@@ -1,5 +1,7 @@
 """Tests for Settings config module (Task 6)."""
 
+import pytest
+
 from alayaos_core.config import Settings
 
 
@@ -98,3 +100,26 @@ def test_settings_tree_config() -> None:
 def test_settings_feature_flag_vector_search() -> None:
     s = Settings()
     assert s.FEATURE_FLAG_VECTOR_SEARCH is False
+
+
+@pytest.mark.parametrize(
+    ("env_value", "docs_value", "expected"),
+    [
+        ("dev", None, None),
+        ("production", None, None),
+        ("production", "true", True),
+        ("production", "false", False),
+    ],
+)
+def test_settings_security_hardening_flags(monkeypatch, env_value: str, docs_value: str | None, expected) -> None:
+    monkeypatch.setenv("ALAYA_ENV", env_value)
+    if docs_value is None:
+        monkeypatch.delenv("ALAYA_API_DOCS_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("ALAYA_API_DOCS_ENABLED", docs_value)
+    monkeypatch.setenv("ALAYA_TRUSTED_HOSTS", '["api.example.com","testserver"]')
+
+    s = Settings()
+
+    assert s.API_DOCS_ENABLED is expected
+    assert s.TRUSTED_HOSTS == ["api.example.com", "testserver"]

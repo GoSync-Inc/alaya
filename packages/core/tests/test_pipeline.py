@@ -236,7 +236,12 @@ async def test_run_write_locks_workspace_before_atomic_write() -> None:
     event_id = uuid.uuid4()
     workspace_id = uuid.uuid4()
 
-    run = _make_run(run_id=run_id, status="writing", event_id=event_id, raw_extraction={"entities": [], "relations": [], "claims": []})
+    run = _make_run(
+        run_id=run_id,
+        status="writing",
+        event_id=event_id,
+        raw_extraction={"entities": [], "relations": [], "claims": []},
+    )
     run.workspace_id = workspace_id
     event = _make_event(event_id=event_id, workspace_id=workspace_id)
     workspace = MagicMock()
@@ -257,7 +262,15 @@ async def test_run_write_locks_workspace_before_atomic_write() -> None:
     mock_ws_repo.get_by_id_for_update = AsyncMock(return_value=workspace)
 
     llm = AsyncMock()
-    atomic_write = AsyncMock(return_value={"entities_created": 0, "entities_merged": 0, "relations_created": 0, "claims_created": 0, "claims_superseded": 0})
+    atomic_write = AsyncMock(
+        return_value={
+            "entities_created": 0,
+            "entities_merged": 0,
+            "relations_created": 0,
+            "claims_created": 0,
+            "claims_superseded": 0,
+        }
+    )
 
     with (
         patch("alayaos_core.extraction.pipeline.ExtractionRunRepository", return_value=mock_run_repo),

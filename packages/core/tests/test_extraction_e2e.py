@@ -215,9 +215,13 @@ async def test_run_write_creates_entities_claims_relations() -> None:
 
     llm = FakeLLMAdapter()
 
+    mock_workspace_repo = AsyncMock()
+    mock_workspace_repo.get_by_id_for_update = AsyncMock(return_value=MagicMock())
+
     with (
         patch("alayaos_core.extraction.pipeline.ExtractionRunRepository", return_value=mock_run_repo),
         patch("alayaos_core.extraction.pipeline.EventRepository", return_value=mock_event_repo),
+        patch("alayaos_core.extraction.pipeline.WorkspaceRepository", return_value=mock_workspace_repo),
         patch("alayaos_core.extraction.writer.EntityRepository", return_value=mock_entity_repo),
         patch("alayaos_core.extraction.writer.RelationRepository", return_value=mock_relation_repo),
         patch("alayaos_core.extraction.writer.ClaimRepository", return_value=mock_claim_repo),
@@ -282,9 +286,13 @@ async def test_run_write_marks_event_as_extracted() -> None:
 
     llm = FakeLLMAdapter()
 
+    mock_workspace_repo = AsyncMock()
+    mock_workspace_repo.get_by_id_for_update = AsyncMock(return_value=MagicMock())
+
     with (
         patch("alayaos_core.extraction.pipeline.ExtractionRunRepository", return_value=mock_run_repo),
         patch("alayaos_core.extraction.pipeline.EventRepository", return_value=mock_event_repo),
+        patch("alayaos_core.extraction.pipeline.WorkspaceRepository", return_value=mock_workspace_repo),
         patch("alayaos_core.extraction.writer.EntityRepository", return_value=mock_entity_repo),
         patch("alayaos_core.extraction.writer.RelationRepository", return_value=mock_relation_repo),
         patch("alayaos_core.extraction.writer.ClaimRepository", return_value=mock_claim_repo),
@@ -357,9 +365,13 @@ async def test_run_write_updates_run_counters() -> None:
 
     llm = FakeLLMAdapter()
 
+    mock_workspace_repo = AsyncMock()
+    mock_workspace_repo.get_by_id_for_update = AsyncMock(return_value=MagicMock())
+
     with (
         patch("alayaos_core.extraction.pipeline.ExtractionRunRepository", return_value=mock_run_repo),
         patch("alayaos_core.extraction.pipeline.EventRepository", return_value=mock_event_repo),
+        patch("alayaos_core.extraction.pipeline.WorkspaceRepository", return_value=mock_workspace_repo),
         patch("alayaos_core.extraction.writer.EntityRepository", return_value=mock_entity_repo),
         patch("alayaos_core.extraction.writer.RelationRepository", return_value=mock_relation_repo),
         patch("alayaos_core.extraction.writer.ClaimRepository", return_value=mock_claim_repo),

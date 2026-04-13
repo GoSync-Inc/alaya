@@ -19,12 +19,20 @@ def test_get_session_factory_reuses_engine_per_process(monkeypatch: pytest.Monke
 
     factory_marker = MagicMock(name="session_factory")
     engine = AsyncMock()
+    settings = MagicMock(
+        DATABASE_URL="postgresql+asyncpg://test",
+        DB_ECHO=False,
+        DB_POOL_SIZE=7,
+        DB_MAX_OVERFLOW=11,
+        DB_POOL_RECYCLE=123,
+        DB_POOL_TIMEOUT=45,
+    )
 
     monkeypatch.setattr(worker_tasks, "_engine", None, raising=False)
     monkeypatch.setattr(worker_tasks, "_session_factory_cached", None, raising=False)
 
     with (
-        patch("alayaos_core.worker.tasks.Settings", return_value=MagicMock(DATABASE_URL="postgresql+asyncpg://test")),
+        patch("alayaos_core.worker.tasks.Settings", return_value=settings),
         patch("alayaos_core.worker.tasks.create_async_engine", return_value=engine) as mock_create_engine,
         patch("alayaos_core.worker.tasks.async_sessionmaker", return_value=factory_marker) as mock_sessionmaker,
     ):
@@ -33,7 +41,15 @@ def test_get_session_factory_reuses_engine_per_process(monkeypatch: pytest.Monke
 
     assert factory_a is factory_marker
     assert factory_b is factory_marker
-    mock_create_engine.assert_called_once()
+    mock_create_engine.assert_called_once_with(
+        settings.DATABASE_URL,
+        echo=settings.DB_ECHO,
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
+        pool_recycle=settings.DB_POOL_RECYCLE,
+        pool_timeout=settings.DB_POOL_TIMEOUT,
+        pool_pre_ping=True,
+    )
     mock_sessionmaker.assert_called_once_with(engine, expire_on_commit=False)
 
 
@@ -80,3 +96,40 @@ def test_worker_shutdown_hook_registered() -> None:
     from alayaos_core.worker.broker import broker
 
     assert worker_tasks._close_worker_resources_on_shutdown in broker.event_handlers[TaskiqEvents.WORKER_SHUTDOWN]
+
+
+def test_worker_startup_hook_registered() -> None:
+    from alayaos_core.worker import tasks as worker_tasks
+    from alayaos_core.worker.broker import broker
+
+    assert worker_tasks._initialize_worker_resources_on_startup in broker.event_handlers[TaskiqEvents.WORKER_STARTUP]
+
+
+@pytest.mark.asyncio
+async def test_worker_startup_hook_initializes_resources_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from alayaos_core.worker import tasks as worker_tasks
+
+    factory_marker = MagicMock(name="session_factory")
+    engine = AsyncMock()
+    settings = MagicMock(
+        DATABASE_URL="postgresql+asyncpg://test",
+        DB_ECHO=False,
+        DB_POOL_SIZE=7,
+        DB_MAX_OVERFLOW=11,
+        DB_POOL_RECYCLE=123,
+        DB_POOL_TIMEOUT=45,
+    )
+
+    monkeypatch.setattr(worker_tasks, "_engine", None, raising=False)
+    monkeypatch.setattr(worker_tasks, "_session_factory_cached", None, raising=False)
+
+    with (
+        patch("alayaos_core.worker.tasks.Settings", return_value=settings),
+        patch("alayaos_core.worker.tasks.create_async_engine", return_value=engine) as mock_create_engine,
+        patch("alayaos_core.worker.tasks.async_sessionmaker", return_value=factory_marker),
+    ):
+        await worker_tasks._initialize_worker_resources_on_startup(None)
+        factory = worker_tasks._session_factory()
+
+    assert factory is factory_marker
+    mock_create_engine.assert_called_once()

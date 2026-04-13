@@ -71,6 +71,21 @@ No open items — all addressed during Run 2.
 
 ---
 
+## Run 5.1: Review Follow-up (2026-04-13)
+
+Detailed implementation plan:
+`docs/superflow/plans/2026-04-13-review-fixes.md`
+
+### P1 — Should fix next
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.01 | P1 | Write-stage correctness must not depend on Redis | `packages/core/alayaos_core/extraction/pipeline.py`, `packages/core/alayaos_core/repositories/workspace.py` | Replace correctness-critical write serialization with a DB-backed workspace lock. Keep Redis as an optional optimization only. |
+| RUN5.02 | P1 | Manual integrator trigger returns an orphan run | `packages/api/alayaos_api/routers/integrator_runs.py`, `packages/core/alayaos_core/worker/tasks.py` | Reuse the API-created `IntegratorRun` row instead of creating a second worker-owned row. |
+| RUN5.03 | P1 | Worker creates a new SQLAlchemy engine per task | `packages/core/alayaos_core/worker/tasks.py` | Reuse one async engine/session factory per worker process and add a cleanup hook for tests/shutdown. |
+
+---
+
 ## Run 4+: Future (from Master Plan)
 
 | Run | Scope | Status |

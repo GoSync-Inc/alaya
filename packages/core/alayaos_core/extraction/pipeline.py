@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import uuid
 from typing import TYPE_CHECKING
 
@@ -135,6 +136,19 @@ async def run_write(
         await run_repo.update_status(run.id, "failed", error_message="event not found")
         return None
 
+    workspace_repo = WorkspaceRepository(session)
+    workspace = await workspace_repo.get_by_id_for_update(event.workspace_id)
+    if not workspace:
+        await run_repo.update_status(run_id, "failed", error_message="workspace not found")
+        return None
+
+    run = await run_repo.get_by_id(run.id)
+    if not run:
+        await run_repo.update_status(run_id, "failed", error_message="run not found")
+        return None
+    if run.status == "completed":
+        return None
+
     raw = run.raw_extraction
     if not raw:
         await run_repo.update_status(run.id, "failed", error_message="no raw_extraction")
@@ -142,12 +156,13 @@ async def run_write(
 
     extraction_result = ExtractionResult.model_validate(raw)
 
-    # Acquire workspace lock
+    # Optional Redis fast-path lock; correctness comes from the DB row lock.
     token = None
     if redis:
-        token = await acquire_workspace_lock(redis, str(event.workspace_id))
+        with contextlib.suppress(Exception):
+            token = await acquire_workspace_lock(redis, str(event.workspace_id))
         if not token:
-            raise RuntimeError(f"Could not acquire workspace lock for {event.workspace_id}")
+            log.info("workspace_redis_lock_unavailable", workspace_id=str(event.workspace_id))
 
     try:
         await run_repo.update_status(run.id, "writing")

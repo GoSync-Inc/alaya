@@ -60,8 +60,10 @@ class IntegratorRunRepository(BaseRepository):
         if run is None:
             return None
         run.status = status
-        if error_message is not None:
+        if status == "failed":
             run.error_message = error_message
+        else:
+            run.error_message = None
         if status in ("completed", "failed"):
             run.completed_at = datetime.now(UTC)
         await self.session.flush()

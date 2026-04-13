@@ -17,7 +17,9 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         clear_contextvars()
-        request_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        request_id = getattr(request.state, "request_id", None) or request.headers.get(
+            "X-Request-ID", str(uuid.uuid4())
+        )
         request.state.request_id = request_id
         bind_contextvars(request_id=request_id)
         response = await call_next(request)

@@ -26,11 +26,12 @@ def _make_redis(lua_result: list[int]) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_rate_limiter_no_redis_always_allows() -> None:
+async def test_rate_limiter_no_redis_reports_backend_unavailable() -> None:
     limiter = RateLimiterService(redis=None)
-    allowed, retry_after = await limiter.check("key", 1, 60)
-    assert allowed is True
-    assert retry_after is None
+    decision = await limiter.check("key", 1, 60)
+    assert decision.allowed is False
+    assert decision.retry_after is None
+    assert decision.backend_available is False
 
 
 # ---------------------------------------------------------------------------
@@ -44,9 +45,10 @@ async def test_under_limit_allowed() -> None:
     # Lua returns [count, allowed_flag, oldest_score]
     redis = _make_redis([1, 1, 0])
     limiter = RateLimiterService(redis=redis)
-    allowed, retry_after = await limiter.check("user:1", 5, 60)
-    assert allowed is True
-    assert retry_after is None
+    decision = await limiter.check("user:1", 5, 60)
+    assert decision.allowed is True
+    assert decision.retry_after is None
+    assert decision.backend_available is True
     redis.eval.assert_awaited_once()
 
 
@@ -57,10 +59,11 @@ async def test_at_limit_last_request_denied() -> None:
     # but we simulate the script returning allowed=0
     redis = _make_redis([6, 0, 30])
     limiter = RateLimiterService(redis=redis)
-    allowed, retry_after = await limiter.check("user:1", 5, 60)
-    assert allowed is False
-    assert retry_after is not None
-    assert retry_after >= 1
+    decision = await limiter.check("user:1", 5, 60)
+    assert decision.allowed is False
+    assert decision.retry_after is not None
+    assert decision.retry_after >= 1
+    assert decision.backend_available is True
     redis.eval.assert_awaited_once()
 
 
@@ -70,20 +73,22 @@ async def test_expired_entries_cleaned_allows_new_request() -> None:
     # Simulate that after cleanup count is 1 (only the new entry)
     redis = _make_redis([1, 1, 0])
     limiter = RateLimiterService(redis=redis)
-    allowed, retry_after = await limiter.check("user:expired", 5, 60)
-    assert allowed is True
-    assert retry_after is None
+    decision = await limiter.check("user:expired", 5, 60)
+    assert decision.allowed is True
+    assert decision.retry_after is None
+    assert decision.backend_available is True
 
 
 @pytest.mark.asyncio
-async def test_redis_error_fails_open() -> None:
-    """If Redis raises an exception, the limiter allows the request (fail-open)."""
+async def test_redis_error_reports_backend_unavailable() -> None:
+    """If Redis raises an exception, the limiter reports the backend as unavailable."""
     redis = MagicMock()
     redis.eval = AsyncMock(side_effect=ConnectionError("redis down"))
     limiter = RateLimiterService(redis=redis)
-    allowed, retry_after = await limiter.check("user:1", 5, 60)
-    assert allowed is True
-    assert retry_after is None
+    decision = await limiter.check("user:1", 5, 60)
+    assert decision.allowed is False
+    assert decision.retry_after is None
+    assert decision.backend_available is False
 
 
 @pytest.mark.asyncio
@@ -116,7 +121,8 @@ async def test_denied_entry_removed_count_stays_at_limit() -> None:
     # and the caller never sees an inflated count.
     redis = _make_redis([limit + 1, 0, 30])
     limiter = RateLimiterService(redis=redis)
-    allowed, _retry_after = await limiter.check("user:full", limit, 60)
-    assert allowed is False
+    decision = await limiter.check("user:full", limit, 60)
+    assert decision.allowed is False
+    assert decision.backend_available is True
     # Crucially: no second call to redis (e.g. zrem) — removal is inside the Lua script
     assert redis.eval.await_count == 1

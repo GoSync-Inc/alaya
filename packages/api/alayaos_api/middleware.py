@@ -35,10 +35,11 @@ def register_error_handlers(app: FastAPI) -> None:
     async def http_exception_handler(request: Request, exc: HTTPException):
         request_id = getattr(request.state, "request_id", None)
         detail = exc.detail
+        headers = exc.headers or None
         # If detail is a dict with "error" key, inject request_id and return directly
         if isinstance(detail, dict) and "error" in detail:
             detail["error"]["request_id"] = request_id
-            return JSONResponse(status_code=exc.status_code, content=detail)
+            return JSONResponse(status_code=exc.status_code, content=detail, headers=headers)
         # Fallback for plain string detail
         return JSONResponse(
             status_code=exc.status_code,
@@ -51,6 +52,7 @@ def register_error_handlers(app: FastAPI) -> None:
                     "request_id": request_id,
                 }
             },
+            headers=headers,
         )
 
     @app.exception_handler(RequestValidationError)

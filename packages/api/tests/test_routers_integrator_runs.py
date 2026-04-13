@@ -34,23 +34,33 @@ def make_api_key(scopes=None) -> APIKey:
 
 def make_app_with_mock_session(api_key: APIKey):
     app = create_app()
+    auth_session = AsyncMock()
+    route_session = AsyncMock()
+    route_session.__aenter__ = AsyncMock(return_value=route_session)
+    route_session.__aexit__ = AsyncMock(return_value=False)
+    route_transaction = AsyncMock()
+    route_transaction.__aenter__ = AsyncMock(return_value=None)
+
+    async def close_transaction(*_args) -> bool:
+        app.state.run_transaction_closed = True
+        return False
+
+    route_transaction.__aexit__ = AsyncMock(side_effect=close_transaction)
+    route_session.begin = lambda: route_transaction
+    app.state.run_transaction_closed = False
+    app.state.route_session = route_session
+    app.state.session_factory = lambda: route_session
 
     async def override_session():
-        session = AsyncMock()
-        yield session
+        yield auth_session
 
     async def override_api_key():
         return api_key
 
-    async def override_workspace_session():
-        session = AsyncMock()
-        yield session
-
-    from alayaos_api.deps import get_api_key, get_session, get_workspace_session
+    from alayaos_api.deps import get_api_key, get_session
 
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_api_key] = override_api_key
-    app.dependency_overrides[get_workspace_session] = override_workspace_session
     return app
 
 
@@ -128,12 +138,16 @@ class TestIntegratorRunsRouter:
 
         with (
             patch("alayaos_api.routers.integrator_runs.IntegratorRunRepository") as mock_cls,
-            patch("alayaos_api.routers.integrator_runs.job_integrate", create=True) as mock_job,
+            patch("alayaos_core.worker.tasks.job_integrate") as mock_job,
         ):
             repo = AsyncMock()
             repo.create = AsyncMock(return_value=run)
             mock_cls.return_value = repo
-            mock_job.kiq = AsyncMock()
+
+            async def assert_committed(*_args) -> None:
+                assert app.state.run_transaction_closed is True
+
+            mock_job.kiq = AsyncMock(side_effect=assert_committed)
 
             client = TestClient(app)
             response = client.post("/api/v1/integrator-runs/trigger", headers={"X-Api-Key": RAW_KEY})
@@ -141,6 +155,12 @@ class TestIntegratorRunsRouter:
         assert response.status_code == 202
         data = response.json()["data"]
         assert data["trigger"] == "manual"
+        args, _ = app.state.route_session.execute.call_args
+        sql_clause = args[0]
+        assert hasattr(sql_clause, "text")
+        assert "SET LOCAL app.workspace_id" in sql_clause.text
+        assert str(WS_ID) in sql_clause.text
+        mock_job.kiq.assert_awaited_once_with(str(WS_ID), str(run.id))
 
     def test_trigger_requires_admin_scope(self) -> None:
         """Trigger endpoint requires admin scope."""

@@ -3,7 +3,8 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from alayaos_api.deps import (
@@ -79,22 +80,26 @@ async def get_integrator_run(
 
 @router.post("/integrator-runs/trigger", status_code=202)
 async def trigger_integrator_run(
-    session: Annotated[AsyncSession, Depends(get_workspace_session)],
+    request: Request,
     api_key: Annotated[APIKey, Depends(require_scope("admin"))],
 ):
     """Manually trigger an integrator run for the current workspace."""
-    repo = IntegratorRunRepository(session, api_key.workspace_id)
-    run = await repo.create(
-        workspace_id=api_key.workspace_id,
-        trigger="manual",
-        scope_description="manual trigger via API",
-    )
+    session_factory = request.app.state.session_factory
+    async with session_factory() as session, session.begin():
+        validated_wid = str(uuid.UUID(str(api_key.workspace_id)))
+        await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
+        repo = IntegratorRunRepository(session, api_key.workspace_id)
+        run = await repo.create(
+            workspace_id=api_key.workspace_id,
+            trigger="manual",
+            scope_description="manual trigger via API",
+        )
 
     # Enqueue the job (non-blocking; worker may not be running)
     try:
         from alayaos_core.worker.tasks import job_integrate
 
-        await job_integrate.kiq(str(api_key.workspace_id))
+        await job_integrate.kiq(str(api_key.workspace_id), str(run.id))
     except Exception:
         pass
 

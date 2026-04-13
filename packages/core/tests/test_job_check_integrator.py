@@ -77,6 +77,7 @@ async def test_job_check_integrator_triggers_when_threshold_met():
 
     assert "triggered" in result
     assert ws_id in result["triggered"]
+    mock_kiq.assert_awaited_once_with(ws_id)
 
 
 @pytest.mark.asyncio

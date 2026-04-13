@@ -17,10 +17,21 @@ from structlog.contextvars import bind_contextvars, clear_contextvars
 class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         clear_contextvars()
-        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        request_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID", str(uuid.uuid4()))
         request.state.request_id = request_id
         bind_contextvars(request_id=request_id)
         response = await call_next(request)
+        request_id = response.headers.get("X-Request-ID", request_id)
+        request.state.request_id = request_id
+        if response.headers.get("content-type", "").startswith("application/json") and getattr(response, "body", None):
+            try:
+                payload = json_module.loads(response.body)
+            except (TypeError, ValueError):
+                payload = None
+            if isinstance(payload, dict) and isinstance(payload.get("error"), dict):
+                payload["error"]["request_id"] = request_id
+                response.body = json_module.dumps(payload).encode("utf-8")
+                response.headers["content-length"] = str(len(response.body))
         response.headers["X-Request-ID"] = request_id
         return response
 
@@ -31,7 +42,11 @@ class EnvelopeTrustedHostMiddleware(TrustedHostMiddleware):
             await self.app(scope, receive, send)
             return
 
+        clear_contextvars()
         headers = Headers(scope=scope)
+        request_id = headers.get("x-request-id", str(uuid.uuid4()))
+        scope.setdefault("state", {})["request_id"] = request_id
+        bind_contextvars(request_id=request_id)
         host = headers.get("host", "").split(":")[0]
         is_valid_host = False
         found_www_redirect = False
@@ -66,6 +81,7 @@ class EnvelopeTrustedHostMiddleware(TrustedHostMiddleware):
                 }
             },
         )
+        response.headers["X-Request-ID"] = request_id
         await response(scope, receive, send)
 
 

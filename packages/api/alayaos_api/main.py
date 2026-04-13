@@ -2,11 +2,14 @@
 
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from alayaos_core.config import Settings
 from alayaos_core.logging import setup_logging
+
+log = structlog.get_logger()
 
 
 @asynccontextmanager
@@ -51,6 +54,8 @@ def create_app() -> FastAPI:
         from alayaos_api.middleware import EnvelopeTrustedHostMiddleware
 
         app.add_middleware(EnvelopeTrustedHostMiddleware, allowed_hosts=settings.TRUSTED_HOSTS)
+    elif settings.ENV == "production":
+        log.warning("trusted_hosts_not_configured_for_production")
 
     from alayaos_api.middleware import register_error_handlers
     from alayaos_api.routers import (

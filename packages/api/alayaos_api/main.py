@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from alayaos_core.config import Settings
 from alayaos_core.logging import setup_logging
@@ -32,7 +33,23 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="AlayaOS API", version="0.1.0", lifespan=lifespan)
+    settings = Settings()
+    docs_enabled = settings.API_DOCS_ENABLED
+    if docs_enabled is None:
+        docs_enabled = settings.ENV != "production"
+
+    app = FastAPI(
+        title="AlayaOS API",
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
+
+    # Host validation may live here or at ingress, but production needs one of those controls.
+    if settings.TRUSTED_HOSTS:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.TRUSTED_HOSTS)
 
     from alayaos_api.middleware import register_error_handlers
     from alayaos_api.routers import (

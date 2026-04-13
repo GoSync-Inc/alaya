@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     DB_ECHO: bool = False
     LOG_LEVEL: str = "INFO"
     HEALTH_READY_VERBOSE: bool = False
+    API_DOCS_ENABLED: bool | None = None
+    TRUSTED_HOSTS: list[str] = []
 
     # LLM Provider
     EXTRACTION_LLM_PROVIDER: str = "anthropic"  # anthropic|openai|ollama|vllm

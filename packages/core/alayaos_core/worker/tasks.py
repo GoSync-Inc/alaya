@@ -38,11 +38,23 @@ def _get_session_factory() -> async_sessionmaker[AsyncSession]:
     global _engine, _session_factory_cached
 
     if _session_factory_cached is None:
-        settings = Settings()
-        _engine = create_async_engine(settings.DATABASE_URL, echo=False)
-        _session_factory_cached = async_sessionmaker(_engine, expire_on_commit=False)
+        _engine, _session_factory_cached = _build_worker_resources(Settings())
 
     return _session_factory_cached
+
+
+def _build_worker_resources(settings: Settings) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        echo=settings.DB_ECHO,
+        pool_size=settings.DB_POOL_SIZE,
+        max_overflow=settings.DB_MAX_OVERFLOW,
+        pool_recycle=settings.DB_POOL_RECYCLE,
+        pool_timeout=settings.DB_POOL_TIMEOUT,
+        pool_pre_ping=True,
+    )
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    return engine, session_factory
 
 
 def _session_factory() -> async_sessionmaker[AsyncSession]:
@@ -65,6 +77,11 @@ async def close_worker_resources() -> None:
 @broker.on_event(TaskiqEvents.WORKER_SHUTDOWN)
 async def _close_worker_resources_on_shutdown(_state) -> None:
     await close_worker_resources()
+
+
+@broker.on_event(TaskiqEvents.WORKER_STARTUP)
+async def _initialize_worker_resources_on_startup(_state) -> None:
+    _get_session_factory()
 
 
 async def _mark_integrator_run_failed(

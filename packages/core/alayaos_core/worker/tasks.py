@@ -34,6 +34,40 @@ def _session_factory():
     return async_sessionmaker(engine, expire_on_commit=False)
 
 
+async def _mark_integrator_run_failed(
+    factory,
+    workspace_id: str,
+    run_id: uuid.UUID,
+    error_message: str,
+) -> None:
+    ws_uuid = uuid.UUID(workspace_id)
+    async with factory() as session, session.begin():
+        await _set_workspace_context(session, workspace_id)
+        run_repo = IntegratorRunRepository(session, ws_uuid)
+        await run_repo.update_status(run_id, "failed", error_message=error_message)
+
+
+async def _create_integrator_run(
+    factory,
+    workspace_id: str,
+    *,
+    trigger: str,
+    scope_description: str | None,
+    llm_model: str | None,
+) -> uuid.UUID:
+    ws_uuid = uuid.UUID(workspace_id)
+    async with factory() as session, session.begin():
+        await _set_workspace_context(session, workspace_id)
+        run_repo = IntegratorRunRepository(session, ws_uuid)
+        run = await run_repo.create(
+            workspace_id=ws_uuid,
+            trigger=trigger,
+            scope_description=scope_description,
+            llm_model=llm_model,
+        )
+        return run.id
+
+
 @broker.task(timeout=120, retry_on_error=True, max_retries=3)
 async def job_extract(event_id: str, extraction_run_id: str, workspace_id: str) -> dict:
     """Job 1: Extract — preprocess + LLM extraction + store raw result."""
@@ -457,7 +491,7 @@ async def job_enrich(extraction_run_id: str, workspace_id: str) -> dict:
 
 
 @broker.task(timeout=300, retry_on_error=True, max_retries=2)
-async def job_integrate(workspace_id: str) -> dict:
+async def job_integrate(workspace_id: str, integrator_run_id: str | None = None) -> dict:
     """Integrator: process dirty_set union 48h window for a workspace."""
     settings = Settings()
 
@@ -475,10 +509,21 @@ async def job_integrate(workspace_id: str) -> dict:
     with contextlib.suppress(Exception):
         redis_client = aioredis.from_url(settings.REDIS_URL)
 
-    ws_uuid = uuid.UUID(workspace_id)
-
     factory = _session_factory()
+    ws_uuid = uuid.UUID(workspace_id)
+    run_uuid: uuid.UUID | None = None
     try:
+        if integrator_run_id is not None:
+            run_uuid = uuid.UUID(integrator_run_id)
+        else:
+            run_uuid = await _create_integrator_run(
+                factory,
+                workspace_id,
+                trigger="job_integrate",
+                scope_description="dirty_set + 48h window",
+                llm_model=settings.INTEGRATOR_MODEL,
+            )
+
         async with factory() as session, session.begin():
             await _set_workspace_context(session, workspace_id)
 
@@ -488,13 +533,9 @@ async def job_integrate(workspace_id: str) -> dict:
             run_repo = IntegratorRunRepository(session, ws_uuid)
             entity_cache = EntityCacheService(redis=redis_client)
 
-            # Create IntegratorRun record
-            integrator_run = await run_repo.create(
-                workspace_id=ws_uuid,
-                trigger="job_integrate",
-                scope_description="dirty_set + 48h window",
-                llm_model=settings.INTEGRATOR_MODEL,
-            )
+            integrator_run = await run_repo.get_by_id(run_uuid)
+            if integrator_run is None:
+                raise ValueError("integrator run not found for workspace")
 
             engine = IntegratorEngine(
                 llm=llm,
@@ -526,6 +567,11 @@ async def job_integrate(workspace_id: str) -> dict:
                 cost_usd=result.cost_usd,
                 duration_ms=result.duration_ms,
             )
+    except Exception as exc:
+        if run_uuid is not None:
+            with contextlib.suppress(Exception):
+                await _mark_integrator_run_failed(factory, workspace_id, run_uuid, str(exc))
+        raise
     finally:
         if redis_client:
             await redis_client.aclose()

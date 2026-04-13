@@ -1032,3 +1032,37 @@ class TestExtractionRunRepository:
         result = await repo.clear_raw_extraction(run.id)
         assert result is not None
         assert result.raw_extraction is None
+
+
+class TestIntegratorRunRepository:
+    def _make_run(self, ws_id: uuid.UUID | None = None):
+        from alayaos_core.models.integrator_run import IntegratorRun
+
+        now = datetime.now(UTC)
+        run = IntegratorRun(
+            id=uuid.uuid4(),
+            workspace_id=ws_id or uuid.uuid4(),
+            trigger="manual",
+            scope_description="test",
+            status="failed",
+            error_message="boom",
+        )
+        run.started_at = now
+        run.completed_at = now
+        return run
+
+    @pytest.mark.asyncio
+    async def test_update_status_clears_stale_error_message_on_success(self) -> None:
+        from alayaos_core.repositories.integrator_run import IntegratorRunRepository
+
+        ws_id = uuid.uuid4()
+        run = self._make_run(ws_id)
+        session = make_session()
+        session.execute.return_value = make_result(run)
+        repo = IntegratorRunRepository(session, ws_id)
+
+        result = await repo.update_status(run.id, "completed")
+
+        assert result is not None
+        assert result.status == "completed"
+        assert result.error_message is None

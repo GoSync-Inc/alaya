@@ -305,3 +305,28 @@ async def test_mark_failed_is_noop_on_terminal_status():
     assert mock_run.error_message is None
     assert mock_run.completed_at is None
     session.flush.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_recalc_usage_sums_traces():
+    """recalc_usage issues an UPDATE that sums tokens_used and cost_usd from pipeline_traces."""
+    from alayaos_core.repositories.extraction_run import ExtractionRunRepository
+
+    run_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+
+    session = AsyncMock()
+    session.execute = AsyncMock()
+
+    repo = ExtractionRunRepository(session, ws_id)
+    await repo.recalc_usage(run_id=run_id)
+
+    session.execute.assert_awaited_once()
+    call_args = session.execute.call_args
+    # The first positional argument is the compiled SQL statement.
+    stmt = call_args.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "tokens_used" in compiled
+    assert "cost_usd" in compiled
+    # UUID may be rendered without dashes in compiled SQL
+    assert run_id.hex in compiled

@@ -101,6 +101,7 @@ async def _mark_extraction_run_failed(
         await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
         repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
         await repo.mark_failed(run_id=run_id, error_message=error_message, error_detail=error_detail)
+        await repo.recalc_usage(run_id=run_id)
 
 
 async def _mark_integrator_run_failed(
@@ -265,6 +266,8 @@ async def job_write(extraction_run_id: str, workspace_id: str) -> dict:
                     llm=llm,
                     redis=redis_client,
                 )
+                run_repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
+                await run_repo.recalc_usage(run_id=uuid.UUID(extraction_run_id))
         except Exception as e:
             try:
                 await _mark_extraction_run_failed(

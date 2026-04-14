@@ -1,8 +1,18 @@
 """Anthropic LLM adapter using tool-based structured output."""
 
+from __future__ import annotations
+
+import json
+import typing
+from typing import TYPE_CHECKING
+
 import anthropic
 
 from alayaos_core.llm.interface import LLMUsage, T
+
+if TYPE_CHECKING:
+    from anthropic.types import ToolParam
+    from pydantic import BaseModel
 
 # Pricing per 1M tokens
 PRICING: dict[str, dict[str, float]] = {
@@ -13,6 +23,44 @@ PRICING: dict[str, dict[str, float]] = {
     "claude-opus-4-6-20250514": {"input": 15.0, "output": 75.0, "cached": 1.5},
 }
 DEFAULT_PRICING: dict[str, float] = {"input": 3.0, "output": 15.0, "cached": 0.3}  # Sonnet fallback
+
+
+def _is_list_annotation(annotation: object) -> bool:
+    """Return True if *annotation* represents a list type (including Optional[list[...]])."""
+    origin = typing.get_origin(annotation)
+    if origin is list:
+        return True
+    # Handle Union / Optional: e.g. list[X] | None
+    if origin is typing.Union:
+        for arg in typing.get_args(annotation):
+            if typing.get_origin(arg) is list:
+                return True
+    return False
+
+
+def _coerce_list_strings(data: dict[str, object], model: type[BaseModel]) -> dict[str, object]:
+    """Return a shallow copy of *data* with JSON-string list fields parsed.
+
+    For each top-level field in *model* whose annotation is ``list[...]`` (or
+    ``list[...] | None``), if the corresponding value in *data* is a ``str``
+    that can be parsed as a JSON array, replace it with the parsed list.
+    Non-parseable strings and non-list parse results are left unchanged so
+    that Pydantic can raise the appropriate validation error.
+    """
+    result = dict(data)
+    for field_name, field_info in model.model_fields.items():
+        if not _is_list_annotation(field_info.annotation):
+            continue
+        value = result.get(field_name)
+        if not isinstance(value, str):
+            continue
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(parsed, list):
+            result[field_name] = parsed
+    return result
 
 
 class AnthropicAdapter:
@@ -33,7 +81,7 @@ class AnthropicAdapter:
     ) -> tuple[T, LLMUsage]:
         # Build tool definition from Pydantic schema
         schema = response_model.model_json_schema()
-        tool = {
+        tool: ToolParam = {
             "name": "extract_result",
             "description": "Extract structured data from the input",
             "input_schema": schema,
@@ -65,6 +113,7 @@ class AnthropicAdapter:
         if tool_input is None:
             raise ValueError("Model did not return tool use result")
 
+        tool_input = _coerce_list_strings(tool_input, response_model)
         result = response_model.model_validate(tool_input)
         usage = LLMUsage(
             tokens_in=response.usage.input_tokens,

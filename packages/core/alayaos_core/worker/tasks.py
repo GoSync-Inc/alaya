@@ -194,18 +194,38 @@ async def job_extract(event_id: str, extraction_run_id: str, workspace_id: str) 
     extractor = Extractor(llm)
 
     factory = _session_factory()
-    async with factory() as session, session.begin():
-        await _set_workspace_context(session, workspace_id)
-        result = await run_extraction(
-            event_id=uuid.UUID(event_id),
-            run_id=uuid.UUID(extraction_run_id),
-            session=session,
-            llm=llm,
-            preprocessor=preprocessor,
-            extractor=extractor,
-            entity_types=[dict(et) for et in CORE_ENTITY_TYPES],
-            predicates=[dict(p) for p in CORE_PREDICATES],
-        )
+    try:
+        async with factory() as session, session.begin():
+            await _set_workspace_context(session, workspace_id)
+            result = await run_extraction(
+                event_id=uuid.UUID(event_id),
+                run_id=uuid.UUID(extraction_run_id),
+                session=session,
+                llm=llm,
+                preprocessor=preprocessor,
+                extractor=extractor,
+                entity_types=[dict(et) for et in CORE_ENTITY_TYPES],
+                predicates=[dict(p) for p in CORE_PREDICATES],
+            )
+    except Exception as e:
+        try:
+            await _mark_extraction_run_failed(
+                factory,
+                workspace_id,
+                run_id=uuid.UUID(extraction_run_id),
+                error_message=str(e)[:500],
+                error_detail={"stage": "extract", "type": type(e).__name__},
+            )
+        except Exception as mark_exc:
+            log.warning(
+                "extraction_run_mark_failed_error",
+                extraction_run_id=extraction_run_id,
+                stage="extract",
+                exc_type=type(e).__name__,
+                secondary_type=type(mark_exc).__name__,
+                secondary=str(mark_exc)[:300],
+            )
+        raise
 
     if result:
         await job_write.kiq(extraction_run_id, workspace_id)

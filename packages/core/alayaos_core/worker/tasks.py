@@ -13,6 +13,7 @@ from alayaos_core.config import Settings
 from alayaos_core.extraction.integrator.engine import IntegratorEngine
 from alayaos_core.repositories.claim import ClaimRepository
 from alayaos_core.repositories.entity import EntityRepository
+from alayaos_core.repositories.extraction_run import ExtractionRunRepository
 from alayaos_core.repositories.integrator_run import IntegratorRunRepository
 from alayaos_core.repositories.relation import RelationRepository
 from alayaos_core.repositories.workspace import WorkspaceRepository
@@ -82,6 +83,21 @@ async def _close_worker_resources_on_shutdown(_state) -> None:
 @broker.on_event(TaskiqEvents.WORKER_STARTUP)
 async def _initialize_worker_resources_on_startup(_state) -> None:
     _get_session_factory()
+
+
+async def _mark_extraction_run_failed(
+    factory,
+    workspace_id: str,
+    run_id: uuid.UUID,
+    error_message: str,
+    error_detail: dict | None = None,
+) -> None:
+    """Transition an extraction run to failed in a fresh transaction."""
+    validated_wid = str(uuid.UUID(workspace_id))
+    async with factory() as session, session.begin():
+        await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
+        repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
+        await repo.mark_failed(run_id=run_id, error_message=error_message, error_detail=error_detail)
 
 
 async def _mark_integrator_run_failed(
@@ -216,14 +232,25 @@ async def job_write(extraction_run_id: str, workspace_id: str) -> dict:
         redis_client = aioredis.from_url(settings.REDIS_URL)
 
     factory = _session_factory()
-    async with factory() as session, session.begin():
-        await _set_workspace_context(session, workspace_id)
-        counters = await run_write(
-            run_id=uuid.UUID(extraction_run_id),
-            session=session,
-            llm=llm,
-            redis=redis_client,
-        )
+    try:
+        async with factory() as session, session.begin():
+            await _set_workspace_context(session, workspace_id)
+            counters = await run_write(
+                run_id=uuid.UUID(extraction_run_id),
+                session=session,
+                llm=llm,
+                redis=redis_client,
+            )
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            await _mark_extraction_run_failed(
+                factory,
+                workspace_id,
+                run_id=uuid.UUID(extraction_run_id),
+                error_message=str(e)[:500],
+                error_detail={"stage": "write", "type": type(e).__name__},
+            )
+        raise
 
     if redis_client:
         await redis_client.aclose()
@@ -242,7 +269,6 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
     from alayaos_core.extraction.sanitizer import sanitize
     from alayaos_core.repositories.chunk import ChunkRepository
     from alayaos_core.repositories.event import EventRepository
-    from alayaos_core.repositories.extraction_run import ExtractionRunRepository
     from alayaos_core.repositories.pipeline_trace import PipelineTraceRepository
 
     settings = Settings()
@@ -264,125 +290,137 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
     )
 
     factory = _session_factory()
-    async with factory() as session, session.begin():
-        await _set_workspace_context(session, workspace_id)
-
-        event_repo = EventRepository(session, uuid.UUID(workspace_id))
-        run_repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
-        chunk_repo = ChunkRepository(session, uuid.UUID(workspace_id))
-        trace_repo = PipelineTraceRepository(session, uuid.UUID(workspace_id))
-
-        event = await event_repo.get_by_id(uuid.UUID(event_id))
-        run = await run_repo.get_by_id(uuid.UUID(extraction_run_id))
-        if not event or not run:
-            return {"status": "skipped", "reason": "event or run not found"}
-
-        # Idempotency: skip if already processed (completed or cortex_complete)
-        if run.status in ("completed", "cortex_complete"):
-            return {"status": "skipped", "reason": "already processed"}
-
-        # Access-level gating (same as existing should_extract in pipeline.py)
-        from alayaos_core.extraction.pipeline import should_extract
-
-        if not await should_extract(event, run, run_repo, session):
-            return {"status": "skipped", "reason": "access_level denied"}
-
-        await run_repo.update_status(run.id, "extracting")
-
-        # Sanitize
-        text = event.raw_text or event.content.get("text", "")
-        text = sanitize(text)
-
-        # Chunk
-        raw_chunks = chunker.chunk(text, event.source_type, event.source_id)
-
-        # Classify each chunk + write to DB
-        total_cortex_cost = 0.0
-        chunks_crystal = 0
-        chunks_skipped = 0
-        verification_changes = 0
-
-        for rc in raw_chunks:
-            scores, changed, usage = await classifier.classify_and_verify(rc)
-            total_cortex_cost += usage.cost_usd
-            if changed:
-                verification_changes += 1
-
-            is_crystal = classifier.is_crystal(scores)
-            primary = classifier.primary_domain(scores)
-
-            chunk = await chunk_repo.create(
-                workspace_id=uuid.UUID(workspace_id),
-                event_id=event.id,
-                chunk_index=rc.index,
-                chunk_total=rc.total,
-                text=rc.text,
-                token_count=rc.token_count,
-                source_type=rc.source_type,
-                source_id=rc.source_id,
-                domain_scores=scores.model_dump(),
-                primary_domain=primary,
-                is_crystal=is_crystal,
-                classification_model=settings.CORTEX_CLASSIFIER_MODEL,
-                extraction_run_id=run.id,
-            )
-
-            # Update classification flags
-            chunk.classification_verified = True
-            chunk.verification_changed = changed
-
-            if is_crystal:
-                chunks_crystal += 1
-            else:
-                chunks_skipped += 1
-
-            # Write pipeline trace
-            await trace_repo.create(
-                workspace_id=uuid.UUID(workspace_id),
-                event_id=event.id,
-                stage="cortex",
-                decision="classified" if is_crystal else "skipped",
-                reason=f"primary={primary}, crystal={is_crystal}",
-                details={"scores": scores.model_dump(), "changed": changed},
-                tokens_used=usage.tokens_in + usage.tokens_out,
-                cost_usd=usage.cost_usd,
-                extraction_run_id=run.id,
-            )
-
-        # Update extraction run counters and status
-        run.chunks_total = len(raw_chunks)
-        run.chunks_crystal = chunks_crystal
-        run.chunks_skipped = chunks_skipped
-        run.cortex_cost_usd = total_cortex_cost
-        run.verification_changes = verification_changes
-        run.status = "cortex_complete"
-        await session.flush()
-
-    # Enqueue job_crystallize per crystal chunk (outside the session)
-    crystal_chunk_ids = []
-    async with factory() as session, session.begin():
-        await _set_workspace_context(session, workspace_id)
-        from alayaos_core.repositories.chunk import ChunkRepository
-
-        chunk_repo = ChunkRepository(session, uuid.UUID(workspace_id))
-        crystal_chunks = await chunk_repo.list_crystal(uuid.UUID(event_id))
-        crystal_chunk_ids = [str(c.id) for c in crystal_chunks]
-
-    if crystal_chunk_ids:
-        for chunk_id in crystal_chunk_ids:
-            await job_crystallize.kiq(chunk_id, extraction_run_id, workspace_id)
-    else:
-        # No crystal chunks — complete the run (nothing to extract)
-        # Also mark event as extracted so it is not reprocessed on retry
+    try:
         async with factory() as session, session.begin():
             await _set_workspace_context(session, workspace_id)
-            run_repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
-            await run_repo.update_status(uuid.UUID(extraction_run_id), "completed")
+
             event_repo = EventRepository(session, uuid.UUID(workspace_id))
+            run_repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
+            chunk_repo = ChunkRepository(session, uuid.UUID(workspace_id))
+            trace_repo = PipelineTraceRepository(session, uuid.UUID(workspace_id))
+
             event = await event_repo.get_by_id(uuid.UUID(event_id))
-            if event:
-                event.is_extracted = True
-                await session.flush()
+            run = await run_repo.get_by_id(uuid.UUID(extraction_run_id))
+            if not event or not run:
+                return {"status": "skipped", "reason": "event or run not found"}
+
+            # Idempotency: skip if already processed (completed or cortex_complete)
+            if run.status in ("completed", "cortex_complete"):
+                return {"status": "skipped", "reason": "already processed"}
+
+            # Access-level gating (same as existing should_extract in pipeline.py)
+            from alayaos_core.extraction.pipeline import should_extract
+
+            if not await should_extract(event, run, run_repo, session):
+                return {"status": "skipped", "reason": "access_level denied"}
+
+            await run_repo.update_status(run.id, "extracting")
+
+            # Sanitize
+            text = event.raw_text or event.content.get("text", "")
+            text = sanitize(text)
+
+            # Chunk
+            raw_chunks = chunker.chunk(text, event.source_type, event.source_id)
+
+            # Classify each chunk + write to DB
+            total_cortex_cost = 0.0
+            chunks_crystal = 0
+            chunks_skipped = 0
+            verification_changes = 0
+
+            for rc in raw_chunks:
+                scores, changed, usage = await classifier.classify_and_verify(rc)
+                total_cortex_cost += usage.cost_usd
+                if changed:
+                    verification_changes += 1
+
+                is_crystal = classifier.is_crystal(scores)
+                primary = classifier.primary_domain(scores)
+
+                chunk = await chunk_repo.create(
+                    workspace_id=uuid.UUID(workspace_id),
+                    event_id=event.id,
+                    chunk_index=rc.index,
+                    chunk_total=rc.total,
+                    text=rc.text,
+                    token_count=rc.token_count,
+                    source_type=rc.source_type,
+                    source_id=rc.source_id,
+                    domain_scores=scores.model_dump(),
+                    primary_domain=primary,
+                    is_crystal=is_crystal,
+                    classification_model=settings.CORTEX_CLASSIFIER_MODEL,
+                    extraction_run_id=run.id,
+                )
+
+                # Update classification flags
+                chunk.classification_verified = True
+                chunk.verification_changed = changed
+
+                if is_crystal:
+                    chunks_crystal += 1
+                else:
+                    chunks_skipped += 1
+
+                # Write pipeline trace
+                await trace_repo.create(
+                    workspace_id=uuid.UUID(workspace_id),
+                    event_id=event.id,
+                    stage="cortex",
+                    decision="classified" if is_crystal else "skipped",
+                    reason=f"primary={primary}, crystal={is_crystal}",
+                    details={"scores": scores.model_dump(), "changed": changed},
+                    tokens_used=usage.tokens_in + usage.tokens_out,
+                    cost_usd=usage.cost_usd,
+                    extraction_run_id=run.id,
+                )
+
+            # Update extraction run counters and status
+            run.chunks_total = len(raw_chunks)
+            run.chunks_crystal = chunks_crystal
+            run.chunks_skipped = chunks_skipped
+            run.cortex_cost_usd = total_cortex_cost
+            run.verification_changes = verification_changes
+            run.status = "cortex_complete"
+            await session.flush()
+
+        # Enqueue job_crystallize per crystal chunk (outside the session)
+        crystal_chunk_ids = []
+        async with factory() as session, session.begin():
+            await _set_workspace_context(session, workspace_id)
+            from alayaos_core.repositories.chunk import ChunkRepository
+
+            chunk_repo = ChunkRepository(session, uuid.UUID(workspace_id))
+            crystal_chunks = await chunk_repo.list_crystal(uuid.UUID(event_id))
+            crystal_chunk_ids = [str(c.id) for c in crystal_chunks]
+
+        if crystal_chunk_ids:
+            for chunk_id in crystal_chunk_ids:
+                await job_crystallize.kiq(chunk_id, extraction_run_id, workspace_id)
+        else:
+            # No crystal chunks — complete the run (nothing to extract)
+            # Also mark event as extracted so it is not reprocessed on retry
+            async with factory() as session, session.begin():
+                await _set_workspace_context(session, workspace_id)
+                run_repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
+                await run_repo.update_status(uuid.UUID(extraction_run_id), "completed")
+                event_repo = EventRepository(session, uuid.UUID(workspace_id))
+                event = await event_repo.get_by_id(uuid.UUID(event_id))
+                if event:
+                    event.is_extracted = True
+                    await session.flush()
+
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            await _mark_extraction_run_failed(
+                factory,
+                workspace_id,
+                run_id=uuid.UUID(extraction_run_id),
+                error_message=str(e)[:500],
+                error_detail={"stage": "cortex", "type": type(e).__name__},
+            )
+        raise
 
     return {
         "event_id": event_id,
@@ -425,110 +463,122 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
     verifier = CrystallizerVerifier(llm=llm)
 
     factory = _session_factory()
-    async with factory() as session, session.begin():
-        await _set_workspace_context(session, workspace_id)
+    try:
+        async with factory() as session, session.begin():
+            await _set_workspace_context(session, workspace_id)
 
-        chunk_repo = ChunkRepository(session, uuid.UUID(workspace_id))
-        trace_repo = PipelineTraceRepository(session, uuid.UUID(workspace_id))
+            chunk_repo = ChunkRepository(session, uuid.UUID(workspace_id))
+            trace_repo = PipelineTraceRepository(session, uuid.UUID(workspace_id))
 
-        chunk = await chunk_repo.get_by_id(uuid.UUID(chunk_id))
-        if chunk is None:
-            return {"status": "skipped", "reason": "chunk not found"}
+            chunk = await chunk_repo.get_by_id(uuid.UUID(chunk_id))
+            if chunk is None:
+                return {"status": "skipped", "reason": "chunk not found"}
 
-        # Idempotency: skip if not in 'classified' stage
-        if chunk.processing_stage != "classified":
-            return {"status": "skipped", "reason": f"stage={chunk.processing_stage}"}
+            # Idempotency: skip if not in 'classified' stage
+            if chunk.processing_stage != "classified":
+                return {"status": "skipped", "reason": f"stage={chunk.processing_stage}"}
 
-        # Lock extraction run row to serialize concurrent chunk tasks
-        from sqlalchemy import select as sa_select
+            # Lock extraction run row to serialize concurrent chunk tasks
+            from sqlalchemy import select as sa_select
 
-        from alayaos_core.models.extraction_run import ExtractionRun
+            from alayaos_core.models.extraction_run import ExtractionRun
 
-        stmt = sa_select(ExtractionRun).where(ExtractionRun.id == uuid.UUID(extraction_run_id)).with_for_update()
-        result = await session.execute(stmt)
-        run = result.scalar_one_or_none()
-        if run is None:
-            return {"status": "skipped", "reason": "run not found"}
+            stmt = sa_select(ExtractionRun).where(ExtractionRun.id == uuid.UUID(extraction_run_id)).with_for_update()
+            result = await session.execute(stmt)
+            run = result.scalar_one_or_none()
+            if run is None:
+                return {"status": "skipped", "reason": "run not found"}
 
-        # Update chunk to 'extracting'
-        await chunk_repo.update_processing_stage(chunk.id, "extracting")
+            # Update chunk to 'extracting'
+            await chunk_repo.update_processing_stage(chunk.id, "extracting")
 
-        # Extract
-        entity_types = [dict(et) for et in CORE_ENTITY_TYPES]
-        predicates = [dict(p) for p in CORE_PREDICATES]
-        extraction_result, usage_extract = await extractor.extract(
-            chunk=chunk,
-            entity_types=entity_types,
-            predicates=predicates,
-            workspace_id=uuid.UUID(workspace_id),
-        )
+            # Extract
+            entity_types = [dict(et) for et in CORE_ENTITY_TYPES]
+            predicates = [dict(p) for p in CORE_PREDICATES]
+            extraction_result, usage_extract = await extractor.extract(
+                chunk=chunk,
+                entity_types=entity_types,
+                predicates=predicates,
+                workspace_id=uuid.UUID(workspace_id),
+            )
 
-        # Build system prompt for verifier (same prompt for cache hit)
-        system_prompt = extractor._build_prompt(entity_types, predicates, [], chunk)
+            # Build system prompt for verifier (same prompt for cache hit)
+            system_prompt = extractor._build_prompt(entity_types, predicates, [], chunk)
 
-        # Verify
-        verified_result, verification_changed, usage_verify = await verifier.verify(
-            chunk_text=chunk.text,
-            system_prompt=system_prompt,
-            initial_result=extraction_result,
-        )
+            # Verify
+            verified_result, verification_changed, usage_verify = await verifier.verify(
+                chunk_text=chunk.text,
+                system_prompt=system_prompt,
+                initial_result=extraction_result,
+            )
 
-        # Apply confidence tiers
-        final_result = apply_confidence_tiers(
-            verified_result,
-            high=settings.CRYSTALLIZER_CONFIDENCE_HIGH,
-            low=settings.CRYSTALLIZER_CONFIDENCE_LOW,
-        )
+            # Apply confidence tiers
+            final_result = apply_confidence_tiers(
+                verified_result,
+                high=settings.CRYSTALLIZER_CONFIDENCE_HIGH,
+                low=settings.CRYSTALLIZER_CONFIDENCE_LOW,
+            )
 
-        # Merge chunk result into extraction_run.raw_extraction as a proper
-        # ExtractionResult (entities/relations/claims lists). The FOR UPDATE
-        # lock on the run row serializes concurrent chunk tasks.
-        existing_raw = run.raw_extraction or {"entities": [], "relations": [], "claims": []}
-        chunk_data = final_result.model_dump()
-        existing_raw.setdefault("entities", []).extend(chunk_data.get("entities", []))
-        existing_raw.setdefault("relations", []).extend(chunk_data.get("relations", []))
-        existing_raw.setdefault("claims", []).extend(chunk_data.get("claims", []))
-        run.raw_extraction = existing_raw
+            # Merge chunk result into extraction_run.raw_extraction as a proper
+            # ExtractionResult (entities/relations/claims lists). The FOR UPDATE
+            # lock on the run row serializes concurrent chunk tasks.
+            existing_raw = run.raw_extraction or {"entities": [], "relations": [], "claims": []}
+            chunk_data = final_result.model_dump()
+            existing_raw.setdefault("entities", []).extend(chunk_data.get("entities", []))
+            existing_raw.setdefault("relations", []).extend(chunk_data.get("relations", []))
+            existing_raw.setdefault("claims", []).extend(chunk_data.get("claims", []))
+            run.raw_extraction = existing_raw
 
-        # Update chunk to 'extracted'
-        await chunk_repo.update_processing_stage(chunk.id, "extracted")
+            # Update chunk to 'extracted'
+            await chunk_repo.update_processing_stage(chunk.id, "extracted")
 
-        # Write pipeline trace
-        total_tokens = (
-            usage_extract.tokens_in + usage_extract.tokens_out + usage_verify.tokens_in + usage_verify.tokens_out
-        )
-        total_cost = usage_extract.cost_usd + usage_verify.cost_usd
-        await trace_repo.create(
-            workspace_id=uuid.UUID(workspace_id),
-            event_id=chunk.event_id,
-            stage="crystallizer",
-            decision="extracted",
-            reason=f"chunk_id={chunk_id}, verified={True}, changed={verification_changed}",
-            details={
-                "entities": len(final_result.entities),
-                "relations": len(final_result.relations),
-                "claims": len(final_result.claims),
-                "verification_changed": verification_changed,
-            },
-            tokens_used=total_tokens,
-            cost_usd=total_cost,
-            extraction_run_id=run.id,
-        )
+            # Write pipeline trace
+            total_tokens = (
+                usage_extract.tokens_in + usage_extract.tokens_out + usage_verify.tokens_in + usage_verify.tokens_out
+            )
+            total_cost = usage_extract.cost_usd + usage_verify.cost_usd
+            await trace_repo.create(
+                workspace_id=uuid.UUID(workspace_id),
+                event_id=chunk.event_id,
+                stage="crystallizer",
+                decision="extracted",
+                reason=f"chunk_id={chunk_id}, verified={True}, changed={verification_changed}",
+                details={
+                    "entities": len(final_result.entities),
+                    "relations": len(final_result.relations),
+                    "claims": len(final_result.claims),
+                    "verification_changed": verification_changed,
+                },
+                tokens_used=total_tokens,
+                cost_usd=total_cost,
+                extraction_run_id=run.id,
+            )
 
-        # Update extraction_run.crystallizer_cost_usd
-        run.crystallizer_cost_usd = float(run.crystallizer_cost_usd or 0) + total_cost
+            # Update extraction_run.crystallizer_cost_usd
+            run.crystallizer_cost_usd = float(run.crystallizer_cost_usd or 0) + total_cost
 
-        await session.flush()
-        event_id_for_check = chunk.event_id
+            await session.flush()
+            event_id_for_check = chunk.event_id
 
-    # Check AFTER commit — read committed state from a separate transaction
-    all_extracted = False
-    async with factory() as session2, session2.begin():
-        await _set_workspace_context(session2, workspace_id)
-        chunk_repo2 = ChunkRepository(session2, uuid.UUID(workspace_id))
-        all_chunks = await chunk_repo2.list_by_event(event_id_for_check)
-        crystal_chunks = [c for c in all_chunks if c.is_crystal]
-        all_extracted = bool(crystal_chunks) and all(c.processing_stage == "extracted" for c in crystal_chunks)
+        # Check AFTER commit — read committed state from a separate transaction
+        all_extracted = False
+        async with factory() as session2, session2.begin():
+            await _set_workspace_context(session2, workspace_id)
+            chunk_repo2 = ChunkRepository(session2, uuid.UUID(workspace_id))
+            all_chunks = await chunk_repo2.list_by_event(event_id_for_check)
+            crystal_chunks = [c for c in all_chunks if c.is_crystal]
+            all_extracted = bool(crystal_chunks) and all(c.processing_stage == "extracted" for c in crystal_chunks)
+
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            await _mark_extraction_run_failed(
+                factory,
+                workspace_id,
+                run_id=uuid.UUID(extraction_run_id),
+                error_message=str(e)[:500],
+                error_detail={"stage": "crystallize", "type": type(e).__name__},
+            )
+        raise
 
     if all_extracted:
         await job_write.kiq(extraction_run_id, workspace_id)

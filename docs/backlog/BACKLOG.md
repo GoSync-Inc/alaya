@@ -117,6 +117,37 @@ Detailed implementation plan:
 
 ---
 
+## Run 5.3: Extraction Pipeline Reliability (2026-04-14)
+
+Source: benchmark on 40 real Slack events (`docs/superflow/audits/2026-04-14-pre-benchmark-handoff.md` Step B).
+Brief: `docs/superflow/specs/2026-04-14-run5.3-pipeline-reliability-brief.md`
+Plan: `docs/superflow/plans/2026-04-14-run5.3-pipeline-reliability.md`
+
+### In scope for this run
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.3.01 | P1 | `EntityMatchResult.reasoning` max_length too short | `packages/core/alayaos_core/extraction/schemas.py`, `packages/core/alayaos_core/extraction/integrator/schemas.py` | LLM reasoning exceeds 200 chars — `ValidationError` aborts `job_write`, run stuck at `cortex_complete`. Raise limit to 1000 and add regression. |
+| RUN5.3.02 | P1 | Anthropic adapter: tolerate JSON-string for list fields | `packages/core/alayaos_core/llm/anthropic.py` | LLM sometimes returns list fields as a JSON-encoded string. Auto-parse when field annotation is `list[...]` and value is a parseable JSON array. |
+| RUN5.3.03 | P1 | Run status never transitions to `failed` on writer/crystallize crash | `packages/core/alayaos_core/worker/tasks.py` | Wrap task bodies in try/except. On any `Exception`, call `mark_failed` and re-raise. |
+| RUN5.3.04 | P1 | Integrator O(n²) dedup times out | `packages/core/alayaos_core/extraction/integrator/engine.py`, `dedup.py` | Replace all-pairs LLM loop with vector-similarity shortlist + LLM-verify top-k. New settings `INTEGRATOR_DEDUP_SHORTLIST_K`, `INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD`. |
+| RUN5.3.05 | P2 | Cortex `is_crystal`: smalltalk-aware rule | `packages/core/alayaos_core/extraction/cortex/classifier.py` | `is_crystal = not (smalltalk ≥ 0.8 AND max_non_smalltalk < 0.4)` AND `max_non_smalltalk ≥ threshold`. Filters chit-chat while keeping mixed-signal events. |
+| RUN5.3.06 | P2 | `extraction_runs.cost_usd` / `tokens_in` aggregation from traces | `packages/core/alayaos_core/worker/tasks.py`, `repositories/extraction_run.py` | Add `recalc_usage` and call on terminal transitions. Run-level observability matches trace-level reality. |
+
+### Deferred (out of scope for Run 5.3, track here)
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.3.07 | P2 | Drop Cortex `verify` pass by default | `packages/core/alayaos_core/extraction/cortex/classifier.py` | Benchmark showed verify changes scores in 38/40 chunks but doesn't demonstrably improve quality on sample. Dropping it halves Cortex cost. Could be a config flag `CORTEX_VERIFY_ENABLED=false`. |
+| RUN5.3.08 | P3 | Cortex prompt caching: pad system prompt > 1024 tokens | `packages/core/alayaos_core/extraction/cortex/classifier.py` | Haiku requires ≥ 1024 tokens for cache hits. Current classifier prompt is ~ 200 tokens, so 0 cache hits. Either pad with example domain descriptions or switch to Sonnet. |
+| RUN5.3.09 | P2 | Extractor: current date in system prompt | `packages/core/alayaos_core/extraction/extractor.py` | "1 марта" gets resolved to wrong year (e.g. 2024 instead of 2026). Inject today's date into the system prompt so LLM anchors relative dates correctly. |
+| RUN5.3.10 | P3 | Extractor: prefer specific predicates over `description` | `packages/core/alayaos_core/extraction/extractor.py` | `description` is ~ 26-36% of all claims in benchmark — LLM uses it as a catch-all bailout. Tighten system prompt: "Use `description` only if no more specific predicate fits." |
+| RUN5.3.11 | P3 | Resolver: Slack handle `<@UXXXXXX>` → user name | `packages/core/alayaos_core/extraction/resolver.py` | Handles persist as `person` entity name. Requires Slack connector (Run 5a) to populate a user table with handle→name mapping. |
+| RUN5.3.12 | P3 | `l2_claims` temporal: multiple values per (entity, predicate) | `packages/core/alayaos_core/models/claim.py`, `integrator/` | Many `status` claims for the same entity cause graph fragmentation. Needs schema design: supersede-on-write vs. temporal interval vs. latest-wins policy. |
+| RUN5.3.13 | P2 | Orphan-run reaper: retry stuck `cortex_complete` from earlier crashes | `packages/core/alayaos_core/worker/tasks.py` | RUN5.3.03 prevents NEW stuck runs forward. This item is about cleaning up runs stuck from before that fix (reaper task, periodic). |
+
+---
+
 ## Run 4+: Future (from Master Plan)
 
 | Run | Scope | Status |

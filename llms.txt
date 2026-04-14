@@ -17,7 +17,7 @@ Event → Cortex (chunk + classify) → Crystallizer (LLM extract per chunk) →
 - **Cortex (`extraction/cortex/`):** Chunks raw event text into `L0Chunk` records; classifies chunk type (narrative, list, table, etc.) to guide downstream extraction.
 - **Crystallizer (`extraction/crystallizer/`):** Runs LLM extraction on each chunk; verifies and scores output; produces `ExtractionResult` (entities + claims + relations).
 - **Write (`job_write`):** Resolves entities against existing graph (exact → fuzzy → LLM disambiguation), atomically writes entities/claims/relations with `extraction_run_id` provenance.
-- **Integrator (`extraction/integrator/`):** Deduplicates overlapping claims, enriches entities, normalizes date expressions via `dateparser`, tracks runs in `IntegratorRun`.
+- **Integrator (`extraction/integrator/`):** Deduplicates overlapping entities via vector shortlist (FastEmbed cosine, top-K per type) followed by LLM verification; enriches entities, normalizes date expressions via `dateparser`, tracks runs in `IntegratorRun`.
 
 Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `job_write`, `job_cortex`, `job_crystallize`, `job_enrich`, `job_integrate`, `job_check_integrator` (periodic). All task parameters are string IDs — raw text never passed via job queue.
 

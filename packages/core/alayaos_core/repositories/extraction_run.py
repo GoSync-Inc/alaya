@@ -5,9 +5,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 
 from alayaos_core.models.extraction_run import ExtractionRun
+from alayaos_core.models.pipeline_trace import PipelineTrace
 from alayaos_core.repositories.base import BaseRepository
 
 
@@ -140,3 +141,19 @@ class ExtractionRunRepository(BaseRepository):
             run.error_detail = error_detail
         run.completed_at = datetime.now(UTC)
         await self.session.flush()
+
+    async def recalc_usage(self, run_id: uuid.UUID) -> None:
+        """Re-sum tokens and cost from pipeline_traces into the extraction_runs row."""
+        stmt = (
+            update(ExtractionRun)
+            .where(ExtractionRun.id == run_id)
+            .values(
+                tokens_in=select(func.coalesce(func.sum(PipelineTrace.tokens_used), 0))
+                .where(PipelineTrace.extraction_run_id == run_id)
+                .scalar_subquery(),
+                cost_usd=select(func.coalesce(func.sum(PipelineTrace.cost_usd), 0))
+                .where(PipelineTrace.extraction_run_id == run_id)
+                .scalar_subquery(),
+            )
+        )
+        await self.session.execute(stmt)

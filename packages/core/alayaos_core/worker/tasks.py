@@ -435,12 +435,16 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
             for chunk_id in crystal_chunk_ids:
                 await job_crystallize.kiq(chunk_id, extraction_run_id, workspace_id)
         else:
-            # No crystal chunks — complete the run (nothing to extract)
-            # Also mark event as extracted so it is not reprocessed on retry
+            # No crystal chunks — complete the run (nothing to extract).
+            # Also mark event as extracted so it is not reprocessed on retry.
+            # recalc_usage is called here because the Cortex classifier already wrote
+            # pipeline_traces earlier in this task; without recalc those costs would
+            # remain at 0 on the extraction_run row.
             async with factory() as session, session.begin():
                 await _set_workspace_context(session, workspace_id)
                 run_repo = ExtractionRunRepository(session, uuid.UUID(workspace_id))
                 await run_repo.update_status(uuid.UUID(extraction_run_id), "completed")
+                await run_repo.recalc_usage(uuid.UUID(extraction_run_id))
                 event_repo = EventRepository(session, uuid.UUID(workspace_id))
                 event = await event_repo.get_by_id(uuid.UUID(event_id))
                 if event:

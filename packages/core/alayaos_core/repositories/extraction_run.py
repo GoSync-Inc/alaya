@@ -143,7 +143,20 @@ class ExtractionRunRepository(BaseRepository):
         await self.session.flush()
 
     async def recalc_usage(self, run_id: uuid.UUID) -> None:
-        """Re-sum tokens and cost from pipeline_traces into the extraction_runs row."""
+        """Re-sum tokens and cost from pipeline_traces into the extraction_runs row.
+
+        Guard: if no pipeline_traces exist for this run_id the UPDATE is skipped entirely.
+        This preserves tokens_in / cost_usd values that the legacy non-Cortex path writes
+        directly onto the ExtractionRun row (where no pipeline_traces are created).
+        Without the guard, a SUM over an empty set would overwrite correct values with 0.
+        """
+        # Check whether any pipeline_traces exist before overwriting run-level counters.
+        exists_stmt = select(PipelineTrace.id).where(PipelineTrace.extraction_run_id == run_id).limit(1)
+        result = await self.session.execute(exists_stmt)
+        if result.scalar_one_or_none() is None:
+            # Legacy path: no traces were written — leave directly-set values intact.
+            return
+
         stmt = (
             update(ExtractionRun)
             .where(ExtractionRun.id == run_id)

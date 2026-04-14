@@ -315,18 +315,133 @@ async def test_recalc_usage_sums_traces():
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
 
+    # First execute call is the SELECT EXISTS check — return a trace id so the guard passes.
+    exists_result = MagicMock()
+    exists_result.scalar_one_or_none.return_value = uuid.uuid4()  # trace exists
+    update_result = MagicMock()
+
     session = AsyncMock()
-    session.execute = AsyncMock()
+    session.execute = AsyncMock(side_effect=[exists_result, update_result])
 
     repo = ExtractionRunRepository(session, ws_id)
     await repo.recalc_usage(run_id=run_id)
 
-    session.execute.assert_awaited_once()
-    call_args = session.execute.call_args
-    # The first positional argument is the compiled SQL statement.
-    stmt = call_args.args[0]
+    assert session.execute.await_count == 2
+    # Second call must be the UPDATE
+    update_call_args = session.execute.call_args_list[1]
+    stmt = update_call_args.args[0]
     compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
     assert "tokens_used" in compiled
     assert "cost_usd" in compiled
     # UUID may be rendered without dashes in compiled SQL
     assert run_id.hex in compiled
+
+
+@pytest.mark.asyncio
+async def test_recalc_usage_noop_when_no_traces():
+    """recalc_usage must NOT issue an UPDATE when no pipeline_traces rows exist for the run.
+
+    This guards the legacy non-Cortex path where tokens_in/cost_usd are written directly
+    onto the ExtractionRun and no pipeline_traces rows are created. Without this guard,
+    recalc_usage would overwrite correct values with 0.
+    """
+    from alayaos_core.repositories.extraction_run import ExtractionRunRepository
+
+    run_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+
+    # The SELECT EXISTS check returns None — no traces exist.
+    no_traces_result = MagicMock()
+    no_traces_result.scalar_one_or_none.return_value = None
+
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=no_traces_result)
+
+    repo = ExtractionRunRepository(session, ws_id)
+    await repo.recalc_usage(run_id=run_id)
+
+    # Only the existence check SELECT should have been issued — no UPDATE.
+    session.execute.assert_awaited_once()
+    call_args = session.execute.call_args
+    stmt = call_args.args[0]
+    compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+    # Must be a SELECT (existence check), not an UPDATE
+    assert compiled.strip().upper().startswith("SELECT"), f"Expected SELECT, got: {compiled[:80]}"
+    assert "UPDATE" not in compiled.upper()
+
+
+@pytest.mark.asyncio
+async def test_job_cortex_zero_crystal_path_calls_recalc_usage():
+    """job_cortex must call recalc_usage when no crystal chunks are produced.
+
+    Low-signal events (e.g. pure smalltalk) legitimately produce zero crystal chunks.
+    The Haiku classifier still incurred real cost, so recalc_usage must be called so that
+    tokens_in / cost_usd are persisted onto the extraction_run row.
+    """
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+
+    mock_event = MagicMock()
+    mock_event.is_extracted = False
+    mock_event.raw_text = "hi"
+    mock_event.content = {}
+    mock_event.source_type = "slack"
+    mock_event.source_id = "C123"
+    mock_event.id = event_id
+
+    mock_run = MagicMock()
+    mock_run.status = "pending"
+    mock_run.id = run_id
+
+    mock_run_repo = AsyncMock()
+    mock_run_repo.get_by_id = AsyncMock(return_value=mock_run)
+    mock_run_repo.update_status = AsyncMock(return_value=mock_run)
+    mock_run_repo.recalc_usage = AsyncMock()
+
+    mock_event_repo = AsyncMock()
+    mock_event_repo.get_by_id = AsyncMock(return_value=mock_event)
+
+    mock_chunk_repo = AsyncMock()
+    # list_crystal returns empty list — zero crystal chunks
+    mock_chunk_repo.list_crystal = AsyncMock(return_value=[])
+    mock_chunk_repo.create = AsyncMock(return_value=MagicMock())
+
+    mock_trace_repo = AsyncMock()
+
+    # Chunker returns empty list → no chunks to classify → no crystal chunks
+    mock_chunker = MagicMock()
+    mock_chunker.chunk = MagicMock(return_value=[])
+
+    mock_classifier = AsyncMock()
+
+    main_session = _make_mock_session()
+    mock_factory = MagicMock(return_value=main_session)
+
+    with (
+        patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
+        patch("alayaos_core.worker.tasks._set_workspace_context", new=AsyncMock()),
+        patch("alayaos_core.worker.tasks._mark_extraction_run_failed", AsyncMock()),
+        patch("alayaos_core.repositories.event.EventRepository", return_value=mock_event_repo),
+        patch("alayaos_core.worker.tasks.ExtractionRunRepository", return_value=mock_run_repo),
+        patch("alayaos_core.repositories.chunk.ChunkRepository", return_value=mock_chunk_repo),
+        patch("alayaos_core.repositories.pipeline_trace.PipelineTraceRepository", return_value=mock_trace_repo),
+        patch(
+            "alayaos_core.extraction.pipeline.should_extract",
+            new=AsyncMock(return_value=True),
+        ),
+        patch(
+            "alayaos_core.extraction.cortex.chunker.CortexChunker",
+            return_value=mock_chunker,
+        ),
+        patch(
+            "alayaos_core.extraction.cortex.classifier.CortexClassifier",
+            return_value=mock_classifier,
+        ),
+        patch("alayaos_core.extraction.sanitizer.sanitize", return_value="hi"),
+    ):
+        from alayaos_core.worker.tasks import job_cortex
+
+        await job_cortex.original_func(str(event_id), str(run_id), str(ws_id))
+
+    mock_run_repo.recalc_usage.assert_awaited_once_with(uuid.UUID(str(run_id)))

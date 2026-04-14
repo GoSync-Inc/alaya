@@ -507,3 +507,32 @@ async def test_shortlist_skips_typeless_entities():
 
     pairs = await engine._shortlist_dedup([ewc_a, ewc_b])  # type: ignore[attr-defined]
     assert pairs == [], f"Expected no pairs for 'unknown' type entities, got {pairs}"
+
+
+@pytest.mark.asyncio
+async def test_find_duplicates_fallback_does_not_cross_entity_types():
+    """Rapidfuzz fallback find_duplicates must not match entities of different types.
+
+    Regression test for CRITICAL holistic finding: when FastEmbed fails, _shortlist_dedup
+    falls back to find_duplicates() which previously lacked a same-type guard. This test
+    ensures "Alice" (person) and "Alice" (project) are never returned as a DuplicatePair.
+    """
+    from alayaos_core.extraction.integrator.dedup import EntityDeduplicator
+
+    # LLM always says same entity — so any pair reaching LLM would produce a DuplicatePair.
+    always_same_llm = AsyncMock()
+    from alayaos_core.extraction.integrator.schemas import EntityMatchResult
+
+    always_same_llm.extract = AsyncMock(return_value=(EntityMatchResult(is_same_entity=True, reasoning="same"), None))
+
+    deduplicator = EntityDeduplicator(llm=always_same_llm, threshold=0.85, ambiguous_low=0.70)
+
+    alice_person = _make_entity("Alice", entity_type="person")
+    alice_project = _make_entity("Alice", entity_type="project")
+
+    pairs = await deduplicator.find_duplicates([alice_person, alice_project])
+
+    assert pairs == [], (
+        f"Cross-type merge detected: find_duplicates returned {pairs} for "
+        "'Alice' (person) vs 'Alice' (project) — same-type guard is missing."
+    )

@@ -143,92 +143,101 @@ class EntityDeduplicator:
             return []
 
         from rapidfuzz import fuzz, process
+        from rapidfuzz.distance import JaroWinkler
 
-        # Use index-based lookup to handle same-name entities correctly
-        names = [e.name for e in scoreable]
+        # Group by entity_type so we never compare entities of different types
+        # (mirrors the same guard in shortlist_candidates to prevent cross-type merges).
+        by_type: dict[str, list[EntityWithContext]] = {}
+        for entity in scoreable:
+            by_type.setdefault(entity.entity_type, []).append(entity)
 
         pairs: list[DuplicatePair] = []
         seen: set[frozenset] = set()
 
-        from rapidfuzz.distance import JaroWinkler
+        for group in by_type.values():
+            if len(group) < 2:
+                continue
 
-        for entity in scoreable:
-            # Batch extract top matches for this entity's name
-            matches = process.extract(
-                entity.name,
-                names,
-                scorer=fuzz.WRatio,
-                limit=len(names),
-            )
+            # Use index-based lookup to handle same-name entities correctly
+            names = [e.name for e in group]
 
-            # Precompute transliterated form for this entity
-            translit_entity = transliterate_name(entity.name)
-
-            for _candidate_name, score_raw, idx in matches:
-                candidate = scoreable[idx]
-
-                # Skip self
-                if candidate.id == entity.id:
-                    continue
-
-                # Dedup pair ordering (avoid A→B and B→A)
-                pair_key = frozenset([entity.id, candidate.id])
-                if pair_key in seen:
-                    continue
-
-                # WRatio returns 0-100, normalize to 0.0-1.0
-                score = score_raw / 100.0
-
-                # Tier 2: transliteration re-score (always compute for cross-script matching)
-                translit_candidate = transliterate_name(candidate.name)
-                translit_score = max(
-                    JaroWinkler.normalized_similarity(translit_entity, candidate.name.lower()),
-                    JaroWinkler.normalized_similarity(entity.name.lower(), translit_candidate),
-                    JaroWinkler.normalized_similarity(translit_entity, translit_candidate),
+            for entity in group:
+                # Batch extract top matches for this entity's name
+                matches = process.extract(
+                    entity.name,
+                    names,
+                    scorer=fuzz.WRatio,
+                    limit=len(names),
                 )
 
-                best_score = max(score, translit_score)
+                # Precompute transliterated form for this entity
+                translit_entity = transliterate_name(entity.name)
 
-                if score >= self.threshold:
-                    seen.add(pair_key)
-                    pairs.append(
-                        DuplicatePair(
-                            entity_a_id=entity.id,
-                            entity_b_id=candidate.id,
-                            entity_a_name=entity.name,
-                            entity_b_name=candidate.name,
-                            score=score,
-                            method="fuzzy",
-                        )
+                for _candidate_name, score_raw, idx in matches:
+                    candidate = group[idx]
+
+                    # Skip self
+                    if candidate.id == entity.id:
+                        continue
+
+                    # Dedup pair ordering (avoid A→B and B→A)
+                    pair_key = frozenset([entity.id, candidate.id])
+                    if pair_key in seen:
+                        continue
+
+                    # WRatio returns 0-100, normalize to 0.0-1.0
+                    score = score_raw / 100.0
+
+                    # Tier 2: transliteration re-score (always compute for cross-script matching)
+                    translit_candidate = transliterate_name(candidate.name)
+                    translit_score = max(
+                        JaroWinkler.normalized_similarity(translit_entity, candidate.name.lower()),
+                        JaroWinkler.normalized_similarity(entity.name.lower(), translit_candidate),
+                        JaroWinkler.normalized_similarity(translit_entity, translit_candidate),
                     )
-                elif translit_score >= self.threshold:
-                    # Transliteration gives a high score (cross-script match)
-                    seen.add(pair_key)
-                    pairs.append(
-                        DuplicatePair(
-                            entity_a_id=entity.id,
-                            entity_b_id=candidate.id,
-                            entity_a_name=entity.name,
-                            entity_b_name=candidate.name,
-                            score=translit_score,
-                            method="transliteration",
-                        )
-                    )
-                elif best_score >= self.ambiguous_low:
-                    # Tier 3: LLM fallback for ambiguous band
-                    seen.add(pair_key)  # mark as seen regardless of LLM result
-                    is_same = await self._llm_check(entity, candidate)
-                    if is_same:
+
+                    best_score = max(score, translit_score)
+
+                    if score >= self.threshold:
+                        seen.add(pair_key)
                         pairs.append(
                             DuplicatePair(
                                 entity_a_id=entity.id,
                                 entity_b_id=candidate.id,
                                 entity_a_name=entity.name,
                                 entity_b_name=candidate.name,
-                                score=best_score,
-                                method="llm",
+                                score=score,
+                                method="fuzzy",
                             )
                         )
+                    elif translit_score >= self.threshold:
+                        # Transliteration gives a high score (cross-script match)
+                        seen.add(pair_key)
+                        pairs.append(
+                            DuplicatePair(
+                                entity_a_id=entity.id,
+                                entity_b_id=candidate.id,
+                                entity_a_name=entity.name,
+                                entity_b_name=candidate.name,
+                                score=translit_score,
+                                method="transliteration",
+                            )
+                        )
+                    elif best_score >= self.ambiguous_low:
+                        # Tier 3: LLM fallback for ambiguous band
+                        seen.add(pair_key)  # mark as seen regardless of LLM result
+                        is_same = await self._llm_check(entity, candidate)
+                        if is_same:
+                            pairs.append(
+                                DuplicatePair(
+                                    entity_a_id=entity.id,
+                                    entity_b_id=candidate.id,
+                                    entity_a_name=entity.name,
+                                    entity_b_name=candidate.name,
+                                    score=best_score,
+                                    method="llm",
+                                )
+                            )
 
         return pairs
 

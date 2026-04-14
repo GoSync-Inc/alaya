@@ -181,7 +181,7 @@ async def test_engine_result_has_counters():
 
 @pytest.mark.asyncio
 async def test_engine_dedup_called():
-    """Engine calls deduplicator when entities are found."""
+    """Engine calls shortlist dedup when entities are found."""
     from alayaos_core.extraction.integrator.engine import IntegratorEngine
 
     ws_id = uuid.uuid4()
@@ -211,9 +211,6 @@ async def test_engine_dedup_called():
     entity_cache = AsyncMock()
     entity_cache.warm = AsyncMock()
 
-    dedup_mock = AsyncMock()
-    dedup_mock.find_duplicates = AsyncMock(return_value=[])
-
     engine = IntegratorEngine(
         llm=MagicMock(),
         entity_repo=entity_repo,
@@ -223,13 +220,14 @@ async def test_engine_dedup_called():
         redis=redis_mock,
         settings=_make_settings(),
     )
-    # Inject deduplicator mock
-    engine._deduplicator = dedup_mock
+    # Inject shortlist dedup mock (Sprint S6: engine now uses _shortlist_dedup, not find_duplicates)
+    shortlist_dedup_mock = AsyncMock(return_value=[])
+    engine._shortlist_dedup = shortlist_dedup_mock
 
     session = AsyncMock()
     await engine.run(ws_id, session)
 
-    dedup_mock.find_duplicates.assert_called_once()
+    shortlist_dedup_mock.assert_called_once()
 
 
 @pytest.mark.asyncio

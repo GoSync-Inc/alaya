@@ -1,6 +1,14 @@
-"""EntityDeduplicator — 3-tier entity deduplication using rapidfuzz + transliteration + LLM."""
+"""EntityDeduplicator — 3-tier entity deduplication using rapidfuzz + transliteration + LLM.
+
+Sprint S6 adds a vector-shortlist pass: instead of comparing every O(n²) pair with the LLM,
+we first embed entity names in Python (fast, no DB), group by entity_type, and retain only the
+top-K nearest neighbours per entity above a cosine-similarity threshold.  Only those pairs go
+to the (slow) LLM verifier.
+"""
 
 from __future__ import annotations
+
+import uuid
 
 import structlog
 
@@ -11,6 +19,89 @@ log = structlog.get_logger()
 
 # Minimum name length for fuzzy matching (short names are too unreliable)
 _MIN_NAME_LENGTH = 4
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Compute cosine similarity between two vectors (assumed pre-normalised or normalised here)."""
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(x * x for x in b) ** 0.5
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def shortlist_candidates(
+    entities: list[EntityWithContext],
+    embeddings: dict[uuid.UUID, list[float]],
+    *,
+    k: int = 5,
+    threshold: float = 0.85,
+) -> list[tuple[EntityWithContext, EntityWithContext]]:
+    """Build a shortlist of candidate duplicate pairs via vector similarity.
+
+    Groups entities by entity_type (slug), then for each entity finds the top-K
+    nearest neighbours with cosine similarity >= threshold within the same type.
+    Returns deduplicated pairs (A, B) where A.id < B.id (string ordering of UUIDs).
+
+    This is a pure Python operation — no DB access, no LLM calls.
+
+    Args:
+        entities:   Entities to compare.
+        embeddings: Pre-computed embedding for each entity id.
+        k:          Maximum candidates per entity.
+        threshold:  Minimum cosine similarity to include a pair.
+
+    Returns:
+        List of (entity_a, entity_b) pairs, deduplicated.
+    """
+    if len(entities) < 2:
+        return []
+
+    # Group by entity_type (slug acts as the discriminator; entity_type_id stored in properties
+    # as string if available, but we use slug here to match EntityWithContext schema).
+    by_type: dict[str, list[EntityWithContext]] = {}
+    for entity in entities:
+        by_type.setdefault(entity.entity_type, []).append(entity)
+
+    seen: set[frozenset[uuid.UUID]] = set()
+    pairs: list[tuple[EntityWithContext, EntityWithContext]] = []
+
+    for group in by_type.values():
+        if len(group) < 2:
+            continue
+
+        for entity in group:
+            emb_a = embeddings.get(entity.id)
+            if emb_a is None:
+                continue
+
+            # Compute cosine similarity against all other members of this type
+            scored: list[tuple[float, EntityWithContext]] = []
+            for candidate in group:
+                if candidate.id == entity.id:
+                    continue
+                emb_b = embeddings.get(candidate.id)
+                if emb_b is None:
+                    continue
+                sim = _cosine_similarity(emb_a, emb_b)
+                if sim >= threshold:
+                    scored.append((sim, candidate))
+
+            # Keep only the top-K by similarity
+            scored.sort(key=lambda t: t[0], reverse=True)
+            for _, candidate in scored[:k]:
+                pair_key: frozenset[uuid.UUID] = frozenset([entity.id, candidate.id])
+                if pair_key in seen:
+                    continue
+                seen.add(pair_key)
+                # Canonical order: smaller UUID string first
+                if str(entity.id) < str(candidate.id):
+                    pairs.append((entity, candidate))
+                else:
+                    pairs.append((candidate, entity))
+
+    return pairs
 
 
 class EntityDeduplicator:
@@ -125,6 +216,13 @@ class EntityDeduplicator:
                         )
 
         return pairs
+
+    async def llm_check_pair(self, entity_a: EntityWithContext, entity_b: EntityWithContext) -> bool:
+        """Public API: ask LLM whether two entities represent the same real-world entity.
+
+        Used by IntegratorEngine._shortlist_dedup to verify shortlisted pairs.
+        """
+        return await self._llm_check(entity_a, entity_b)
 
     async def _llm_check(self, entity_a: EntityWithContext, entity_b: EntityWithContext) -> bool:
         """Ask LLM whether two entities represent the same real-world entity."""

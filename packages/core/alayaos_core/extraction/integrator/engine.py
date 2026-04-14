@@ -9,9 +9,10 @@ import uuid
 import structlog
 from sqlalchemy import text
 
-from alayaos_core.extraction.integrator.dedup import EntityDeduplicator
+from alayaos_core.extraction.integrator.dedup import EntityDeduplicator, shortlist_candidates
 from alayaos_core.extraction.integrator.enricher import EntityEnricher
 from alayaos_core.extraction.integrator.schemas import (
+    DuplicatePair,
     EnrichmentAction,
     EntityWithContext,
     IntegratorRunResult,
@@ -65,6 +66,13 @@ class IntegratorEngine:
             llm=llm,
             batch_size=settings.INTEGRATOR_BATCH_SIZE,
         )
+
+        # Shortlist config (Sprint S6: vector-similarity pre-filter before LLM verify)
+        self._shortlist_k: int = getattr(settings, "INTEGRATOR_DEDUP_SHORTLIST_K", 5)
+        self._shortlist_threshold: float = getattr(settings, "INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD", 0.85)
+
+        # Embedding service injected in tests; created lazily in production
+        self._embedding_service = None
 
     async def run(self, workspace_id: uuid.UUID, session) -> IntegratorRunResult:
         """Execute Integrator pass with workspace-level lock."""
@@ -159,9 +167,9 @@ class IntegratorEngine:
         claims_updated = 0
         noise_removed = 0
 
-        # Step 5: Deduplicate
+        # Step 5: Deduplicate via vector shortlist + LLM verify
         if entities_with_context:
-            dup_pairs = await self._deduplicator.find_duplicates(entities_with_context)
+            dup_pairs = await self._shortlist_dedup(entities_with_context)
             entities_deduplicated = await self._merge_duplicates(dup_pairs, workspace_id, session)
             log.info(
                 "integrator_dedup",
@@ -204,6 +212,77 @@ class IntegratorEngine:
             noise_removed=noise_removed,
             duration_ms=duration_ms,
         )
+
+    def _get_embedding_service(self):
+        """Return the embedding service, creating a FastEmbedService lazily if not injected."""
+        if self._embedding_service is None:
+            from alayaos_core.services.embedding import FastEmbedService
+
+            model = getattr(self.settings, "EMBEDDING_MODEL", "intfloat/multilingual-e5-large")
+            dimensions = getattr(self.settings, "EMBEDDING_DIMENSIONS", 1024)
+            self._embedding_service = FastEmbedService(model_name=model, dimensions=dimensions)
+        return self._embedding_service
+
+    async def _shortlist_dedup(self, entities: list[EntityWithContext]) -> list[DuplicatePair]:
+        """Vector shortlist → LLM-verify dedup (replaces O(n²) rapidfuzz loop).
+
+        1. Embed all entity names via embedding service (fast, CPU-only, no DB).
+        2. Use shortlist_candidates to find top-K similar pairs per entity type.
+        3. LLM-verify only the shortlisted pairs.
+
+        This reduces LLM calls from O(n²) to at most n * K.
+        """
+        if len(entities) < 2:
+            return []
+
+        # 1. Embed entity names
+        embed_svc = self._get_embedding_service()
+        names = [e.name for e in entities]
+        try:
+            vectors = await embed_svc.embed_texts(names)
+        except Exception:
+            log.warning(
+                "integrator_shortlist_embed_failed",
+                entity_count=len(entities),
+                msg="falling back to rapidfuzz dedup",
+            )
+            # Graceful fallback to the existing rapidfuzz-based deduplicator
+            return await self._deduplicator.find_duplicates(entities)
+
+        embeddings: dict[uuid.UUID, list[float]] = {e.id: v for e, v in zip(entities, vectors, strict=False)}
+
+        # 2. Build shortlist of candidate pairs via cosine similarity
+        candidate_pairs = shortlist_candidates(
+            entities,
+            embeddings,
+            k=self._shortlist_k,
+            threshold=self._shortlist_threshold,
+        )
+
+        log.info(
+            "integrator_shortlist_built",
+            entity_count=len(entities),
+            candidate_pairs=len(candidate_pairs),
+            k=self._shortlist_k,
+            threshold=self._shortlist_threshold,
+        )
+
+        # 3. LLM-verify each shortlisted pair
+        dup_pairs: list[DuplicatePair] = []
+        for entity_a, entity_b in candidate_pairs:
+            is_same = await self._deduplicator.llm_check_pair(entity_a, entity_b)
+            if is_same:
+                dup_pairs.append(
+                    DuplicatePair(
+                        entity_a_id=entity_a.id,
+                        entity_b_id=entity_b.id,
+                        entity_a_name=entity_a.name,
+                        entity_b_name=entity_b.name,
+                        score=self._shortlist_threshold,
+                        method="vector_shortlist",
+                    )
+                )
+        return dup_pairs
 
     async def _merge_duplicates(self, pairs, workspace_id: uuid.UUID, session) -> int:
         """Merge duplicate entity pairs: keep entity_a, soft-delete entity_b, merge aliases.

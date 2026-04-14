@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
@@ -114,3 +115,25 @@ class ExtractionRunRepository(BaseRepository):
         run.raw_extraction = None
         await self.session.flush()
         return run
+
+    async def mark_failed(
+        self,
+        run_id: uuid.UUID,
+        error_message: str,
+        error_detail: dict | None = None,
+    ) -> None:
+        """Transition run to failed status with error info.
+
+        Idempotent: no-op if the run is already in a terminal state (completed or failed).
+        """
+        run = await self.get_by_id(run_id)
+        if run is None:
+            return
+        if run.status in ("completed", "failed"):
+            return
+        run.status = "failed"
+        run.error_message = error_message
+        if error_detail is not None:
+            run.error_detail = error_detail
+        run.completed_at = datetime.now(UTC)
+        await self.session.flush()

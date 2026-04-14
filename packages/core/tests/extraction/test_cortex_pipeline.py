@@ -104,7 +104,7 @@ async def test_cortex_pipeline_creates_chunks_and_traces() -> None:
             patch("alayaos_core.worker.tasks.Settings", return_value=_mock_settings(threshold=0.1)),
             patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
             patch("alayaos_core.repositories.event.EventRepository", return_value=mock_event_repo),
-            patch("alayaos_core.repositories.extraction_run.ExtractionRunRepository", return_value=mock_run_repo),
+            patch("alayaos_core.worker.tasks.ExtractionRunRepository", return_value=mock_run_repo),
             patch("alayaos_core.repositories.chunk.ChunkRepository", return_value=mock_chunk_repo),
             patch("alayaos_core.repositories.pipeline_trace.PipelineTraceRepository", return_value=mock_trace_repo),
         ):
@@ -159,7 +159,7 @@ async def test_cortex_pipeline_crystal_selection_all_skipped_at_high_threshold()
             patch("alayaos_core.worker.tasks.Settings", return_value=_mock_settings(threshold=0.9)),
             patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
             patch("alayaos_core.repositories.event.EventRepository", return_value=mock_event_repo),
-            patch("alayaos_core.repositories.extraction_run.ExtractionRunRepository", return_value=mock_run_repo),
+            patch("alayaos_core.worker.tasks.ExtractionRunRepository", return_value=mock_run_repo),
             patch("alayaos_core.repositories.chunk.ChunkRepository", return_value=mock_chunk_repo),
             patch("alayaos_core.repositories.pipeline_trace.PipelineTraceRepository", return_value=mock_trace_repo),
         ):
@@ -239,7 +239,7 @@ async def test_cortex_pipeline_empty_event_no_crystal_chunks() -> None:
             patch("alayaos_core.worker.tasks.Settings", return_value=_mock_settings(threshold=0.9)),
             patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
             patch("alayaos_core.repositories.event.EventRepository", return_value=mock_event_repo),
-            patch("alayaos_core.repositories.extraction_run.ExtractionRunRepository", return_value=mock_run_repo),
+            patch("alayaos_core.worker.tasks.ExtractionRunRepository", return_value=mock_run_repo),
             patch("alayaos_core.repositories.chunk.ChunkRepository", return_value=mock_chunk_repo),
             patch("alayaos_core.repositories.pipeline_trace.PipelineTraceRepository", return_value=mock_trace_repo),
         ):
@@ -282,7 +282,7 @@ async def test_cortex_pipeline_skips_when_event_not_found() -> None:
             patch("alayaos_core.worker.tasks.Settings", return_value=_mock_settings()),
             patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
             patch("alayaos_core.repositories.event.EventRepository", return_value=mock_event_repo),
-            patch("alayaos_core.repositories.extraction_run.ExtractionRunRepository", return_value=mock_run_repo),
+            patch("alayaos_core.worker.tasks.ExtractionRunRepository", return_value=mock_run_repo),
             patch("alayaos_core.repositories.chunk.ChunkRepository"),
             patch("alayaos_core.repositories.pipeline_trace.PipelineTraceRepository"),
         ):

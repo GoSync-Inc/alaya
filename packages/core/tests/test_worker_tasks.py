@@ -197,6 +197,45 @@ async def test_job_cortex_marks_run_failed_on_exception():
 
 
 @pytest.mark.asyncio
+async def test_job_extract_marks_run_failed_on_exception():
+    """job_extract (legacy non-Cortex path) catches exception from run_extraction, marks run as failed, then re-raises."""
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+
+    extraction_error = RuntimeError("legacy extractor exploded")
+
+    main_session = _make_mock_session()
+    mock_factory = MagicMock(return_value=main_session)
+    mock_mark_failed = AsyncMock()
+
+    with (
+        patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
+        patch("alayaos_core.worker.tasks._set_workspace_context", new=AsyncMock()),
+        patch("alayaos_core.worker.tasks._mark_extraction_run_failed", mock_mark_failed),
+        patch("alayaos_core.extraction.pipeline.run_extraction", side_effect=extraction_error),
+        patch("alayaos_core.worker.tasks.Settings") as mock_settings_cls,
+    ):
+        mock_settings = MagicMock()
+        mock_settings.FEATURE_FLAG_USE_CORTEX = False
+        mock_settings.ANTHROPIC_API_KEY.get_secret_value.return_value = ""
+        mock_settings_cls.return_value = mock_settings
+
+        from alayaos_core.worker.tasks import job_extract
+
+        with pytest.raises(RuntimeError):
+            await job_extract.original_func(str(event_id), str(run_id), str(ws_id))
+
+    mock_mark_failed.assert_awaited_once()
+    call_kwargs = mock_mark_failed.call_args
+    assert call_kwargs.kwargs["run_id"] == run_id
+    assert call_kwargs.kwargs["error_message"] is not None
+    error_detail = call_kwargs.kwargs["error_detail"]
+    assert error_detail["stage"] == "extract"
+    assert error_detail["type"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
 async def test_mark_failed_persists_status_and_error_fields():
     """mark_failed transitions run to failed with all expected fields set."""
     from unittest.mock import AsyncMock, MagicMock

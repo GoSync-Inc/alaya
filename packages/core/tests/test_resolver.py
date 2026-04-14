@@ -449,3 +449,29 @@ async def test_resolve_entity_type_fallback() -> None:
             result = await resolve_entity_type_id("unknown_type", ws_id, mock_session)
 
     assert result == topic_id
+
+
+# ─── Regression: EntityMatchResult long reasoning ─────────────────────────────
+
+
+def test_entity_match_result_accepts_real_llm_reasoning() -> None:
+    """Regression: LLM-generated reasoning > 200 chars must not raise ValidationError.
+
+    Captured from worker logs where job_write aborted with Pydantic ValidationError
+    because real Sonnet output exceeded the former max_length=200 limit.
+    """
+    long_reasoning = (
+        'Entity A is "\u041e\u0440\u0433\u0430\u043d\u0438\u0437\u0430\u0446\u0438\u044f" which refers to an organizational body, '
+        "while Entity B is described as a department or subdivision within the same parent structure. "
+        "Both entities refer to the same organizational unit and should be merged rather than treated "
+        "as separate records. The context confirms they belong to the same business entity."
+    )
+    assert len(long_reasoning) > 200, "Fixture must exceed 200 chars to be a valid regression"
+
+    payload = {
+        "is_same_entity": True,
+        "reasoning": long_reasoning,
+    }
+    result = EntityMatchResult.model_validate(payload)
+    assert result.is_same_entity is True
+    assert result.reasoning == long_reasoning

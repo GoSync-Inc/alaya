@@ -48,7 +48,7 @@ class EntityMatchResult(BaseModel):
     """Used by the Integrator LLM for dedup disambiguation."""
 
     is_same_entity: bool
-    reasoning: str = Field(default="", max_length=500)
+    reasoning: str = Field(default="", max_length=1000)
 
 
 class IntegratorRunResult(BaseModel):

@@ -124,7 +124,10 @@ class ExtractionRunRepository(BaseRepository):
     ) -> None:
         """Transition run to failed status with error info.
 
-        Idempotent: no-op if the run is already in a terminal state (completed or failed).
+        Idempotent only for terminal states (completed, failed) — calling mark_failed on
+        a run that has already succeeded or permanently failed is safe and has no effect.
+        Intermediate states (extracting, cortex_complete) can legitimately be marked failed
+        if a task crashes mid-flight; this is intentional and correct.
         """
         run = await self.get_by_id(run_id)
         if run is None:

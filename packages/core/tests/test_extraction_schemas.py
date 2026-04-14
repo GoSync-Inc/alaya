@@ -1,8 +1,14 @@
 """Tests for extraction Pydantic schemas."""
 
+import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
+from alayaos_core.extraction.integrator.schemas import (
+    EntityMatchResult as IntegratorEntityMatchResult,
+)
 from alayaos_core.extraction.schemas import (
     EntityMatchResult,
     ExtractedClaim,
@@ -10,6 +16,11 @@ from alayaos_core.extraction.schemas import (
     ExtractedRelation,
     ExtractionResult,
 )
+
+# ResolverEntityMatchResult is the same class as EntityMatchResult (resolver-side alias for parametrize clarity)
+ResolverEntityMatchResult = EntityMatchResult
+
+FIXTURES_DIR = Path(__file__).parent.parent.parent.parent / "tests" / "fixtures"
 
 # ─── ExtractedEntity ──────────────────────────────────────────────────────────
 
@@ -121,6 +132,33 @@ def test_extracted_relation_valid() -> None:
 def test_entity_match_result_valid() -> None:
     r = EntityMatchResult(is_same_entity=True, reasoning="Same person with different name")
     assert r.is_same_entity is True
+
+
+@pytest.mark.parametrize(
+    "schema_cls",
+    [
+        pytest.param(ResolverEntityMatchResult, id="resolver"),
+        pytest.param(IntegratorEntityMatchResult, id="integrator"),
+    ],
+)
+def test_entity_match_result_accepts_real_llm_reasoning(
+    schema_cls: type[EntityMatchResult] | type[IntegratorEntityMatchResult],
+) -> None:
+    """Regression: LLM-generated reasoning > 200 chars must not raise ValidationError.
+
+    Captured from worker logs where job_write aborted with Pydantic ValidationError
+    because real Sonnet output exceeded the former max_length=200 limit.
+    Covers both EntityMatchResult definitions (resolver-side and integrator-side).
+    """
+    fixture_path = FIXTURES_DIR / "llm_responses" / "entity_match_long_reasoning.json"
+    with fixture_path.open() as f:
+        payload = json.load(f)
+
+    assert len(payload["reasoning"]) > 200, "Fixture must exceed 200 chars to be a valid regression"
+
+    result = schema_cls.model_validate(payload)
+    assert result.is_same_entity is True
+    assert result.reasoning == payload["reasoning"]
 
 
 def test_confidence_bounds() -> None:

@@ -66,6 +66,11 @@ class FakeLLMAdapter:
             "answerable": True,
             "citations": [],
         },
+        # EntityMatchResult has a required bool field with no default — must be explicit
+        "EntityMatchResult": {
+            "is_same_entity": True,
+            "reasoning": "names match (fake adapter)",
+        },
     }
 
     @classmethod

@@ -66,11 +66,10 @@ class Settings(BaseSettings):
     INTEGRATOR_DEDUP_THRESHOLD: float = 0.85
     INTEGRATOR_DEDUP_AMBIGUOUS_LOW: float = 0.70
     # Vector shortlist: maximum nearest neighbours to retrieve per entity before LLM verification.
-    # Raise INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD to ~0.9 in production to keep LLM calls < 100 pairs
-    # (see PR description for cost math).
     INTEGRATOR_DEDUP_SHORTLIST_K: int = 5
     # Minimum cosine similarity to include a candidate in the LLM-verify shortlist.
-    INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD: float = 0.85
+    # At 0.9 the expected pair count stays < 100 for a 139-entity workspace (< 5 min budget).
+    INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD: float = 0.9
 
     # Embedding
     EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large"

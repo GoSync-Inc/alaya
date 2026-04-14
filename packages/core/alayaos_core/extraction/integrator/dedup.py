@@ -8,6 +8,7 @@ to the (slow) LLM verifier.
 
 from __future__ import annotations
 
+import math
 import uuid
 
 import structlog
@@ -22,13 +23,22 @@ _MIN_NAME_LENGTH = 4
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
-    """Compute cosine similarity between two vectors (assumed pre-normalised or normalised here)."""
-    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    """Compute cosine similarity between two vectors (assumed pre-normalised or normalised here).
+
+    Returns 0.0 on dimension mismatch or NaN result rather than raising or silently truncating.
+    """
+    if len(a) != len(b):
+        log.warning("cosine_similarity_dimension_mismatch", len_a=len(a), len_b=len(b))
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     norm_a = sum(x * x for x in a) ** 0.5
     norm_b = sum(x * x for x in b) ** 0.5
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
-    return dot / (norm_a * norm_b)
+    result = dot / (norm_a * norm_b)
+    if math.isnan(result):
+        return 0.0
+    return result
 
 
 def shortlist_candidates(
@@ -55,6 +65,11 @@ def shortlist_candidates(
     Returns:
         List of (entity_a, entity_b) pairs, deduplicated.
     """
+    if len(entities) < 2:
+        return []
+
+    # Filter out entities with names too short to be reliable (same guard as EntityDeduplicator)
+    entities = [e for e in entities if len(e.name) >= _MIN_NAME_LENGTH]
     if len(entities) < 2:
         return []
 

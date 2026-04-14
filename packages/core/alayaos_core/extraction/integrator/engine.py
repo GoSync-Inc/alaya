@@ -235,6 +235,17 @@ class IntegratorEngine:
         if len(entities) < 2:
             return []
 
+        # Skip entities with unresolvable entity_type — "same-type only" guarantee requires a
+        # real type slug. Grouping unknowns together would pair unrelated entities.
+        resolved = [e for e in entities if e.entity_type != "unknown"]
+        skipped = len(entities) - len(resolved)
+        if skipped:
+            log.debug("integrator_shortlist_skip_typeless", skipped=skipped)
+        entities = resolved
+
+        if len(entities) < 2:
+            return []
+
         # 1. Embed entity names
         embed_svc = self._get_embedding_service()
         names = [e.name for e in entities]
@@ -249,7 +260,15 @@ class IntegratorEngine:
             # Graceful fallback to the existing rapidfuzz-based deduplicator
             return await self._deduplicator.find_duplicates(entities)
 
-        embeddings: dict[uuid.UUID, list[float]] = {e.id: v for e, v in zip(entities, vectors, strict=False)}
+        if len(vectors) != len(entities):
+            log.warning(
+                "integrator_shortlist_embed_length_mismatch",
+                entity_count=len(entities),
+                vector_count=len(vectors),
+                msg="falling back to rapidfuzz dedup",
+            )
+            return await self._deduplicator.find_duplicates(entities)
+        embeddings: dict[uuid.UUID, list[float]] = {e.id: v for e, v in zip(entities, vectors, strict=True)}
 
         # 2. Build shortlist of candidate pairs via cosine similarity
         candidate_pairs = shortlist_candidates(

@@ -150,7 +150,7 @@ def summarize(results: list[dict], usage, threshold: float) -> dict:
     print(f"  Verify changed scores:              {verify_changed}")
     print(f"  Tokens: {usage.tokens_in} in / {usage.tokens_out} out / {usage.tokens_cached} cached")
     print(f"  Cost:   ${usage.cost_usd:.4f}")
-    print(f"\n  Primary domain distribution (by chunk):")
+    print("\n  Primary domain distribution (by chunk):")
     for d, n in primary_dist.most_common():
         print(f"    {d:12} {n}")
     print(f"{'=' * 60}\n")

@@ -1,0 +1,1456 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alaya — Operational Memory &amp; Workflow Engine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Adamina&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --cream: #f7f3ee;
+    --cream-soft: #fbf8f3;
+    --mist: #e8e4df;
+    --blush: #f5d5c8;
+    --coral: #e8896f;
+    --coral-dark: #d47660;
+    --sky: #b8d4e3;
+    --teal: #7aaba0;
+    --slate: #2d3436;
+    --slate-light: #636e72;
+    --white: #ffffff;
+    --font-serif: "Adamina", Georgia, "Times New Roman", serif;
+    --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; scroll-behavior: smooth; }
+
+  body {
+    background: var(--cream);
+    color: var(--slate);
+    font-family: var(--font-mono);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: var(--mist);
+    color: var(--slate);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  em { font-style: italic; }
+  a { color: var(--coral-dark); text-decoration: none; border-bottom: 1px solid var(--blush); transition: all 0.15s ease; }
+  a:hover { color: var(--coral); border-bottom-color: var(--coral); }
+
+  .container {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 0 40px;
+  }
+
+  /* ─── Hero ───────────────────────────────────────────── */
+  .hero {
+    border-bottom: 1px solid var(--mist);
+    padding: 120px 40px 104px;
+    background: linear-gradient(180deg, var(--cream) 0%, var(--cream-soft) 100%);
+  }
+  .hero-inner { max-width: 1040px; margin: 0 auto; }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin-bottom: 32px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 24px;
+    height: 1px;
+    background: var(--coral);
+    display: inline-block;
+  }
+
+  .hero h1 {
+    font-family: var(--font-serif);
+    font-size: clamp(44px, 6.5vw, 82px);
+    line-height: 1.02;
+    letter-spacing: -0.015em;
+    color: var(--slate);
+    margin-bottom: 28px;
+    max-width: 18ch;
+    font-weight: 400;
+  }
+  .hero h1 em { color: var(--coral-dark); }
+
+  .hero .formula {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: clamp(20px, 2.4vw, 26px);
+    line-height: 1.4;
+    color: var(--coral-dark);
+    margin-bottom: 36px;
+    padding-left: 20px;
+    border-left: 2px solid var(--coral);
+    max-width: 50ch;
+  }
+
+  .hero .lede {
+    font-family: var(--font-serif);
+    font-size: clamp(18px, 1.9vw, 21px);
+    line-height: 1.6;
+    color: var(--slate);
+    max-width: 62ch;
+    margin-bottom: 52px;
+  }
+  .hero .lede strong {
+    color: var(--slate);
+    font-weight: 400;
+    border-bottom: 2px solid var(--blush);
+    padding-bottom: 1px;
+  }
+
+  .hero .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 28px;
+    font-size: 11px;
+    color: var(--slate-light);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .hero .meta span + span::before {
+    content: "";
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--mist);
+    margin-right: 18px;
+    display: inline-block;
+    vertical-align: middle;
+  }
+
+  /* ─── TOC ────────────────────────────────────────────── */
+  .toc {
+    padding: 48px 40px;
+    border-bottom: 1px solid var(--mist);
+    background: var(--cream);
+  }
+  .toc-inner {
+    max-width: 1040px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px 32px;
+  }
+  .toc a {
+    display: flex;
+    gap: 14px;
+    padding: 10px 0;
+    font-size: 13px;
+    color: var(--slate);
+    border: none;
+  }
+  .toc a:hover { color: var(--coral-dark); }
+  .toc a .num {
+    color: var(--coral);
+    font-weight: 500;
+    min-width: 24px;
+  }
+
+  /* ─── Section ────────────────────────────────────────── */
+  .section {
+    padding: 104px 0;
+    border-bottom: 1px solid var(--mist);
+  }
+  .section:last-of-type { border-bottom: none; }
+
+  .section-num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    color: var(--coral);
+    text-transform: uppercase;
+    margin-bottom: 24px;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .section-num::before {
+    content: "";
+    width: 24px;
+    height: 1px;
+    background: var(--coral);
+  }
+
+  .section h2 {
+    font-family: var(--font-serif);
+    font-size: clamp(32px, 4vw, 48px);
+    line-height: 1.1;
+    color: var(--slate);
+    margin-bottom: 24px;
+    max-width: 26ch;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+  .section h2 em { color: var(--coral-dark); }
+
+  .section .intro {
+    font-family: var(--font-serif);
+    font-size: 19px;
+    line-height: 1.6;
+    color: var(--slate-light);
+    max-width: 66ch;
+    margin-bottom: 56px;
+  }
+
+  .section h3.block-title {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    color: var(--slate);
+    margin: 48px 0 24px;
+    font-weight: 400;
+  }
+
+  /* ─── Stats ──────────────────────────────────────────── */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    border: 1px solid var(--mist);
+    background: var(--mist);
+    margin-bottom: 48px;
+  }
+  .stat {
+    background: var(--cream-soft);
+    padding: 32px 28px;
+    text-align: left;
+  }
+  .stat .value {
+    font-family: var(--font-serif);
+    font-size: 44px;
+    line-height: 1;
+    color: var(--coral-dark);
+    margin-bottom: 12px;
+  }
+  .stat .label {
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--slate-light);
+    line-height: 1.5;
+  }
+
+  /* ─── Cards ──────────────────────────────────────────── */
+  .card {
+    background: var(--cream-soft);
+    border: 1px solid var(--mist);
+    padding: 28px 32px;
+  }
+  .card h4 {
+    font-family: var(--font-serif);
+    font-size: 20px;
+    line-height: 1.25;
+    color: var(--slate);
+    margin-bottom: 10px;
+    font-weight: 400;
+  }
+  .card p { font-size: 14px; line-height: 1.65; color: var(--slate-light); }
+  .card p + p { margin-top: 10px; }
+
+  .card-accent { border-left: 3px solid var(--coral); }
+  .card-warn   { border-left: 3px solid var(--coral-dark); }
+  .card-ok     { border-left: 3px solid var(--teal); }
+  .card-info   { border-left: 3px solid var(--sky); }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+
+  /* ─── Layer cards ────────────────────────────────────── */
+  .layers {
+    display: grid;
+    gap: 0;
+    border: 1px solid var(--mist);
+    background: var(--mist);
+  }
+  .layers > * + * { border-top: 1px solid var(--mist); }
+  .layer {
+    background: var(--cream-soft);
+    padding: 36px 40px;
+    display: grid;
+    grid-template-columns: 80px 1fr 200px;
+    align-items: start;
+    gap: 32px;
+    transition: background 0.2s ease;
+  }
+  .layer:hover { background: var(--white); }
+  .layer-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: 15px;
+    letter-spacing: 0.05em;
+  }
+  .layer-tag.l0 { background: var(--sky);    color: var(--slate); }
+  .layer-tag.l1 { background: var(--teal);   color: var(--white); }
+  .layer-tag.l2 { background: var(--coral);  color: var(--white); }
+  .layer-tag.l3 { background: var(--blush);  color: var(--slate); }
+  .layer-tag.lx { background: var(--slate);  color: var(--cream); }
+  .layer-body h3 {
+    font-family: var(--font-serif);
+    font-size: 24px;
+    line-height: 1.25;
+    color: var(--slate);
+    margin-bottom: 10px;
+    font-weight: 400;
+  }
+  .layer-body .desc { font-size: 14px; line-height: 1.65; color: var(--slate-light); max-width: 58ch; }
+  .layer-meta {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--slate-light);
+    text-align: right;
+    line-height: 1.9;
+    padding-top: 4px;
+  }
+  .layer-meta strong { color: var(--slate); font-weight: 500; }
+
+  /* ─── Pipeline ───────────────────────────────────────── */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    align-items: stretch;
+    margin-bottom: 32px;
+  }
+  .stage {
+    background: var(--cream-soft);
+    border: 1px solid var(--mist);
+    padding: 24px 22px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .stage .model {
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin-bottom: 12px;
+    font-weight: 500;
+  }
+  .stage h4 {
+    font-family: var(--font-serif);
+    font-size: 20px;
+    color: var(--slate);
+    margin-bottom: 10px;
+    font-weight: 400;
+  }
+  .stage p { font-size: 13px; line-height: 1.6; color: var(--slate-light); margin-bottom: 14px; flex-grow: 1; }
+  .stage .output {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--slate);
+    padding-top: 12px;
+    border-top: 1px solid var(--mist);
+  }
+  .stage .output strong { color: var(--coral-dark); font-weight: 500; }
+  .stage::after {
+    content: "→";
+    position: absolute;
+    right: -14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--coral);
+    font-size: 18px;
+    z-index: 2;
+    background: var(--cream);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .stage:last-child::after { display: none; }
+
+  /* ─── Diagram (ascii) ────────────────────────────────── */
+  .diagram {
+    background: var(--slate);
+    color: var(--cream);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.75;
+    padding: 28px 32px;
+    border-radius: 3px;
+    overflow-x: auto;
+    white-space: pre;
+    margin: 24px 0;
+  }
+  .diagram .hl { color: var(--coral); }
+  .diagram .soft { color: var(--slate-light); }
+  .diagram .ok { color: var(--teal); }
+
+  /* ─── Table ──────────────────────────────────────────── */
+  .table-wrap {
+    border: 1px solid var(--mist);
+    background: var(--cream-soft);
+    overflow-x: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    padding: 14px 20px;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--mist);
+  }
+  th {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--slate);
+    font-weight: 500;
+    background: var(--cream);
+  }
+  td { color: var(--slate-light); line-height: 1.6; }
+  td strong { color: var(--slate); font-weight: 500; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  /* ─── Pills ──────────────────────────────────────────── */
+  .pill {
+    display: inline-block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 999px;
+    margin-right: 4px;
+  }
+  .pill-coral { background: var(--coral); color: var(--white); }
+  .pill-teal  { background: var(--teal); color: var(--white); }
+  .pill-sky   { background: var(--sky); color: var(--slate); }
+  .pill-blush { background: var(--blush); color: var(--slate); }
+  .pill-mist  { background: var(--mist); color: var(--slate); }
+  .pill-slate { background: var(--slate); color: var(--cream); }
+
+  /* ─── Callout ────────────────────────────────────────── */
+  .callout {
+    margin-top: 48px;
+    padding: 32px 36px;
+    border: 1px solid var(--mist);
+    border-left: 3px solid var(--coral);
+    background: var(--cream-soft);
+    font-family: var(--font-serif);
+    font-size: 17px;
+    line-height: 1.6;
+    color: var(--slate);
+    max-width: 74ch;
+  }
+  .callout.warn { border-left-color: var(--coral-dark); }
+  .callout.ok   { border-left-color: var(--teal); }
+  .callout .tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--coral);
+    display: block;
+    margin-bottom: 10px;
+    font-weight: 500;
+  }
+  .callout.warn .tag { color: var(--coral-dark); }
+  .callout.ok .tag { color: var(--teal); }
+
+  /* ─── Progressive stack ──────────────────────────────── */
+  .stack {
+    display: grid;
+    gap: 8px;
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  .stack-row {
+    background: var(--cream-soft);
+    border: 1px solid var(--mist);
+    padding: 20px 28px;
+    display: grid;
+    grid-template-columns: 140px 1fr 140px;
+    align-items: center;
+    gap: 24px;
+  }
+  .stack-row .tier {
+    font-family: var(--font-serif);
+    font-size: 18px;
+    color: var(--slate);
+  }
+  .stack-row .tier small {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin-bottom: 4px;
+  }
+  .stack-row .desc { font-size: 13px; color: var(--slate-light); line-height: 1.55; }
+  .stack-row .budget {
+    text-align: right;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--slate-light);
+  }
+  .stack-row .budget strong { display: block; color: var(--slate); font-size: 20px; font-family: var(--font-serif); font-weight: 400; letter-spacing: 0.02em; margin-bottom: 2px; }
+  .stack-row:nth-child(1) { margin: 0 15%; background: var(--blush); }
+  .stack-row:nth-child(2) { margin: 0 10%; background: var(--cream-soft); }
+  .stack-row:nth-child(3) { margin: 0 5%;  background: var(--cream-soft); }
+  .stack-row:nth-child(4) { background: var(--cream-soft); }
+
+  /* ─── Timeline ───────────────────────────────────────── */
+  .timeline {
+    position: relative;
+    padding-left: 32px;
+  }
+  .timeline::before {
+    content: "";
+    position: absolute;
+    left: 6px;
+    top: 8px;
+    bottom: 8px;
+    width: 1px;
+    background: var(--mist);
+  }
+  .run {
+    position: relative;
+    padding: 18px 0 26px 0;
+  }
+  .run::before {
+    content: "";
+    position: absolute;
+    left: -32px;
+    top: 26px;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background: var(--cream);
+    border: 2px solid var(--mist);
+  }
+  .run.done::before   { background: var(--teal); border-color: var(--teal); }
+  .run.next::before   { background: var(--coral); border-color: var(--coral); box-shadow: 0 0 0 4px rgba(232,137,111,0.18); }
+  .run.future::before { background: var(--cream); border-color: var(--mist); }
+
+  .run-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .run-head h4 {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    color: var(--slate);
+    font-weight: 400;
+  }
+  .run-head .tag {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--slate-light);
+    padding: 2px 8px;
+    border: 1px solid var(--mist);
+    border-radius: 999px;
+  }
+  .run.done .run-head .tag { color: var(--teal); border-color: var(--teal); }
+  .run.next .run-head .tag { color: var(--coral); border-color: var(--coral); background: var(--blush); }
+  .run p { font-size: 14px; color: var(--slate-light); line-height: 1.65; max-width: 72ch; }
+
+  /* ─── Market map ─────────────────────────────────────── */
+  .market {
+    border: 1px solid var(--mist);
+    background: var(--cream-soft);
+  }
+  .market-row {
+    display: grid;
+    grid-template-columns: 200px 1fr 240px;
+    gap: 0;
+    border-bottom: 1px solid var(--mist);
+  }
+  .market-row:last-child { border-bottom: none; }
+  .market-row .cat {
+    padding: 20px 24px;
+    border-right: 1px solid var(--mist);
+    background: var(--cream);
+  }
+  .market-row .cat h5 {
+    font-family: var(--font-serif);
+    font-size: 17px;
+    color: var(--slate);
+    margin-bottom: 6px;
+    font-weight: 400;
+  }
+  .market-row .cat small {
+    font-size: 11px;
+    color: var(--slate-light);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .market-row .players {
+    padding: 20px 24px;
+    border-right: 1px solid var(--mist);
+    font-size: 13px;
+    color: var(--slate-light);
+    line-height: 1.75;
+  }
+  .market-row .players strong { color: var(--slate); font-weight: 500; }
+  .market-row .alaya {
+    padding: 20px 24px;
+    font-size: 13px;
+    color: var(--slate);
+    line-height: 1.65;
+    background: var(--blush);
+  }
+
+  /* ─── Split (three products) ─────────────────────────── */
+  .split {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+    border: 1px solid var(--mist);
+  }
+  .split-side {
+    padding: 32px 36px;
+    background: var(--cream-soft);
+  }
+  .split-side + .split-side { border-left: 1px solid var(--mist); }
+  .split-side h4 {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    color: var(--slate);
+    margin-bottom: 8px;
+    font-weight: 400;
+  }
+  .split-side .kind {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--coral);
+    margin-bottom: 14px;
+    font-weight: 500;
+  }
+  .split-side p { font-size: 14px; color: var(--slate-light); line-height: 1.65; margin-bottom: 12px; }
+  .split-side ul { list-style: none; padding: 0; margin-top: 12px; }
+  .split-side ul li {
+    font-size: 13px;
+    color: var(--slate);
+    line-height: 1.55;
+    padding: 6px 0 6px 18px;
+    position: relative;
+  }
+  .split-side ul li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 13px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--coral);
+  }
+
+  /* ─── Footer ─────────────────────────────────────────── */
+  .footer {
+    padding: 64px 40px 96px;
+    font-size: 12px;
+    color: var(--slate-light);
+    letter-spacing: 0.06em;
+    background: var(--cream);
+    border-top: 1px solid var(--mist);
+  }
+  .footer-inner {
+    max-width: 1040px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .footer-links { display: flex; gap: 20px; }
+
+  /* ─── Responsive ─────────────────────────────────────── */
+  @media (max-width: 900px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .pipeline { grid-template-columns: 1fr; gap: 24px; }
+    .stage::after { display: none; }
+    .grid-3, .grid-2, .grid-4 { grid-template-columns: 1fr; }
+    .toc-inner { grid-template-columns: repeat(2, 1fr); }
+    .stack-row { grid-template-columns: 1fr; gap: 10px; margin: 0 !important; }
+    .stack-row .budget { text-align: left; }
+    .market-row { grid-template-columns: 1fr; }
+    .market-row .cat, .market-row .players { border-right: none; border-bottom: 1px solid var(--mist); }
+    .split { grid-template-columns: 1fr; }
+    .split-side + .split-side { border-left: none; border-top: 1px solid var(--mist); }
+  }
+  @media (max-width: 640px) {
+    .hero { padding: 80px 24px 72px; }
+    .section { padding: 72px 0; }
+    .container { padding: 0 24px; }
+    .toc { padding: 32px 24px; }
+    .toc-inner { grid-template-columns: 1fr; }
+    .layer { grid-template-columns: 56px 1fr; gap: 20px; padding: 28px 24px; }
+    .layer-tag { width: 48px; height: 48px; font-size: 13px; }
+    .layer-meta { grid-column: 2 / 3; text-align: left; margin-top: 12px; padding-top: 0; }
+    .footer { padding: 40px 24px 56px; }
+    th, td { padding: 10px 14px; }
+    .stats { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══ HERO ═══════════════════════════════════════════════ -->
+<header class="hero">
+  <div class="hero-inner">
+    <div class="eyebrow">Alaya · Architecture Manifesto</div>
+    <h1>Operational&nbsp;memory для&nbsp;<em>любого</em>&nbsp;ИИ-агента.</h1>
+    <p class="formula">
+      «Из разговоров — в состояние.<br>Из состояния — в действия.»
+    </p>
+    <p class="lede">
+      Alaya непрерывно поглощает рабочие данные компании и превращает их в <strong>структурированное состояние мира</strong> с провенансом и темпоральностью. Поверх этого состояния — <strong>движок workflows</strong>: reminders, follow-ups, stale-detection. Любой агент через CLI, MCP или REST работает не с сырым шумом, а с <strong>уже собранной моделью</strong> и <strong>запланированными действиями</strong>.
+    </p>
+    <div class="meta">
+      <span>2026·04·14</span>
+      <span>Концепция v0.2</span>
+      <span>BSL 1.1 — Source Available</span>
+      <span>Python 3.13 · PostgreSQL · pgvector · TaskIQ</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ TOC ════════════════════════════════════════════════ -->
+<nav class="toc">
+  <div class="toc-inner">
+    <a href="#problem"><span class="num">01</span> Проблема</a>
+    <a href="#frame"><span class="num">02</span> Рамка: память + workflow</a>
+    <a href="#layers"><span class="num">03</span> Слои</a>
+    <a href="#pipeline"><span class="num">04</span> Pipeline извлечения</a>
+    <a href="#action"><span class="num">05</span> Action Loop</a>
+    <a href="#agents"><span class="num">06</span> Контракт с агентом</a>
+    <a href="#disclosure"><span class="num">07</span> Progressive disclosure</a>
+    <a href="#security"><span class="num">08</span> Безопасность</a>
+    <a href="#split"><span class="num">09</span> Продуктовая линия</a>
+    <a href="#market"><span class="num">10</span> Карта рынка</a>
+    <a href="#roadmap"><span class="num">11</span> Roadmap</a>
+    <a href="#know-how"><span class="num">12</span> Что здесь нашего</a>
+  </div>
+</nav>
+
+<main class="container">
+
+<!-- ═══ 01 PROBLEM ═════════════════════════════════════════ -->
+<section class="section" id="problem">
+  <div class="section-num">01 · Проблема</div>
+  <h2>ИИ-агент знает, что сказали. Не&nbsp;знает, <em>что&nbsp;осталось сделать</em>.</h2>
+  <p class="intro">
+    Решения теряются в истории чатов. Обещания не отслеживаются. Устаревшие факты маскируются под актуальные. Каждый агент собирает контекст руками и начинает каждую сессию с нуля. Попытки навести порядок через wiki проваливаются — стоимость поддержания растёт быстрее её ценности.
+  </p>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="value">∞</div>
+      <div class="label">сессий начинается<br>с пустого контекста</div>
+    </div>
+    <div class="stat">
+      <div class="value">12+</div>
+      <div class="label">SaaS-инструментов<br>в среднем стеке</div>
+    </div>
+    <div class="stat">
+      <div class="value">0</div>
+      <div class="label">обязательств<br>отслеживается автоматически</div>
+    </div>
+    <div class="stat">
+      <div class="value">~40%</div>
+      <div class="label">времени уходит<br>на поиск информации</div>
+    </div>
+  </div>
+
+  <div class="grid-3">
+    <div class="card card-warn">
+      <h4>Memory-only системы</h4>
+      <p>RAG достаёт чанки и забывает. Vector store ищет похожее. Mem0/Letta хранят факты. Но никто не отвечает на «что я обещал и кому, срок — завтра?».</p>
+    </div>
+    <div class="card card-warn">
+      <h4>Workflow-only системы</h4>
+      <p>Lindy, Zapier, Granola запускают действия. Но они не ведут <em>модель мира</em> — не отличают факт от гипотезы, не видят устаревания, не связывают новое с предыдущим.</p>
+    </div>
+    <div class="card card-warn">
+      <h4>Разрыв между ними</h4>
+      <p>Память без execution — аналитика. Execution без памяти — слепой cron. Alaya стоит ровно на этом шве: <em>изменение состояния → триггер действия</em>.</p>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <span class="tag">Корневая мысль</span>
+    Реальная ценность для компании — не «помню больше текста», а <em>«ничего важного не падает между стульями»</em>. Это требует трёх свойств одновременно: памяти с провенансом, темпоральной модели мира, и execution-слоя, запускающегося от изменений состояния.
+  </div>
+</section>
+
+<!-- ═══ 02 FRAME ═══════════════════════════════════════════ -->
+<section class="section" id="frame">
+  <div class="section-num">02 · Рамка</div>
+  <h2>Не&nbsp;память. Не&nbsp;workflows. <em>Operational memory + workflow engine</em>.</h2>
+  <p class="intro">
+    Alaya мыслится не как база знаний и не как RPA-платформа. Это единый слой, в котором поток событий превращается в рабочее состояние мира, а изменения состояния запускают действия. Четыре слоя, один контракт.
+  </p>
+
+  <div class="grid-4">
+    <div class="card card-info">
+      <h4>1 · Events</h4>
+      <p>Сырые сообщения, транскрипты, тикеты, обновления из интеграций. Неизменяемые, с метаданными источника и ACL.</p>
+    </div>
+    <div class="card card-accent">
+      <h4>2 · Memory</h4>
+      <p>Сущности, факты, связи, обязательства, предпочтения, цели. Declared vs inferred. Темпоральные, с провенансом.</p>
+    </div>
+    <div class="card card-ok">
+      <h4>3 · Reasoning</h4>
+      <p>Извлечение, матчинг, нормализация, консолидация, разрешение противоречий. LLM под контролем схемы.</p>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--coral-dark);">
+      <h4>4 · Action Loop</h4>
+      <p>Reminders, delayed jobs, follow-ups, stale-detection, review-циклы. Workflows, триггерящиеся от изменения состояния.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="tag">Почему это важно</span>
+    Memory-only вендоры решают часть (1)+(2). Workflow-вендоры — часть (4). Но реальные рабочие сценарии — обязательства, статусы, незакрытые темы — живут <em>ровно на стыке</em>. Наша ставка: если соединить четыре слоя в один контракт, получится продукт, которого пока нет.
+  </div>
+
+  <h3 class="block-title">Два принципа, без которых рамка не работает</h3>
+  <div class="grid-2">
+    <div class="card card-accent">
+      <h4>Declared vs Inferred</h4>
+      <p>Что <em>человек явно сказал</em> — это одно. Что <em>модель вывела из контекста</em> — это другое. В Alaya эти два класса фактов различаются на уровне схемы: у каждого claim'а есть <code>kind</code>. Inferred не может маскироваться под declared. Correction loop уважает это различие.</p>
+    </div>
+    <div class="card card-accent">
+      <h4>Provenance как обязательное свойство</h4>
+      <p>Каждый derived факт связан с исходными событиями через <code>extraction_run_id</code>. Без provenance память — чёрный ящик. С provenance она проверяема, объяснима и пригодна для correction. Цитата в ответе агента — это не украшение, а контракт.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 03 LAYERS ══════════════════════════════════════════ -->
+<section class="section" id="layers">
+  <div class="section-num">03 · Слои памяти</div>
+  <h2>От&nbsp;сырого события до&nbsp;<em>оглавления как книги</em>.</h2>
+  <p class="intro">
+    Каждый факт в Alaya проходит путь от реплики в чате до узла в knowledge tree. Разделение на слои — не метафора, а физический контракт: у каждого слоя своя таблица, свой SLA на свежесть, свой способ запроса.
+  </p>
+
+  <div class="layers">
+    <div class="layer">
+      <div class="layer-tag l0">L0</div>
+      <div class="layer-body">
+        <h3>Events — сырой поток</h3>
+        <p class="desc">Сообщения, документы, тикеты, веб-хуки коннекторов. Неизменяемые. Хранят полный текст, метаданные источника и ACL. <code>l0_chunks</code> делит их на семантические сегменты для extraction.</p>
+      </div>
+      <div class="layer-meta"><strong>Append-only</strong><br>Идемпотентный upsert<br>Источник истины</div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-tag l1">L1</div>
+      <div class="layer-body">
+        <h3>Entities — разрешённые сущности</h3>
+        <p class="desc">Люди, проекты, команды, документы, решения, <em>обязательства</em>. 10 базовых типов плюс динамическая онтология. Каждая сущность жёстко привязана к workspace через composite FK — утечки между компаниями невозможны по схеме.</p>
+      </div>
+      <div class="layer-meta"><strong>Уникальные</strong><br>3-tier resolver<br>RLS-изолированные</div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-tag l2">L2</div>
+      <div class="layer-body">
+        <h3>Claims &amp; Relations — атомарные факты</h3>
+        <p class="desc">Утверждения с <code>kind</code> (declared / inferred), confidence, временем (<code>valid_from</code>/<code>valid_to</code>) и полным провенансом. Устаревание вместо удаления, <code>supersedes</code>-цепочки сохраняют историю изменений.</p>
+      </div>
+      <div class="layer-meta"><strong>Темпоральные</strong><br>С провенансом<br>Инвалидируются, не удаляются</div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-tag l3">L3</div>
+      <div class="layer-body">
+        <h3>Knowledge Tree — оглавление</h3>
+        <p class="desc">Иерархический свод брифингов: агент читает корневой обзор, углубляется в нужный раздел. Материализуется LLM по запросу, инвалидируется dirty-flag'ом. Fallback на сырые claims, если синтез не уложился в бюджет 6 сек.</p>
+      </div>
+      <div class="layer-meta"><strong>Синтезированное</strong><br>Ленивый rebuild<br>≤6 сек на узел</div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-tag lx">EX</div>
+      <div class="layer-body">
+        <h3>Action Loop — исполнение</h3>
+        <p class="desc">Workflows, триггерящиеся от изменений L1/L2: reminders по дедлайнам из commitments, follow-ups по незакрытым темам, stale-detection по устаревшим claims, review-циклы. Не отдельная подсистема — часть identity.</p>
+      </div>
+      <div class="layer-meta"><strong>State-triggered</strong><br>Idempotent<br><span class="pill pill-coral">planned</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 04 PIPELINE ════════════════════════════════════════ -->
+<section class="section" id="pipeline">
+  <div class="section-num">04 · Pipeline извлечения</div>
+  <h2>От&nbsp;сырого события до&nbsp;графа — <em>за&nbsp;четыре шага</em>.</h2>
+  <p class="intro">
+    Pipeline разнесён на четыре стадии, чтобы каждая использовала модель подходящей силы. Дешёвая отбрасывает шум. Дорогая работает только по содержательному. Результат дешевле одной-сквозной экстракции минимум на 40%, при сопоставимом качестве.
+  </p>
+
+  <div class="pipeline">
+    <div class="stage">
+      <div class="model">Haiku · дёшево</div>
+      <h4>Cortex</h4>
+      <p>Режет событие на семантические чанки и классифицирует каждый: narrative, list, table, smalltalk. Двухпроходная верификация отбрасывает шум.</p>
+      <div class="output">→ <strong>L0 Chunks</strong> + domain scores</div>
+    </div>
+    <div class="stage">
+      <div class="model">Sonnet · точно</div>
+      <h4>Crystallizer</h4>
+      <p>На каждом «crystal»-чанке извлекает entities, claims, relations с confidence-тирами и <code>kind</code>. Второй проход сравнивает, фиксирует расхождения.</p>
+      <div class="output">→ <strong>ExtractionResult</strong> verified</div>
+    </div>
+    <div class="stage">
+      <div class="model">Resolver · атомарно</div>
+      <h4>Writer</h4>
+      <p>Разрешает сущности против графа: exact → fuzzy → LLM. Атомарно пишет под workspace-lock с полным провенансом. Пропагирует ACL от event к claim.</p>
+      <div class="output">→ <strong>Entities</strong> · <strong>Claims</strong> · <strong>Relations</strong></div>
+    </div>
+    <div class="stage">
+      <div class="model">Sonnet · фоново</div>
+      <h4>Integrator</h4>
+      <p>Дедупликация (3-tier), обогащение связей, нормализация дат, contradiction-detection. Работает по dirty-set с max-wait 30 мин.</p>
+      <div class="output">→ <strong>Интегрированный граф</strong></div>
+    </div>
+  </div>
+
+  <h3 class="block-title">Четыре контура защиты от «яда» в памяти</h3>
+  <div class="grid-2">
+    <div class="card card-accent">
+      <h4>Sanitizer на входе</h4>
+      <p>NFKC-нормализация, стрипинг zero-width символов, удаление HTML-комментариев, детектирование injection-паттернов. Подозрительное логируется в <code>monitoring</code>.</p>
+    </div>
+    <div class="card card-accent">
+      <h4>XML-границы prompt'а</h4>
+      <p>Систем-промпт использует <code>&lt;instructions&gt;</code>, <code>&lt;ontology&gt;</code>, <code>&lt;data&gt;</code> — инструкции физически отделены от данных, LLM знает что где.</p>
+    </div>
+    <div class="card card-accent">
+      <h4>Pydantic-валидаторы</h4>
+      <p>Весь output LLM проходит через схему: script-теги отклоняются, control-символы стрипаются, confidence зажимается в <code>[0, 1]</code>, длина ограничена.</p>
+    </div>
+    <div class="card card-accent">
+      <h4>Job-контракт</h4>
+      <p>TaskIQ-задачи принимают только string-ID. Сырой текст никогда не ходит по очереди — воркер читает его из защищённой БД.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="tag">Базовый принцип</span>
+    Output LLM — это <em>ненадёжный пользовательский ввод</em>. Его нельзя доверять в обход схемы. Любой факт в графе — это то, что прошло через валидатор, а не то, что сказала модель.
+  </div>
+</section>
+
+<!-- ═══ 05 ACTION LOOP ═════════════════════════════════════ -->
+<section class="section" id="action">
+  <div class="section-num">05 · Action Loop</div>
+  <h2>Память, которая <em>напоминает сама</em>.</h2>
+  <p class="intro">
+    Memory без execution — полезный, но неполный слой. Alaya встраивает workflow-движок рядом с графом: изменения состояния триггерят действия. Это то, что отличает operational memory от обычной — и то, чего нет ни у одного из «памятевых» вендоров.
+  </p>
+
+  <div class="grid-3">
+    <div class="card" style="border-left: 3px solid var(--coral);">
+      <h4><span class="pill pill-coral">Reminders</span></h4>
+      <p><strong>Триггер:</strong> новый <code>commitment</code>-claim с <code>due_date</code>.</p>
+      <p><strong>Действие:</strong> запланировать <code>job_remind</code> на <code>due - 1d</code>. Агент/человек получает напоминание через MCP / Slack / email.</p>
+      <p><strong>Idempotency:</strong> по <code>(claim_id, kind=remind)</code>.</p>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--coral);">
+      <h4><span class="pill pill-coral">Follow-ups</span></h4>
+      <p><strong>Триггер:</strong> незакрытая тема — inferred claim со статусом <code>unresolved</code>, старше N дней.</p>
+      <p><strong>Действие:</strong> создать review-item с провенансом исходного обсуждения.</p>
+      <p><strong>Отмена:</strong> если появился новый claim, closing эту тему.</p>
+    </div>
+    <div class="card" style="border-left: 3px solid var(--coral);">
+      <h4><span class="pill pill-coral">Stale detection</span></h4>
+      <p><strong>Триггер:</strong> <code>max(valid_from, last_touched) + decay(trust) &gt; threshold</code>.</p>
+      <p><strong>Действие:</strong> пометить claim как stale, поднять в weekly review, снизить вес в retrieval.</p>
+      <p><strong>Возврат:</strong> свежий upsert сбрасывает флаг.</p>
+    </div>
+  </div>
+
+  <div class="diagram">
+<span class="soft"># 2026-04-01: извлечён commitment</span>
+claim(kind=<span class="hl">declared</span>, commitment: <span class="ok">Ivan → release beta by 2026-04-15</span>)
+       valid_from: 2026-04-01   source: meeting/notes/17
+
+<span class="soft"># Action Loop триггер</span>
+→ enqueue <span class="hl">job_remind</span> at (due - 1d) = 2026-04-14 09:00
+→ enqueue <span class="hl">job_followup_check</span> at (due + 1d) = 2026-04-16 09:00
+
+<span class="soft"># 2026-04-14 09:00: reminder fires</span>
+→ <span class="ok">MCP notify</span>: "Beta release — tomorrow. Status?"
+
+<span class="soft"># 2026-04-16: follow-up check</span>
+→ query claims about <span class="hl">Beta release</span> since 2026-04-14
+→ если нет closing-claim: поднять в review</div>
+
+  <div class="callout ok">
+    <span class="tag">Архитектурное решение</span>
+    TaskIQ уже в стеке как исполнитель extraction-pipeline. Action Loop переиспользует ту же инфраструктуру: delayed jobs, recurring, retries, idempotency — бесплатно. Новое здесь — не машина исполнения, а <em>контракт триггеров от состояния памяти</em>.
+  </div>
+
+  <div class="callout">
+    <span class="tag">Граница между core и paid tier</span>
+    В open-core остаются <em>примитивы</em>: триггеры, reminder-jobs, stale-detection, follow-up-механика. Готовые <em>бизнес-процессы и domain-recipe'ы</em> (sales stage transitions, compliance review cycles, onboarding progression) — это отдельный SaaS <strong>Alaya Workflow</strong>, который работает stateless через API-ключ к клиентскому Core. Подробнее — секция 09.
+  </div>
+</section>
+
+<!-- ═══ 06 AGENTS ══════════════════════════════════════════ -->
+<section class="section" id="agents">
+  <div class="section-num">06 · Контракт с агентом</div>
+  <h2>Агент — <em>клиент графа</em>, а не владелец памяти.</h2>
+  <p class="intro">
+    В корпорации граф один — это общая правда компании. Но разным агентам нужна разная проекция. Это решается не моделью «агент как личность», а тремя простыми механиками поверх единого графа.
+  </p>
+
+  <div class="grid-3">
+    <div class="card card-accent">
+      <h4>Scoped API keys</h4>
+      <p>У каждого ключа — набор scope'ов и фильтров: <code>entity_types</code>, <code>tags</code>, <code>read|write|admin</code>. Один граф, но агент видит только свою линзу. RLS снизу гарантирует workspace-изоляцию; scopes сверху — ролевую.</p>
+    </div>
+    <div class="card card-accent">
+      <h4>Person briefing</h4>
+      <p>При запуске агента от имени конкретного человека — Alaya отдаёт person-centric проекцию: чем человек занят, к каким проектам привязан, какие commitments на нём висят. Dev получает свой срез, PM — свой, CEO — свой.</p>
+    </div>
+    <div class="card card-accent">
+      <h4>MCP wake-up</h4>
+      <p>На MCP-коннекте агент получает ~170 токенов сжатого wake-up контекста: имя воркспейса, ключевые сущности, свежие изменения, открытые commitments. Достаточно, чтобы не грузить сессию с нуля.</p>
+    </div>
+  </div>
+
+  <div class="diagram">
+<span class="hl">Person</span> ─┬─► <span class="soft">agent: sales-copilot</span>   ──scope: customers, deals──┐
+         ├─► <span class="soft">agent: eng-copilot</span>     ──scope: projects, tickets──┤
+         ├─► <span class="soft">agent: meeting-summarizer</span> ──scope: *──────────────┤
+         └─► <span class="soft">agent: exec-briefer</span>    ──scope: admin──────────────┤
+                                                                       │
+                                                                       ▼
+                                                <span class="ok">Shared memory graph + Action Loop</span>
+                                                <span class="soft">workspace-isolated by RLS</span>
+                                                <span class="soft">scope-filtered per API key</span>
+                                                <span class="soft">person-projected on briefing</span></div>
+</section>
+
+<!-- ═══ 07 DISCLOSURE ══════════════════════════════════════ -->
+<section class="section" id="disclosure">
+  <div class="section-num">07 · Progressive disclosure</div>
+  <h2>Агент получает <em>ровно столько контекста</em>, сколько нужно.</h2>
+  <p class="intro">
+    Наивный подход — грузить всё и фильтровать в LLM. Это дорого, медленно и ломается на большом графе. Alaya отдаёт контекст слоями — от сжатого приветствия до полного deep-search по L0. Агент сам решает, на какой уровень спуститься.
+  </p>
+
+  <div class="stack">
+    <div class="stack-row">
+      <div class="tier"><small>Слой 1</small>Wake-up</div>
+      <div class="desc">Имя воркспейса, счётчики ключевых сущностей, последние 3 изменения, свои открытые commitments. Достаточно чтобы агент «понимал где он».</div>
+      <div class="budget"><strong>~170</strong>токенов</div>
+    </div>
+    <div class="stack-row">
+      <div class="tier"><small>Слой 2</small>Summary</div>
+      <div class="desc">Топ-L1 сущностей по релевантности + свежие L2 claims. Отвечает на «кто-что-когда» без похода в сырые данные.</div>
+      <div class="budget"><strong>500–800</strong>токенов</div>
+    </div>
+    <div class="stack-row">
+      <div class="tier"><small>Слой 3</small>Scoped query</div>
+      <div class="desc">Поиск по конкретной сущности/предикату. Возвращает claims + relations + стейт Action Loop с evidence. Закрывает ≥80% реальных вопросов агента.</div>
+      <div class="budget"><strong>2–4K</strong>токенов</div>
+    </div>
+    <div class="stack-row">
+      <div class="tier"><small>Слой 4</small>Deep search</div>
+      <div class="desc">Полный 3-канальный RRF по всему графу, включая L0-события. Для сложных кейсов: «что именно было сказано в переписке на прошлой неделе?».</div>
+      <div class="budget"><strong>до лимита</strong>окна</div>
+    </div>
+  </div>
+
+  <div class="callout ok">
+    <span class="tag">Экономика</span>
+    90% запросов агента укладывается в первые два слоя — это ~1K токенов против ~50K на «сырой RAG со всем на свете». На миллионе запросов в месяц разница — в счёте на LLM порядки, не проценты.
+  </div>
+</section>
+
+<!-- ═══ 08 SECURITY ════════════════════════════════════════ -->
+<section class="section" id="security">
+  <div class="section-num">08 · Безопасность</div>
+  <h2>Централизованная память — <em>одна точка входа</em>.</h2>
+  <p class="intro">
+    Общий граф знаний компании — привлекательная цель. Tenant-изоляция, injection-защита, memory poisoning, attribution — угрозы распределены по слоям, и защита тоже.
+  </p>
+
+  <h3 class="block-title">Tenant isolation — защищено схемой</h3>
+  <div class="grid-2">
+    <div class="card card-ok">
+      <h4>PostgreSQL Row-Level Security</h4>
+      <p>14 таблиц с <code>FORCE ROW LEVEL SECURITY</code>. На каждом запросе <code>SET LOCAL app.workspace_id</code>. Даже если приложение забудет фильтр — БД вернёт пустой результат.</p>
+    </div>
+    <div class="card card-ok">
+      <h4>Composite FK <code>(workspace_id, id)</code></h4>
+      <p>Все дочерние таблицы ссылаются на родителя парой ключей. Cross-workspace reference физически невозможен на уровне схемы.</p>
+    </div>
+  </div>
+
+  <h3 class="block-title">OWASP Agentic Top 10 · наши контрмеры</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Угроза</th><th>Как у нас закрыта</th><th>Статус</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Memory &amp; Context Poisoning</strong><br>Persistent corruption памяти</td>
+          <td>Sanitizer + Pydantic + XML-границы. Planned: content-policy validator, контрадикция-детект.</td>
+          <td><span class="pill pill-coral">partial</span></td>
+        </tr>
+        <tr>
+          <td><strong>Tool Misuse</strong><br>Агент небезопасно использует API</td>
+          <td>Scoped API keys + RLS. Агент физически не может выйти за scope.</td>
+          <td><span class="pill pill-teal">covered</span></td>
+        </tr>
+        <tr>
+          <td><strong>Excessive Agency</strong><br>Агент действует вне полномочий</td>
+          <td>Write-scope отдельно от read-scope. Admin-операции требуют отдельного ключа.</td>
+          <td><span class="pill pill-teal">covered</span></td>
+        </tr>
+        <tr>
+          <td><strong>Agent Goal Hijack</strong><br>Подмена целей через контекст</td>
+          <td>XML-границы prompt'а, валидация цитат в <code>/ask</code>, sanitization контекста.</td>
+          <td><span class="pill pill-coral">partial</span></td>
+        </tr>
+        <tr>
+          <td><strong>Privacy Leakage</strong><br>Утечка между воркспейсами</td>
+          <td>RLS + composite FK + <code>SET LOCAL</code> на каждом запросе.</td>
+          <td><span class="pill pill-teal">covered</span></td>
+        </tr>
+        <tr>
+          <td><strong>Provenance Loss</strong><br>Факты без источника</td>
+          <td><code>extraction_run_id</code> на каждом claim/relation. Trace до конкретного chunk'а и event'а.</td>
+          <td><span class="pill pill-teal">covered</span></td>
+        </tr>
+        <tr>
+          <td><strong>Inferred masquerades as declared</strong><br>Гипотеза выдаёт себя за факт</td>
+          <td>Явное поле <code>kind</code> на claim, разные retrieval-веса.</td>
+          <td><span class="pill pill-coral">planned</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout warn">
+    <span class="tag">Lethal Trifecta</span>
+    Приватные данные + недоверенный контент + внешняя коммуникация = неизбежный эксплойт. Корп-память автоматически имеет первые два. Третий — в зоне ответственности агента, но Alaya <em>не даёт</em> ему это через себя: никаких исходящих вебхуков в core, никакого file-write, только read/write в собственную БД.
+  </div>
+</section>
+
+<!-- ═══ 09 PRODUCT LINE ════════════════════════════════════ -->
+<section class="section" id="split">
+  <div class="section-num">09 · Продуктовая линия</div>
+  <h2>Память — <em>open-core</em>. Автоматизация и&nbsp;sync — <em>paid tiers</em>.</h2>
+  <p class="intro">
+    Alaya разбивается на три продукта над одним контрактом. Основа — open-core память с workflow-примитивами. Поверх неё — два коммерческих слоя: stateless-оркестровка бизнес-процессов и локальный sync-демон для AI-инструментов пользователя. Каждый следующий слой работает через API-ключ к клиентскому Core и <em>не дублирует storage</em>.
+  </p>
+
+  <div class="split">
+    <div class="split-side">
+      <div class="kind">Open-core · BSL 1.1</div>
+      <h4>Alaya Core</h4>
+      <p>Серверная память и примитивы исполнения. Self-host бесплатно, managed cloud — по подписке.</p>
+      <ul>
+        <li>Event ingestion + connectors</li>
+        <li>Multi-stage extraction</li>
+        <li>Hybrid retrieval + tree</li>
+        <li>TaskIQ workflow primitives</li>
+        <li>MCP / REST API контракт</li>
+      </ul>
+    </div>
+    <div class="split-side">
+      <div class="kind">SaaS · paid · stateless</div>
+      <h4>Alaya Workflow</h4>
+      <p>Оркестровка бизнес-процессов поверх Core. <em>Не хранит клиентских данных</em> — работает через API-ключ к Core клиента.</p>
+      <ul>
+        <li>BYO Core (self-host или managed)</li>
+        <li>Ничего не persists на стороне Workflow</li>
+        <li>Domain packs: sales / ops / HR / compliance</li>
+        <li>Visual triggers + recipe-библиотека</li>
+        <li>Webhooks и мост к внешним системам</li>
+      </ul>
+    </div>
+    <div class="split-side">
+      <div class="kind">Desktop · paid tier</div>
+      <h4>Alaya Sync</h4>
+      <p>Локальный демон для синхронизации AI-инструментов с корпоративной памятью. Делает sync невидимым для юзера.</p>
+      <ul>
+        <li>Claude Code / Cursor / Zed AI / Raycast</li>
+        <li>Briefing inject на SessionStart</li>
+        <li>Capture PreCompact / SessionEnd</li>
+        <li>Верификация цитат и writebacks</li>
+        <li>Auto-update под новые AI-tools</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="diagram">
+     ┌──────────────────────────────────────────────────────────────────┐
+     │  <span class="hl">Alaya Core</span>  (BSL 1.1 · self-host / managed cloud)              │
+     │   memory + extraction + retrieval + tree + workflow primitives   │
+     │   MCP / REST API contract                                        │
+     └────────────▲─────────────────▲─────────────────▲─────────────────┘
+                  │ events          │ API-key         │ events
+                  │                 │ (stateless)     │
+       ┌──────────┴────────┐ ┌──────┴──────────┐ ┌───┴────────────────┐
+       │  <span class="ok">Alaya Connectors</span> │ │ <span class="ok">Alaya Workflow</span> <span class="hl">$</span>│ │  <span class="ok">Alaya Sync</span>  <span class="hl">$</span>    │
+       │  (server, Run 8)  │ │ (SaaS, stateless)│ │  (local daemon)    │
+       │  Slack · GitHub   │ │ business-process │ │  Claude Code · IDE │
+       │  Linear · webhooks│ │ orchestration    │ │  AI-assistants     │
+       │  <span class="soft">corporate stack</span>  │ │ <span class="soft">domain recipes</span>   │ │  <span class="soft">personal AI tools</span> │
+       └───────────────────┘ └──────────────────┘ └────────────────────┘</div>
+
+  <div class="callout">
+    <span class="tag">Зачем такое разделение</span>
+    Open-core память остаётся доступной — это распространение и доверие. Workflow и Sync — два разных класса commercial-продуктов: первый решает <em>«как автоматизировать бизнес-процесс поверх памяти»</em>, второй — <em>«как сделать так, чтобы память всегда была актуальной без дисциплины со стороны юзера»</em>. Ни один не дублирует storage — оба работают через API клиентского Core.
+  </div>
+</section>
+
+<!-- ═══ 10 MARKET MAP ══════════════════════════════════════ -->
+<section class="section" id="market">
+  <div class="section-num">10 · Карта рынка</div>
+  <h2>Где сильны другие. Чем <em>отличается</em> Alaya.</h2>
+  <p class="intro">
+    Мы не изобретаем память с нуля — рынок зрелый. Но в выбранной комбинации свойств пересечение конкурентов минимально. Ниже — где конкретно проходят границы.
+  </p>
+
+  <div class="market">
+    <div class="market-row">
+      <div class="cat">
+        <h5>Memory middleware</h5>
+        <small>Layer под агентом</small>
+      </div>
+      <div class="players">
+        <strong>Mem0</strong> — memory middleware, key-value поверх vector store. <br>
+        <strong>Letta / MemGPT</strong> — stateful agent runtime с memory-блоками. <br>
+        <strong>Supermemory</strong> — API для персональной памяти агента.
+      </div>
+      <div class="alaya">
+        Сильны в <em>хранении фактов</em>. Но нет темпоральной модели, нет declared/inferred различения, нет execution-слоя. <strong>Alaya добавляет workflow engine поверх памяти.</strong>
+      </div>
+    </div>
+
+    <div class="market-row">
+      <div class="cat">
+        <h5>Graph-native memory</h5>
+        <small>Temporal knowledge graphs</small>
+      </div>
+      <div class="players">
+        <strong>Graphiti / Zep</strong> — bi-temporal knowledge graph, invalidation вместо deletion. <br>
+        <strong>Cognee</strong> — knowledge pipeline с graph-представлением.
+      </div>
+      <div class="alaya">
+        Сильны в <em>темпоральной истине и графовых связях</em>. Но graph-first архитектура — тяжёлая база без доказанной пользы на всех use-case'ах. <strong>Alaya — Postgres-first с опциональным graph-слоем, плюс Action Loop.</strong>
+      </div>
+    </div>
+
+    <div class="market-row">
+      <div class="cat">
+        <h5>Enterprise search</h5>
+        <small>«AI-поиск по корпорации»</small>
+      </div>
+      <div class="players">
+        <strong>Glean</strong> — enterprise search + AI assistant. <br>
+        <strong>Dust</strong> — workspace assistants с retrieval.
+      </div>
+      <div class="alaya">
+        Сильны в <em>retrieval по корпоративным источникам</em>. Но это чистый RAG — нет модели мира, нет commitments, нет reminders. <strong>Alaya ведёт состояние, а не только отвечает на вопросы.</strong>
+      </div>
+    </div>
+
+    <div class="market-row">
+      <div class="cat">
+        <h5>Workflow / agent shells</h5>
+        <small>Движки автоматизации</small>
+      </div>
+      <div class="players">
+        <strong>Lindy</strong> — workflow automation с LLM. <br>
+        <strong>Granola</strong> — meeting assistant с action-items.
+      </div>
+      <div class="alaya">
+        Сильны в <em>execution</em>. Но у них нет <em>памяти как first-class</em> — workflow живёт в моменте, не в state. <strong>Alaya триггерит действия от изменений в графе, а не от внешних событий.</strong>
+      </div>
+    </div>
+
+    <div class="market-row">
+      <div class="cat">
+        <h5>Operational memory + workflow</h5>
+        <small>Наша ниша</small>
+      </div>
+      <div class="players">
+        <strong>Никто явно не владеет категорией</strong> — это комбинация, которую пока не собирают целиком.
+      </div>
+      <div class="alaya">
+        <strong>Alaya строится прямо здесь</strong> — в точке, где память, темпоральная модель мира и workflow-исполнение объединяются в один контракт.
+      </div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="tag">Почему комбинация работает</span>
+    Повторить отдельный слой может любой. Повторить <em>связную композицию</em> — память + provenance + declared/inferred + темпоральность + state-triggered workflows + agent-agnostic API — быстро и качественно трудно.
+  </div>
+</section>
+
+<!-- ═══ 11 ROADMAP ═════════════════════════════════════════ -->
+<section class="section" id="roadmap">
+  <div class="section-num">11 · Roadmap</div>
+  <h2>Что <em>уже работает</em> и что <em>в очереди</em>.</h2>
+  <p class="intro">
+    Alaya развивается по run'ам. Каждый run — одна логическая способность, PR-per-sprint, dual-model review перед мержем.
+  </p>
+
+  <div class="timeline">
+    <div class="run done">
+      <div class="run-head"><h4>Run 1 · Foundation</h4><span class="tag">Shipped</span></div>
+      <p>Монорепо, 18 таблиц, RLS на 14 из них, REST API, API-keys c хэшем, error-envelope, курсор-пагинация, CI.</p>
+    </div>
+    <div class="run done">
+      <div class="run-head"><h4>Run 2 · Extraction</h4><span class="tag">Shipped</span></div>
+      <p>Single-pass Sonnet extraction, TaskIQ workers, Anthropic adapter с ephemeral cache_control, FakeLLMAdapter.</p>
+    </div>
+    <div class="run done">
+      <div class="run-head"><h4>Run 3 · Intelligence pipeline</h4><span class="tag">Shipped</span></div>
+      <p>Cortex (Haiku) → Crystallizer (Sonnet) → Integrator с двухпроходной верификацией, 3-tier resolver, dedup, date-normalizer. ≥40% экономии на LLM.</p>
+    </div>
+    <div class="run done">
+      <div class="run-head"><h4>Run 4 · Go CLI</h4><span class="tag">Shipped</span></div>
+      <p>Single-binary Cobra CLI. OS keyring, dual-mode output, <code>setup agent --profile claude-code</code>.</p>
+    </div>
+    <div class="run done">
+      <div class="run-head"><h4>Run 5 · Search &amp; Ask &amp; Tree</h4><span class="tag">Shipped</span></div>
+      <p>Hybrid 3-channel RRF, Ask с валидацией цитат, Knowledge tree с dirty-flag rebuild. Embedding pipeline на multilingual-e5-large.</p>
+    </div>
+    <div class="run done">
+      <div class="run-head"><h4>Run 5.1 + 5.2 · Hardening</h4><span class="tag">Shipped</span></div>
+      <p>DB-backed workspace lock, scope enforcement, fail-closed rate-limit, docs off в prod, TrustedHost middleware.</p>
+    </div>
+    <div class="run next">
+      <div class="run-head"><h4>Run 6 · MCP Server</h4><span class="tag">Next</span></div>
+      <p>MCP wake-up (~170 токенов), Person briefing, API-key scope filters, related-paths в tree, content-policy validator.</p>
+    </div>
+    <div class="run future">
+      <div class="run-head"><h4>Run 7 · Action Loop MVP</h4><span class="tag">Planned</span></div>
+      <p><code>commitment</code> entity type, declared vs inferred в схеме claims, <code>job_remind</code>/<code>job_stale_scan</code>/<code>job_followup</code>, ACL propagation, correction loop. <em>Vision alignment P1.</em></p>
+    </div>
+    <div class="run future">
+      <div class="run-head"><h4>Run 8 · Connectors</h4><span class="tag">Planned</span></div>
+      <p>Slack, GitHub, Linear, Webhook. Delta-sync с ETag, ACL-mapping источника в entity access_level.</p>
+    </div>
+    <div class="run future">
+      <div class="run-head"><h4>Run 9 · Web UI</h4><span class="tag">Planned</span></div>
+      <p>Graph browser, live extraction runs monitor, workspace admin, review-queue для stale/follow-ups.</p>
+    </div>
+    <div class="run future">
+      <div class="run-head"><h4>Run 10 · Knowledge quality</h4><span class="tag">Planned</span></div>
+      <p>Contradiction detection, forgetting-decay по trust, trust-feedback, ретроспективный memory-poisoning scan, LongMemEval harness.</p>
+    </div>
+    <div class="run future">
+      <div class="run-head"><h4>Strategic · Alaya Workflow</h4><span class="tag">Product · SaaS</span></div>
+      <p>Отдельный SaaS: stateless-оркестровка бизнес-процессов поверх клиентского Core. Не хранит данных, работает по API-ключу. Domain packs (sales / ops / HR) + recipe-библиотека + webhooks-мост. <em>Начинается после стабилизации core workflow primitives.</em></p>
+    </div>
+    <div class="run future">
+      <div class="run-head"><h4>Strategic · Alaya Sync</h4><span class="tag">Product · Desktop</span></div>
+      <p>Отдельный продукт и репо: локальный sync-демон как paid tier поверх open-core. MVP: Claude Code + Cursor, macOS. <em>Начинаем после стабилизации MCP-контракта.</em></p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 12 KNOW-HOW ════════════════════════════════════════ -->
+<section class="section" id="know-how">
+  <div class="section-num">12 · Что здесь нашего</div>
+  <h2>Know-how не&nbsp;в&nbsp;одной фиче. В&nbsp;<em>композиции</em>.</h2>
+  <p class="intro">
+    Каждый отдельный приём в Alaya либо взят из индустрии, либо известен. Но именно собранная композиция свойств — редкая и повторить её быстро и качественно сложно.
+  </p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Механика</th><th>Происхождение</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Pipeline Cortex → Crystallizer → Writer → Integrator</strong></td><td>Наш дизайн — многоступенчатая extraction с domain-классификацией чанков и двухпроходной верификацией на двух стадиях</td></tr>
+        <tr><td><strong>3-tier entity resolver</strong> (exact → fuzzy → LLM disambiguation)</td><td>Наш рецепт с порогами и транслитерацией</td></tr>
+        <tr><td><strong>Composite FK <code>(workspace_id, id)</code></strong> как security primitive</td><td>Стандартный Postgres; применение как layer защиты — Alaya</td></tr>
+        <tr><td><strong>Provenance через <code>extraction_run_id</code> + <code>pipeline_traces</code></strong></td><td>Наш дизайн</td></tr>
+        <tr><td><strong>Четыре контура защиты output'а LLM</strong> (sanitizer + XML + Pydantic + string-ID job)</td><td>Приёмы известны; композиция — наша</td></tr>
+        <tr><td><strong>Action Loop, триггерящийся от изменений графа</strong></td><td>Наш дизайн — вдохновлён «operational memory» рамкой из vision</td></tr>
+        <tr><td><strong>Dirty-set + max-wait в Integrator</strong></td><td>Наше</td></tr>
+        <tr><td><strong>Dirty-flag tree rebuild с 6-сек timeout и fallback на raw claims</strong></td><td>Наше</td></tr>
+        <tr><td><strong>Hybrid 3-channel RRF</strong> (vector + FTS + pg_trgm по entity name)</td><td>Редкая комбинация; собрано здесь</td></tr>
+        <tr><td><strong>Progressive disclosure с токен-бюджетами</strong></td><td>Наш дизайн</td></tr>
+        <tr><td><strong>Scoped API keys как проекция графа</strong> (вместо «agent-as-entity»)</td><td>Наше архитектурное решение</td></tr>
+        <tr><td><strong>Трёхслойная продуктовая линия:</strong> open-core Core + stateless paid Workflow SaaS + paid local Sync daemon над одним API-контрактом</td><td>Наша продуктовая архитектура</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p style="font-size: 13px; color: var(--slate-light); margin-top: 32px; max-width: 72ch;">
+    <em>Идейные влияния:</em> Karpathy («LLM Wiki» — идея накапливаемого артефакта вместо RAG-на-лету); Graphiti/Zep (bi-temporal модель claims); Simon Willison («Lethal Trifecta» как дизайн-принцип границы); OWASP Top 10 Agentic 2026 (модель угроз). Ни одна из этих систем не собрана в ту же композицию.
+  </p>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="footer-inner">
+    <span>Alaya · Operational memory and workflow engine · BSL 1.1</span>
+    <div class="footer-links">
+      <a href="https://alayaos.com">alayaos.com</a>
+      <a href="https://github.com/GoSync-Inc/alaya">github</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

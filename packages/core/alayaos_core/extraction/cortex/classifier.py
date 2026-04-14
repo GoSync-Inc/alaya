@@ -81,8 +81,19 @@ class CortexClassifier:
         return final, changed, combined
 
     def is_crystal(self, scores: DomainScores) -> bool:
-        """Return True if any non-SMALLTALK domain score >= crystal_threshold."""
-        return any(getattr(scores, d.value, 0.0) >= self.crystal_threshold for d in Domain if d != Domain.SMALLTALK)
+        """Filter smalltalk-dominated chunks unless they carry meaningful competing signal.
+
+        Rule:
+          - If smalltalk >= 0.8 AND max_non_smalltalk < 0.4 → skip (noise).
+          - Otherwise keep if any non-smalltalk domain reaches crystal_threshold.
+        """
+        max_non_st = max(
+            (getattr(scores, d.value, 0.0) for d in Domain if d != Domain.SMALLTALK),
+            default=0.0,
+        )
+        if scores.smalltalk >= 0.8 and max_non_st < 0.4:
+            return False
+        return max_non_st >= self.crystal_threshold
 
     def primary_domain(self, scores: DomainScores) -> str:
         """Return domain name with highest score."""

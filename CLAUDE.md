@@ -142,9 +142,9 @@ Tree: GET /tree, GET /tree/{path}, POST /tree/export
 ## LLM Architecture (Run 2+)
 
 Model-agnostic: `LLMServiceInterface` with provider adapters.
-- `AnthropicAdapter`: Production provider (Haiku for classification, Sonnet for extraction/integration)
+- `AnthropicAdapter`: Production provider (Haiku for classification, Sonnet for extraction/integration); coerces JSON-string values for top-level `list[...]` / `list[...] | None` fields before Pydantic validation (`_coerce_list_strings` in `llm/anthropic.py`)
 - `FakeLLMAdapter`: Deterministic test responses with domain-specific overrides
 Config: per-stage model selection via `CORTEX_CLASSIFIER_MODEL`, `CRYSTALLIZER_MODEL`, `INTEGRATOR_MODEL`.
 Provider-specific features preserved — no lowest common denominator.
 
-<!-- updated-by-superflow:2026-04-08 -->
+<!-- updated-by-superflow:2026-04-14 -->

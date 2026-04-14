@@ -23,7 +23,7 @@ packages/
 │       ├── extraction/             # Multi-stage intelligence pipeline
 │       │   ├── cortex/             # Chunker + classifier (L0 → L0Chunks with domain scores)
 │       │   ├── crystallizer/       # LLM extractor + verifier (L0Chunks → claims with confidence tiers)
-│       │   ├── integrator/         # Dedup, enricher, date normalizer, KG integration engine
+│       │   ├── integrator/         # Dedup (vector shortlist → LLM verify), enricher, date normalizer, KG integration engine
 │       │   ├── pipeline.py         # Orchestration: run_extraction, run_write, run_enrich, should_extract
 │       │   ├── monitoring.py       # Structlog anomaly detection events
 │       │   ├── writer.py           # Atomic persist, dirty-set trigger, workspace lock
@@ -79,6 +79,8 @@ Run before every commit:
 
 - `ALAYA_API_DOCS_ENABLED` defaults to disabled in production when unset.
 - `ALAYA_TRUSTED_HOSTS` should be configured to the public hostnames served by ingress/Caddy, unless host validation is enforced upstream.
+- `INTEGRATOR_DEDUP_SHORTLIST_K` (default `5`) — max nearest-neighbours per entity in vector-shortlist dedup phase.
+- `INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD` (default `0.9`) — minimum cosine similarity to forward a pair to LLM verification; lower values increase recall at the cost of more LLM calls.
 
 ## Architecture Rules
 

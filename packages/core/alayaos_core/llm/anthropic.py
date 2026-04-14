@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import types
 import typing
 from typing import TYPE_CHECKING
 
@@ -30,8 +31,8 @@ def _is_list_annotation(annotation: object) -> bool:
     origin = typing.get_origin(annotation)
     if origin is list:
         return True
-    # Handle Union / Optional: e.g. list[X] | None
-    if origin is typing.Union:
+    # Handle Union / Optional: e.g. list[X] | None (typing.Union or PEP 604 types.UnionType)
+    if origin is typing.Union or isinstance(annotation, types.UnionType):
         for arg in typing.get_args(annotation):
             if typing.get_origin(arg) is list:
                 return True

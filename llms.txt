@@ -88,7 +88,7 @@ POST /tree/export         — export subtree as markdown
 - **L0 Events** — Raw ingested events with source metadata. `l0_chunks` stores chunked text segments per event.
 - **L1 Entities** — Resolved named entities (person, project, team, etc.). 10 seeded entity types, 20 seeded predicates per workspace.
 - **L2 Claims + Relations** — Structured facts with confidence scores and `extraction_run_id` provenance.
-- **Extraction Runs** — Tracks each pipeline execution: status, token usage, cost, timestamps. `pipeline_traces` captures per-step execution details; `integrator_runs` tracks knowledge graph integration runs.
+- **Extraction Runs** — Tracks each pipeline execution: status (`pending` → `extracting` → `cortex_complete` → `completed` | `failed`), token usage, cost, timestamps. On task exception, `job_cortex`/`job_crystallize`/`job_write` call `ExtractionRunRepository.mark_failed` in a fresh transaction; idempotent for terminal states. `pipeline_traces` captures per-step execution details; `integrator_runs` tracks knowledge graph integration runs.
 
 Tenant isolation via PostgreSQL RLS (`SET LOCAL app.workspace_id`). Composite FK `(workspace_id, id)` prevents cross-workspace references.
 
@@ -121,4 +121,4 @@ Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · 
 - [CLAUDE.md](./CLAUDE.md): Development guide, architecture rules, security policy
 - [CHANGELOG](./CHANGELOG.md)
 
-<!-- updated-by-superflow:2026-04-08 -->
+<!-- updated-by-superflow:2026-04-14 -->

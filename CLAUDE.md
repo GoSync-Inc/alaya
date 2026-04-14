@@ -61,7 +61,7 @@ docker compose up -d             # Start all services
 docker compose up postgres redis # Start only DB + cache
 just check                       # Lint + format + typecheck + tests
 just smoke                       # Docker smoke test
-taskiq worker alayaos_core.worker.tasks:broker  # Start pipeline worker (job_extract, job_write, job_cortex, job_crystallize, job_enrich, job_integrate, job_check_integrator)
+taskiq worker alayaos_core.worker.tasks:broker  # Start pipeline worker (job_extract, job_write, job_cortex, job_crystallize, job_enrich, job_integrate, job_check_integrator); on task exception, run transitions to `failed` via ExtractionRunRepository.mark_failed (idempotent for terminal states)
 ```
 
 ## Verification

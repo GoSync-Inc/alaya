@@ -97,12 +97,7 @@ async def run_cortex(events, crystal_threshold: float = 0.1, verify: bool = True
 
         event_result["any_crystal"] = any(c.get("is_crystal") for c in event_result["chunks"])
         event_result["max_non_smalltalk"] = max(
-            (
-                v
-                for c in event_result["chunks"]
-                for d, v in c.get("domain_scores", {}).items()
-                if d != "smalltalk"
-            ),
+            (v for c in event_result["chunks"] for d, v in c.get("domain_scores", {}).items() if d != "smalltalk"),
             default=0.0,
         )
         event_result["smalltalk_score"] = max(
@@ -145,7 +140,9 @@ def summarize(results: list[dict], usage, threshold: float) -> dict:
     print(f"  CORTEX SUMMARY ({len(results)} events)")
     print(f"{'=' * 60}")
     print(f"  Crystal (any chunk ≥ {threshold}): {crystal}/{len(results)} ({crystal / len(results) * 100:.1f}%)")
-    print(f"  Primary=smalltalk:                 {smalltalk_primary}/{len(results)} ({smalltalk_primary / len(results) * 100:.1f}%)")
+    print(
+        f"  Primary=smalltalk:                 {smalltalk_primary}/{len(results)} ({smalltalk_primary / len(results) * 100:.1f}%)"
+    )
     print(f"  Total chunks:                       {total_chunks}")
     print(f"  Verify changed scores:              {verify_changed}")
     print(f"  Tokens: {usage.tokens_in} in / {usage.tokens_out} out / {usage.tokens_cached} cached")

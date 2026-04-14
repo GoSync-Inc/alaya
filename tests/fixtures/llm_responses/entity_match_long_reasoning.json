@@ -1,0 +1,4 @@
+{
+  "is_same_entity": true,
+  "reasoning": "Entity A is \"\u041e\u0440\u0433\u0430\u043d\u0438\u0437\u0430\u0446\u0438\u044f\" which refers to an organizational body, while Entity B is described as a department or subdivision within the same parent structure. Both entities refer to the same organizational unit and should be merged rather than treated as separate records. The context confirms they belong to the same business entity."
+}

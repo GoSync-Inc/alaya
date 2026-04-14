@@ -52,4 +52,4 @@ class EntityMatchResult(BaseModel):
     """Used by LLM entity resolution (Tier 3)."""
 
     is_same_entity: bool
-    reasoning: str = Field(max_length=200)
+    reasoning: str = Field(max_length=1000)

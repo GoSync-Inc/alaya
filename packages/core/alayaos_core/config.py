@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     # Minimum cosine similarity to include a candidate in the LLM-verify shortlist.
     # At 0.9 the expected pair count stays < 100 for a 139-entity workspace (< 5 min budget).
     INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD: float = 0.9
+    # Batch size for dedup v2 — number of entities per LLM dedup batch (N=9 default).
+    INTEGRATOR_DEDUP_BATCH_SIZE: int = 9
 
     # Embedding
     EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large"

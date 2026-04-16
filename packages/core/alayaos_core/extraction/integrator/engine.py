@@ -9,7 +9,12 @@ import uuid
 import structlog
 from sqlalchemy import text
 
-from alayaos_core.extraction.integrator.dedup import EntityDeduplicator, shortlist_candidates
+from alayaos_core.extraction.integrator.dedup import (
+    DeduplicatorV2,
+    EntityDeduplicator,
+    assemble_batches,
+    shortlist_candidates,
+)
 from alayaos_core.extraction.integrator.enricher import EntityEnricher
 from alayaos_core.extraction.integrator.schemas import (
     DuplicatePair,
@@ -70,6 +75,10 @@ class IntegratorEngine:
         # Shortlist config (Sprint S6: vector-similarity pre-filter before LLM verify)
         self._shortlist_k: int = getattr(settings, "INTEGRATOR_DEDUP_SHORTLIST_K", 5)
         self._shortlist_threshold: float = getattr(settings, "INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD", 0.85)
+
+        # Dedup v2 (Sprint 5): batch-oriented deduplicator with composite signal ordering
+        self._dedup_batch_size: int = getattr(settings, "INTEGRATOR_DEDUP_BATCH_SIZE", 9)
+        self._deduplicator_v2 = DeduplicatorV2(llm=llm, batch_size=self._dedup_batch_size)
 
         # Embedding service injected in tests; created lazily in production
         self._embedding_service = None
@@ -167,10 +176,9 @@ class IntegratorEngine:
         claims_updated = 0
         noise_removed = 0
 
-        # Step 5: Deduplicate via vector shortlist + LLM verify
+        # Step 5: Deduplicate via dedup v2 (batch-oriented, no threshold gate)
         if entities_with_context:
-            dup_pairs = await self._shortlist_dedup(entities_with_context)
-            entities_deduplicated = await self._merge_duplicates(dup_pairs, workspace_id, session)
+            entities_deduplicated = await self._dedup_v2(entities_with_context, workspace_id, session)
             log.info(
                 "integrator_dedup",
                 workspace_id=str(workspace_id),
@@ -222,6 +230,96 @@ class IntegratorEngine:
             dimensions = getattr(self.settings, "EMBEDDING_DIMENSIONS", 1024)
             self._embedding_service = FastEmbedService(model_name=model, dimensions=dimensions)
         return self._embedding_service
+
+    async def _dedup_v2(
+        self,
+        entities: list[EntityWithContext],
+        workspace_id: uuid.UUID,
+        session,
+    ) -> int:
+        """Dedup v2: batch-oriented deduplication with composite signal ordering.
+
+        1. Filter out entities with entity_type == 'unknown' (no type = unpaireable).
+        2. Embed entity names (for cosine signal in composite score).
+        3. Use assemble_batches to group by type and chunk into N=batch_size.
+        4. DeduplicatorV2.execute_batches: LLM batch call → MergeGroups → apply merges.
+
+        Falls back to _shortlist_dedup if embedding fails.
+        Returns the number of entity merges performed.
+        """
+        if len(entities) < 2:
+            return 0
+
+        # Skip entities without a resolved type — grouping unknowns together would pair
+        # unrelated entities and produces noise.
+        resolved = [e for e in entities if e.entity_type != "unknown"]
+        skipped = len(entities) - len(resolved)
+        if skipped:
+            log.debug("integrator_dedup_v2_skip_typeless", skipped=skipped)
+        entities = resolved
+        if len(entities) < 2:
+            return 0
+
+        # Embed entity names for cosine component of composite signal
+        embed_svc = self._get_embedding_service()
+        names = [e.name for e in entities]
+        try:
+            vectors = await embed_svc.embed_texts(names)
+        except Exception:
+            log.warning(
+                "integrator_dedup_v2_embed_failed",
+                entity_count=len(entities),
+                msg="falling back to shortlist dedup",
+            )
+            dup_pairs = await self._shortlist_dedup(entities)
+            return await self._merge_duplicates(dup_pairs, workspace_id, session)
+
+        if len(vectors) != len(entities):
+            log.warning(
+                "integrator_dedup_v2_embed_length_mismatch",
+                entity_count=len(entities),
+                vector_count=len(vectors),
+                msg="falling back to shortlist dedup",
+            )
+            dup_pairs = await self._shortlist_dedup(entities)
+            return await self._merge_duplicates(dup_pairs, workspace_id, session)
+
+        embeddings: dict[uuid.UUID, list[float]] = {e.id: v for e, v in zip(entities, vectors, strict=True)}
+
+        # Assemble batches grouped by entity type, ordered by composite signal
+        batches_by_type: dict[str, list[list[EntityWithContext]]] = {}
+        all_batches = assemble_batches(entities, embeddings, batch_size=self._dedup_batch_size)
+
+        # Group batches by entity_type for per-type LLM calls
+        for batch in all_batches:
+            if not batch:
+                continue
+            etype = batch[0].entity_type
+            batches_by_type.setdefault(etype, []).append(batch)
+
+        log.info(
+            "integrator_dedup_v2_batches",
+            workspace_id=str(workspace_id),
+            entity_count=len(entities),
+            total_batches=len(all_batches),
+        )
+
+        total_merged = 0
+        for entity_type, type_batches in batches_by_type.items():
+            # We don't have a run_id at this level — use a deterministic placeholder.
+            # The action_repo is not wired into the engine yet; pass None for now.
+            merged = await self._deduplicator_v2.execute_batches(
+                batches=type_batches,
+                entity_type=entity_type,
+                workspace_id=workspace_id,
+                run_id=uuid.UUID(int=0),  # placeholder — no run_id in engine scope
+                entity_repo=self.entity_repo,
+                session=session,
+                action_repo=None,
+            )
+            total_merged += merged
+
+        return total_merged
 
     async def _shortlist_dedup(self, entities: list[EntityWithContext]) -> list[DuplicatePair]:
         """Vector shortlist → LLM-verify dedup (replaces O(n²) rapidfuzz loop).

@@ -4,6 +4,13 @@ Sprint S6 adds a vector-shortlist pass: instead of comparing every O(n²) pair w
 we first embed entity names in Python (fast, no DB), group by entity_type, and retain only the
 top-K nearest neighbours per entity above a cosine-similarity threshold.  Only those pairs go
 to the (slow) LLM verifier.
+
+Sprint 5 (dedup v2) introduces DeduplicatorV2:
+- Drops the similarity threshold gate entirely.
+- Uses a composite signal (cosine + trigram + co-event + shared-owner) only for ordering.
+- Groups entities by type, assembles batches of N=9, and sends each batch to a focused LLM prompt.
+- LLM returns DedupResult with MergeGroup objects describing winner/loser relationships.
+- Merge execution: winner gets merged_name/description/union-aliases; losers soft-deleted.
 """
 
 from __future__ import annotations
@@ -267,3 +274,393 @@ class EntityDeduplicator:
         except Exception:
             log.warning("dedup_llm_check_failed", entity_a=entity_a.name, entity_b=entity_b.name)
             return False
+
+
+# ---------------------------------------------------------------------------
+# Dedup v2 — batch-oriented, no threshold gate
+# ---------------------------------------------------------------------------
+
+_STRIP_CHARS = " _-.,;:()[]{}'\""  # characters to strip from names before trigram comparison
+
+
+def _stripped_name(name: str) -> str:
+    """Normalize a name for trigram comparison: lowercase, strip punctuation."""
+    return name.lower().strip(_STRIP_CHARS)
+
+
+def compute_composite_score(
+    entity_a: EntityWithContext,
+    entity_b: EntityWithContext,
+    cosine_sim: float,
+    same_run: bool,
+    same_owner: bool,
+) -> float:
+    """Compute a composite similarity score for ordering entity pairs in a batch.
+
+    Weights:
+      0.4 * cosine(embedding_a, embedding_b)   — semantic similarity
+      0.3 * trigram_similarity(name_a, name_b) — string similarity on normalized names
+      0.2 * co_event_score                     — 1.0 if same extraction_run_id, else 0.0
+      0.1 * shared_owner_score                 — 1.0 if same "owner" claim, else 0.0
+
+    The score is used ONLY for sorting — not as a filter.
+    """
+    from rapidfuzz import fuzz
+
+    trigram_sim = fuzz.ratio(_stripped_name(entity_a.name), _stripped_name(entity_b.name)) / 100.0
+    co_event = 1.0 if same_run else 0.0
+    shared_owner = 1.0 if same_owner else 0.0
+
+    return 0.4 * cosine_sim + 0.3 * trigram_sim + 0.2 * co_event + 0.1 * shared_owner
+
+
+def _get_owner_claim(entity: EntityWithContext) -> str | None:
+    """Extract the 'owner' claim value from entity claims, if present."""
+    for claim in entity.claims:
+        if isinstance(claim, dict) and claim.get("predicate") == "owner":
+            return str(claim.get("value", ""))
+    return None
+
+
+def _get_extraction_run_id(entity: EntityWithContext) -> str | None:
+    """Extract extraction_run_id from entity properties, if present."""
+    return entity.properties.get("extraction_run_id")
+
+
+def assemble_batches(
+    entities: list[EntityWithContext],
+    embeddings: dict[uuid.UUID, list[float]],
+    *,
+    batch_size: int = 9,
+) -> list[list[EntityWithContext]]:
+    """Group entities by type and assemble batches of at most batch_size.
+
+    Within each type group, entities are sorted by their pairwise composite score to keep
+    the most similar entities in the same batch. Uses a greedy approach: build a score
+    matrix, then sort by max composite similarity to a reference entity.
+
+    Only entity types with >= 2 entities produce batches (single-entity types have no
+    dedup candidates).
+
+    Returns a list of batches (each batch is a list of EntityWithContext).
+    No cross-type batches are ever produced.
+    """
+    # Group by entity_type
+    by_type: dict[str, list[EntityWithContext]] = {}
+    for entity in entities:
+        by_type.setdefault(entity.entity_type, []).append(entity)
+
+    all_batches: list[list[EntityWithContext]] = []
+
+    def _max_composite_for_group(
+        entity: EntityWithContext,
+        grp: list[EntityWithContext],
+        embs: dict[uuid.UUID, list[float]],
+    ) -> float:
+        """Return the highest composite score between `entity` and any peer in `grp`."""
+        emb_a = embs.get(entity.id)
+        best = 0.0
+        owner_a = _get_owner_claim(entity)
+        run_a = _get_extraction_run_id(entity)
+        for other in grp:
+            if other.id == entity.id:
+                continue
+            emb_b = embs.get(other.id)
+            cosine = _cosine_similarity(emb_a, emb_b) if (emb_a and emb_b) else 0.0
+            owner_b = _get_owner_claim(other)
+            run_b = _get_extraction_run_id(other)
+            score = compute_composite_score(
+                entity_a=entity,
+                entity_b=other,
+                cosine_sim=cosine,
+                same_run=(run_a is not None and run_a == run_b),
+                same_owner=(owner_a is not None and owner_a == owner_b),
+            )
+            best = max(best, score)
+        return best
+
+    for entity_type, group in by_type.items():
+        if len(group) < 2:
+            # Single entity — nothing to dedup
+            continue
+
+        # Sort by descending max composite score so similar entities cluster together
+        sorted_group = sorted(
+            group,
+            key=lambda e: _max_composite_for_group(e, group, embeddings),
+            reverse=True,
+        )
+
+        # Split into batches of batch_size
+        for i in range(0, len(sorted_group), batch_size):
+            chunk = sorted_group[i : i + batch_size]
+            if len(chunk) >= 2:
+                all_batches.append(chunk)
+            # If a trailing chunk has only 1 entity (due to odd numbers), merge it into
+            # the previous batch if it fits, otherwise skip it (no dedup possible).
+            elif chunk and all_batches:
+                prev = all_batches[-1]
+                # Only merge back if it won't exceed batch_size and same type
+                if len(prev) < batch_size and prev[0].entity_type == entity_type:
+                    all_batches[-1] = prev + chunk
+
+    return all_batches
+
+
+_DEDUP_SYSTEM_PROMPT = (
+    "You are an expert entity deduplication system for a corporate knowledge graph. "
+    "Your task is to identify which entities represent the same real-world object. "
+    "Be conservative: only merge when you are confident. "
+    "Return only duplicates you are certain about."
+)
+
+
+def _build_dedup_prompt(entities: list[EntityWithContext], entity_type: str) -> str:
+    """Build the focused dedup prompt for a batch of entities."""
+    n = len(entities)
+    rows: list[str] = []
+    for i, e in enumerate(entities):
+        top_claims = "; ".join(f"{c.get('predicate')}={c.get('value')}" for c in e.claims[:3] if isinstance(c, dict))
+        aliases_str = ", ".join(e.aliases[:5]) if e.aliases else ""
+        rows.append(f"  {i + 1}. id={e.id}  name={e.name!r}  aliases=[{aliases_str}]  top_claims=[{top_claims}]")
+
+    batch_table = "\n".join(rows)
+
+    return (
+        f"You are an entity deduplication expert.\n\n"
+        f"## Task\n"
+        f'Given these {n} entities of type "{entity_type}", identify duplicates.\n'
+        f"Two entities are duplicates if they refer to the same real-world thing, even with:\n"
+        f"- Different spelling, abbreviations, transliterations\n"
+        f"- One in Russian, one in Latin script\n"
+        f"- Different levels of detail (short name vs full legal name)\n\n"
+        f"## For each duplicate group, provide:\n"
+        f"- The canonical name (best/clearest name)\n"
+        f"- A merged description (synthesize from both)\n"
+        f"- Which entity to keep (winner) and which to merge into it (losers)\n\n"
+        f"## Entities\n"
+        f"{batch_table}\n\n"
+        f"Return a DedupResult with groups (may be empty if no duplicates found)."
+    )
+
+
+class DeduplicatorV2:
+    """Batch-oriented entity deduplicator (dedup v2).
+
+    Replaces the threshold-gated pair approach with:
+    1. assemble_batches — group by type, sort by composite signal, chunk into N=9
+    2. LLM batch call — focused prompt returns DedupResult (list of MergeGroups)
+    3. execute_batches — apply MergeGroups: winner rewrite + loser soft-delete
+    """
+
+    def __init__(self, llm, *, batch_size: int = 9) -> None:
+        self.llm = llm
+        self.batch_size = batch_size
+
+    async def execute_batches(
+        self,
+        batches: list[list[EntityWithContext]],
+        entity_type: str,
+        workspace_id: uuid.UUID,
+        run_id: uuid.UUID,
+        entity_repo,
+        session,
+        action_repo,
+    ) -> int:
+        """Call LLM for each batch, then apply MergeGroups.
+
+        Returns the total number of merges performed (loser entities soft-deleted).
+        """
+        from alayaos_core.extraction.integrator.schemas import DedupResult
+
+        total_merged = 0
+        for batch in batches:
+            prompt = _build_dedup_prompt(batch, entity_type)
+            try:
+                dedup_result, _ = await self.llm.extract(
+                    text=prompt,
+                    system_prompt=_DEDUP_SYSTEM_PROMPT,
+                    response_model=DedupResult,
+                    max_tokens=1024,
+                )
+            except Exception:
+                log.warning("dedup_v2_llm_failed", entity_type=entity_type, batch_size=len(batch))
+                continue
+
+            if not dedup_result.groups:
+                continue
+
+            # Build entity_id → EntityWithContext lookup for validation
+            batch_ids: set[uuid.UUID] = {e.id for e in batch}
+
+            for group in dedup_result.groups:
+                # Guard: winner and losers must be in this batch
+                if group.winner_id not in batch_ids:
+                    log.warning("dedup_v2_winner_not_in_batch", winner_id=str(group.winner_id))
+                    continue
+                valid_loser_ids = [lid for lid in group.loser_ids if lid in batch_ids and lid != group.winner_id]
+                if not valid_loser_ids:
+                    continue
+
+                merged = await self._apply_merge_group(
+                    winner_id=group.winner_id,
+                    loser_ids=valid_loser_ids,
+                    merged_name=group.merged_name,
+                    merged_description=group.merged_description,
+                    merged_aliases=group.merged_aliases,
+                    confidence=group.confidence,
+                    rationale=group.rationale,
+                    workspace_id=workspace_id,
+                    run_id=run_id,
+                    entity_repo=entity_repo,
+                    session=session,
+                    action_repo=action_repo,
+                )
+                total_merged += merged
+
+        return total_merged
+
+    async def _apply_merge_group(
+        self,
+        winner_id: uuid.UUID,
+        loser_ids: list[uuid.UUID],
+        merged_name: str,
+        merged_description: str,
+        merged_aliases: list[str],
+        confidence: float,
+        rationale: str,
+        workspace_id: uuid.UUID,
+        run_id: uuid.UUID,
+        entity_repo,
+        session,
+        action_repo,
+    ) -> int:
+        """Apply a single MergeGroup: rewrite winner, soft-delete losers, reassign FK refs."""
+        from sqlalchemy import text
+
+        winner = await entity_repo.get_by_id(winner_id)
+        if winner is None:
+            return 0
+
+        # Snapshot winner before modification (for rollback/audit)
+        before_snapshot = {
+            "name": winner.name,
+            "description": getattr(winner, "description", "") or "",
+            "aliases": list(winner.aliases or []),
+        }
+
+        # Union all aliases: existing winner aliases + merged_aliases + loser names
+        new_aliases = list(dict.fromkeys(list(winner.aliases or []) + list(merged_aliases)))
+
+        # Rewrite winner
+        await entity_repo.update(
+            winner_id,
+            name=merged_name,
+            description=merged_description,
+            aliases=new_aliases,
+        )
+
+        merged_count = 0
+        for loser_id in loser_ids:
+            loser = await entity_repo.get_by_id(loser_id)
+            if loser is None:
+                continue
+
+            # Add loser's original name as alias on winner
+            if loser.name and loser.name not in new_aliases:
+                new_aliases = list(dict.fromkeys([*new_aliases, loser.name]))
+                await entity_repo.update(winner_id, aliases=new_aliases)
+
+            # Reassign claims from loser to winner
+            await session.execute(
+                text("UPDATE l2_claims SET entity_id = :a_id WHERE entity_id = :b_id AND workspace_id = :ws_id"),
+                {"a_id": winner_id, "b_id": loser_id, "ws_id": workspace_id},
+            )
+
+            # Reassign relations where loser is source (skip would-be self-refs)
+            await session.execute(
+                text(
+                    "UPDATE l1_relations SET source_entity_id = :a_id"
+                    " WHERE source_entity_id = :b_id AND target_entity_id != :a_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": winner_id, "b_id": loser_id, "ws_id": workspace_id},
+            )
+            # Delete b→a relations that would become self-referential
+            await session.execute(
+                text(
+                    "DELETE FROM l1_relations"
+                    " WHERE source_entity_id = :b_id AND target_entity_id = :a_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": winner_id, "b_id": loser_id, "ws_id": workspace_id},
+            )
+
+            # Reassign relations where loser is target (skip would-be self-refs)
+            await session.execute(
+                text(
+                    "UPDATE l1_relations SET target_entity_id = :a_id"
+                    " WHERE target_entity_id = :b_id AND source_entity_id != :a_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": winner_id, "b_id": loser_id, "ws_id": workspace_id},
+            )
+            # Delete a→b relations that would become self-referential
+            await session.execute(
+                text(
+                    "DELETE FROM l1_relations"
+                    " WHERE source_entity_id = :a_id AND target_entity_id = :b_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": winner_id, "b_id": loser_id, "ws_id": workspace_id},
+            )
+
+            # Reassign vector chunks
+            await session.execute(
+                text(
+                    "UPDATE vector_chunks SET source_id = :a_id"
+                    " WHERE source_id = :b_id AND source_type = 'entity' AND workspace_id = :ws_id"
+                ),
+                {"a_id": winner_id, "b_id": loser_id, "ws_id": workspace_id},
+            )
+
+            # Soft-delete loser with provenance
+            loser_props = dict(loser.properties or {})
+            loser_props["merged_into"] = str(winner_id)
+            await entity_repo.update(loser_id, is_deleted=True, properties=loser_props)
+
+            # Record audit action (best-effort — failure doesn't abort merge)
+            if action_repo is not None:
+                try:
+                    from alayaos_core.schemas.integrator_action import IntegratorActionCreate
+
+                    await action_repo.create(
+                        workspace_id=workspace_id,
+                        data=IntegratorActionCreate(
+                            run_id=run_id,
+                            action_type="merge",
+                            entity_id=winner_id,
+                            params={
+                                "name": merged_name,
+                                "description": merged_description,
+                                "aliases": new_aliases,
+                            },
+                            targets=[str(loser_id)],
+                            inverse={
+                                "loser_id": str(loser_id),
+                                **before_snapshot,
+                            },
+                            confidence=confidence,
+                            rationale=rationale,
+                        ),
+                    )
+                except Exception:
+                    log.warning(
+                        "dedup_v2_action_record_failed",
+                        winner_id=str(winner_id),
+                        loser_id=str(loser_id),
+                    )
+
+            merged_count += 1
+
+        return merged_count

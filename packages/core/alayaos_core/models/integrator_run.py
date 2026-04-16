@@ -30,5 +30,7 @@ class IntegratorRun(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True, server_default="0")
     status: Mapped[str | None] = mapped_column(Text, nullable=True, server_default="running")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pass_count: Mapped[int | None] = mapped_column(Integer, nullable=True, server_default="1")
+    convergence_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

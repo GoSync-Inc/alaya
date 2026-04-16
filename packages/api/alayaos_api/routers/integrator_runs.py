@@ -1,4 +1,4 @@
-"""IntegratorRun endpoints."""
+"""IntegratorRun and IntegratorAction endpoints."""
 
 import uuid
 from typing import Annotated
@@ -15,7 +15,9 @@ from alayaos_api.deps import (
 )
 from alayaos_core.models.api_key import APIKey
 from alayaos_core.repositories.base import BaseRepository
+from alayaos_core.repositories.integrator_action import IntegratorActionRepository
 from alayaos_core.repositories.integrator_run import IntegratorRunRepository
+from alayaos_core.schemas.integrator_action import IntegratorActionRead, IntegratorActionRollbackResponse
 from alayaos_core.schemas.integrator_run import IntegratorRunRead
 
 router = APIRouter()
@@ -124,3 +126,67 @@ async def trigger_integrator_run(
         raise _enqueue_failed() from exc
 
     return data_response(IntegratorRunRead.model_validate(run))
+
+
+def _action_not_found(action_id: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={
+            "error": {
+                "code": "resource.not_found",
+                "message": f"Integrator action '{action_id}' not found.",
+                "hint": None,
+                "docs": None,
+                "request_id": None,
+            }
+        },
+    )
+
+
+@router.get("/integrator-actions")
+async def list_integrator_actions(
+    run_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_workspace_session)],
+    api_key: Annotated[APIKey, Depends(require_scope("read"))],
+    cursor: str | None = None,
+    limit: int = 50,
+):
+    if cursor is not None:
+        try:
+            BaseRepository.decode_cursor(cursor)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": {
+                        "code": "validation.invalid_cursor",
+                        "message": "Invalid pagination cursor.",
+                        "hint": None,
+                        "docs": None,
+                        "request_id": None,
+                    }
+                },
+            ) from e
+
+    repo = IntegratorActionRepository(session, api_key.workspace_id)
+    items, next_cursor, has_more = await repo.list_by_run(
+        api_key.workspace_id,
+        run_id,
+        cursor=cursor,
+        limit=limit,
+    )
+    return paginated_response(items, IntegratorActionRead, next_cursor, has_more)
+
+
+@router.post("/integrator-actions/{action_id}/rollback")
+async def rollback_integrator_action(
+    action_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_workspace_session)],
+    api_key: Annotated[APIKey, Depends(require_scope("admin"))],
+    force: bool = False,
+):
+    repo = IntegratorActionRepository(session, api_key.workspace_id)
+    result = await repo.apply_rollback(api_key.workspace_id, action_id, force=force)
+    if result is None:
+        raise _action_not_found(str(action_id))
+    return data_response(IntegratorActionRollbackResponse.model_validate(result))

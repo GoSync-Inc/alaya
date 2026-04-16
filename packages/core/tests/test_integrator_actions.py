@@ -647,6 +647,73 @@ class TestIntegratorActionRollback:
         assert entity.name == "Someone Changed This"
 
     @pytest.mark.asyncio
+    async def test_rollback_create_from_cluster_also_deletes_part_of_relations(self) -> None:
+        """Rollback of create_from_cluster also deletes the part_of relations stored in targets."""
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.models.relation import L1Relation
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        synthetic_id = uuid.uuid4()
+        rel_id_1 = uuid.uuid4()
+        rel_id_2 = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="create_from_cluster")
+        action.entity_id = synthetic_id
+        action.status = "applied"
+        action.params = {}
+        action.inverse = {}
+        # Engine stores relation IDs as plain UUID strings in targets
+        action.targets = [str(rel_id_1), str(rel_id_2)]
+
+        synthetic = L1Entity(
+            id=synthetic_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Synthetic",
+            properties={},
+            is_deleted=False,
+        )
+        synthetic.external_ids = []
+
+        rel_1 = L1Relation(
+            id=rel_id_1,
+            workspace_id=ws_id,
+            source_entity_id=uuid.uuid4(),
+            target_entity_id=synthetic_id,
+            relation_type="part_of",
+            confidence=0.9,
+        )
+        rel_2 = L1Relation(
+            id=rel_id_2,
+            workspace_id=ws_id,
+            source_entity_id=uuid.uuid4(),
+            target_entity_id=synthetic_id,
+            relation_type="part_of",
+            confidence=0.9,
+        )
+
+        session = make_session()
+        # execute calls: action lookup, entity lookup, rel_1 lookup, rel_2 lookup
+        session.execute.side_effect = [
+            make_result(action),
+            make_result(synthetic),
+            make_result(rel_1),
+            make_result(rel_2),
+        ]
+
+        repo = IntegratorActionRepository(session, ws_id)
+        result = await repo.apply_rollback(ws_id, action.id)
+        assert result.conflicts == []
+        assert synthetic.is_deleted is True
+        # Both relations must have been deleted
+        assert session.delete.call_count == 2
+        deleted_objs = [call.args[0] for call in session.delete.call_args_list]
+        assert rel_1 in deleted_objs
+        assert rel_2 in deleted_objs
+        assert action.status == "rolled_back"
+
+    @pytest.mark.asyncio
     async def test_rollback_unknown_action_type_returns_conflict_not_rolled_back(self) -> None:
         """apply_rollback with unknown action_type returns conflict message and does NOT mark action as rolled_back."""
         from alayaos_core.repositories.integrator_action import IntegratorActionRepository

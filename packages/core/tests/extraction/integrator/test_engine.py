@@ -135,7 +135,10 @@ async def test_engine_loads_48h_window():
     session = AsyncMock()
     await engine.run(ws_id, session)
 
-    entity_repo.list_recent.assert_called_once_with(ws_id, hours=48)
+    # list_recent is called at least twice: once for initial load and once for
+    # the post-convergence reload before enrichment (Fix 3 — holistic review).
+    assert entity_repo.list_recent.call_count >= 2
+    entity_repo.list_recent.assert_called_with(ws_id, hours=48)
 
 
 @pytest.mark.asyncio
@@ -221,7 +224,7 @@ async def test_engine_dedup_called():
         settings=_make_settings(),
     )
     # Inject dedup v2 mock (Sprint 5: engine now uses _dedup_v2, not _shortlist_dedup)
-    dedup_v2_mock = AsyncMock(return_value=0)
+    dedup_v2_mock = AsyncMock(return_value=(0, []))
     engine._dedup_v2 = dedup_v2_mock
 
     session = AsyncMock()

@@ -237,8 +237,9 @@ class IntegratorEngine:
 
             # ── Dedup v2 pass ──
             applied_d = 0
+            dedup_signatures: list[str] = []
             if entities_with_context:
-                applied_d = await self._dedup_v2(
+                applied_d, dedup_signatures = await self._dedup_v2(
                     entities_with_context,
                     workspace_id,
                     session,
@@ -267,9 +268,9 @@ class IntegratorEngine:
                 break
 
             # Convergence check 2: cycle detection via action signature hash.
-            # Include both panoramic actions and dedup count so that a pass where
-            # only dedup changes (not panoramic) does not trigger a false cycle.
-            action_hash = hash(frozenset([str(a) for a in panoramic_result.actions] + [f"dedup:{applied_d}"]))
+            # Include panoramic actions and dedup entity IDs (not just count) so that
+            # passes with the same count but different entity merges do not collide.
+            action_hash = hash(frozenset([str(a) for a in panoramic_result.actions] + dedup_signatures))
             if previous_hash is not None and action_hash == previous_hash:
                 convergence_reason = "cycle_detected"
                 break
@@ -277,6 +278,13 @@ class IntegratorEngine:
         else:
             # for-loop completed without break → max_passes
             convergence_reason = "max_passes"
+
+        # ── Reload entities after convergence, before enrichment ──
+        # Ensures enrichment sees post-consolidation state: deleted entities excluded,
+        # newly created entities (e.g. from create_from_cluster) included.
+        fresh_window = await self.entity_repo.list_recent(workspace_id, hours=window_hours)
+        all_entity_ids = dirty_entity_ids | {e.id for e in fresh_window}
+        entities_with_context = await self._load_entities_with_context(workspace_id, all_entity_ids)
 
         # ── Enrichment (single pass after convergence) ──
         enrichment_result = await self._enricher.enrich_batch(entities_with_context)
@@ -580,7 +588,7 @@ class IntegratorEngine:
         *,
         run_id: uuid.UUID | None = None,
         action_repo=None,
-    ) -> int:
+    ) -> tuple[int, list[str]]:
         """Dedup v2: batch-oriented deduplication with composite signal ordering.
 
         1. Filter out entities with entity_type == 'unknown' (no type = unpaireable).
@@ -589,7 +597,8 @@ class IntegratorEngine:
         4. DeduplicatorV2.execute_batches: LLM batch call → MergeGroups → apply merges.
 
         Falls back to _shortlist_dedup if embedding fails.
-        Returns the number of entity merges performed.
+        Returns (total_merged, merge_signatures) where merge_signatures are used for
+        cycle detection hashing — each entry is "merge:<winner_id>:[<loser_ids>]".
 
         Args:
             run_id:      IntegratorRun ID for action provenance.  Falls back to
@@ -600,7 +609,7 @@ class IntegratorEngine:
         effective_run_id = run_id if run_id is not None else uuid.UUID(int=0)
 
         if len(entities) < 2:
-            return 0
+            return 0, []
 
         # Skip entities without a resolved type — grouping unknowns together would pair
         # unrelated entities and produces noise.
@@ -610,7 +619,7 @@ class IntegratorEngine:
             log.debug("integrator_dedup_v2_skip_typeless", skipped=skipped)
         entities = resolved
         if len(entities) < 2:
-            return 0
+            return 0, []
 
         # Embed entity names for cosine component of composite signal
         embed_svc = self._get_embedding_service()
@@ -624,9 +633,11 @@ class IntegratorEngine:
                 msg="falling back to shortlist dedup",
             )
             dup_pairs = await self._shortlist_dedup(entities)
-            return await self._merge_duplicates(
+            merged = await self._merge_duplicates(
                 dup_pairs, workspace_id, session, run_id=effective_run_id, action_repo=action_repo
             )
+            sigs = [f"merge:{p.entity_a_id}:{sorted([str(p.entity_b_id)])}" for p in dup_pairs]
+            return merged, sigs
 
         if len(vectors) != len(entities):
             log.warning(
@@ -636,9 +647,11 @@ class IntegratorEngine:
                 msg="falling back to shortlist dedup",
             )
             dup_pairs = await self._shortlist_dedup(entities)
-            return await self._merge_duplicates(
+            merged = await self._merge_duplicates(
                 dup_pairs, workspace_id, session, run_id=effective_run_id, action_repo=action_repo
             )
+            sigs = [f"merge:{p.entity_a_id}:{sorted([str(p.entity_b_id)])}" for p in dup_pairs]
+            return merged, sigs
 
         embeddings: dict[uuid.UUID, list[float]] = {e.id: v for e, v in zip(entities, vectors, strict=True)}
 
@@ -661,8 +674,9 @@ class IntegratorEngine:
         )
 
         total_merged = 0
+        all_signatures: list[str] = []
         for entity_type, type_batches in batches_by_type.items():
-            merged = await self._deduplicator_v2.execute_batches(
+            merged, sigs = await self._deduplicator_v2.execute_batches(
                 batches=type_batches,
                 entity_type=entity_type,
                 workspace_id=workspace_id,
@@ -672,8 +686,9 @@ class IntegratorEngine:
                 action_repo=action_repo,
             )
             total_merged += merged
+            all_signatures.extend(sigs)
 
-        return total_merged
+        return total_merged, all_signatures
 
     # ---------------------------------------------------------------------------
     # Shortlist dedup (fallback when embedding fails)

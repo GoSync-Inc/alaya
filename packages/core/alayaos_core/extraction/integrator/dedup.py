@@ -323,7 +323,14 @@ def _get_owner_claim(entity: EntityWithContext) -> str | None:
 
 
 def _get_extraction_run_id(entity: EntityWithContext) -> str | None:
-    """Extract extraction_run_id from entity properties, if present."""
+    """Extract extraction_run_id from entity properties, if present.
+
+    NOTE: EntityWithContext does not carry extraction_run_id as a first-class field;
+    the IntegratorEngine copies it into entity.properties["extraction_run_id"] when
+    building EntityWithContext from the ORM model.  If that key is absent (e.g. for
+    entities created before the pipeline was updated), this returns None gracefully —
+    the co-event signal is simply omitted from the composite score.
+    """
     return entity.properties.get("extraction_run_id")
 
 
@@ -379,7 +386,7 @@ def assemble_batches(
             best = max(best, score)
         return best
 
-    for entity_type, group in by_type.items():
+    for _entity_type, group in by_type.items():
         if len(group) < 2:
             # Single entity — nothing to dedup
             continue
@@ -392,17 +399,20 @@ def assemble_batches(
         )
 
         # Split into batches of batch_size
+        type_batches: list[list[EntityWithContext]] = []
         for i in range(0, len(sorted_group), batch_size):
             chunk = sorted_group[i : i + batch_size]
             if len(chunk) >= 2:
-                all_batches.append(chunk)
-            # If a trailing chunk has only 1 entity (due to odd numbers), merge it into
-            # the previous batch if it fits, otherwise skip it (no dedup possible).
-            elif chunk and all_batches:
-                prev = all_batches[-1]
-                # Only merge back if it won't exceed batch_size and same type
-                if len(prev) < batch_size and prev[0].entity_type == entity_type:
-                    all_batches[-1] = prev + chunk
+                type_batches.append(chunk)
+            elif len(chunk) == 1 and type_batches:
+                # Trailing 1-entity chunk: rebalance the last two batches to avoid dropping.
+                # Merge the last batch with this singleton and re-split evenly.
+                combined = type_batches[-1] + chunk
+                mid = len(combined) // 2
+                type_batches[-1] = combined[:mid]
+                type_batches.append(combined[mid:])
+
+        all_batches.extend(type_batches)
 
     return all_batches
 
@@ -662,5 +672,30 @@ class DeduplicatorV2:
                     )
 
             merged_count += 1
+
+        if merged_count > 0:
+            # After reassigning all loser relations to the winner, duplicate
+            # (source_entity_id, target_entity_id, relation_type) rows may exist on the winner.
+            # Keep the oldest row per unique (source, target, type) tuple; delete the rest.
+            await session.execute(
+                text(
+                    "DELETE FROM l1_relations"
+                    " WHERE workspace_id = :ws_id"
+                    " AND id IN ("
+                    "   SELECT id FROM ("
+                    "     SELECT id,"
+                    "       ROW_NUMBER() OVER ("
+                    "         PARTITION BY source_entity_id, target_entity_id, relation_type"
+                    "         ORDER BY created_at ASC"
+                    "       ) AS row_number"
+                    "     FROM l1_relations"
+                    "     WHERE workspace_id = :ws_id"
+                    "       AND (source_entity_id = :winner_id OR target_entity_id = :winner_id)"
+                    "   ) ranked"
+                    "   WHERE row_number > 1"
+                    " )"
+                ),
+                {"ws_id": workspace_id, "winner_id": winner_id},
+            )
 
         return merged_count

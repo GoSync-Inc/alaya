@@ -8,6 +8,7 @@ from alayaos_core.models.entity import EntityExternalId, L1Entity
 from alayaos_core.models.entity_type import EntityTypeDefinition
 from alayaos_core.models.event import L0Event
 from alayaos_core.models.extraction_run import ExtractionRun
+from alayaos_core.models.integrator_action import IntegratorAction
 from alayaos_core.models.integrator_run import IntegratorRun
 from alayaos_core.models.pipeline_trace import PipelineTrace
 from alayaos_core.models.predicate import PredicateDefinition
@@ -26,6 +27,7 @@ __all__ = [
     "EntityExternalId",
     "EntityTypeDefinition",
     "ExtractionRun",
+    "IntegratorAction",
     "IntegratorRun",
     "L0Chunk",
     "L0Event",

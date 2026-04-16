@@ -232,7 +232,8 @@ class IntegratorEngine:
                 session=session,
                 action_repo=action_repo,
             )
-            noise_removed += applied_p  # panoramic actions cover noise/reclassify/rewrite etc.
+            # Count only the remove_noise actions (not reclassify/rewrite/etc.)
+            noise_removed += sum(1 for a in panoramic_result.actions if a.action == "remove_noise")
 
             # ── Dedup v2 pass ──
             applied_d = 0
@@ -623,7 +624,9 @@ class IntegratorEngine:
                 msg="falling back to shortlist dedup",
             )
             dup_pairs = await self._shortlist_dedup(entities)
-            return await self._merge_duplicates(dup_pairs, workspace_id, session)
+            return await self._merge_duplicates(
+                dup_pairs, workspace_id, session, run_id=effective_run_id, action_repo=action_repo
+            )
 
         if len(vectors) != len(entities):
             log.warning(
@@ -633,7 +636,9 @@ class IntegratorEngine:
                 msg="falling back to shortlist dedup",
             )
             dup_pairs = await self._shortlist_dedup(entities)
-            return await self._merge_duplicates(dup_pairs, workspace_id, session)
+            return await self._merge_duplicates(
+                dup_pairs, workspace_id, session, run_id=effective_run_id, action_repo=action_repo
+            )
 
         embeddings: dict[uuid.UUID, list[float]] = {e.id: v for e, v in zip(entities, vectors, strict=True)}
 
@@ -754,11 +759,24 @@ class IntegratorEngine:
                 )
         return dup_pairs
 
-    async def _merge_duplicates(self, pairs, workspace_id: uuid.UUID, session) -> int:
+    async def _merge_duplicates(
+        self,
+        pairs,
+        workspace_id: uuid.UUID,
+        session,
+        *,
+        run_id: uuid.UUID | None = None,
+        action_repo=None,
+    ) -> int:
         """Merge duplicate entity pairs: keep entity_a, soft-delete entity_b, merge aliases.
 
         Also reassigns claims, relations, and vector_chunks from entity_b to entity_a
         before soft-deleting entity_b, so no data is orphaned.
+
+        Args:
+            run_id:      IntegratorRun ID for audit records.  Optional for backward compat.
+            action_repo: IntegratorActionRepository for writing audit records.  When None,
+                         no audit records are written (v1 fallback path backward compat).
 
         Returns the number of pairs successfully merged.
         """
@@ -840,6 +858,25 @@ class IntegratorEngine:
             props = dict(entity_b.properties or {})
             props["merged_into"] = str(entity_a.id)
             await self.entity_repo.update(entity_b.id, is_deleted=True, properties=props)
+            # Step 8: Write audit record (best-effort — failure doesn't abort the merge)
+            if action_repo is not None and run_id is not None:
+                with contextlib.suppress(Exception):
+                    from alayaos_core.schemas.integrator_action import IntegratorActionCreate
+
+                    await action_repo.create(
+                        workspace_id=workspace_id,
+                        data=IntegratorActionCreate(
+                            run_id=run_id,
+                            action_type="merge",
+                            entity_id=entity_a.id,
+                            params={"loser_id": str(entity_b.id), "merged_name": entity_a.name},
+                            targets=[
+                                {"id": str(entity_a.id), "name": entity_a.name},
+                                {"id": str(entity_b.id), "name": entity_b.name},
+                            ],
+                            inverse={"action": "unmerge", "loser_id": str(entity_b.id)},
+                        ),
+                    )
             merged += 1
         return merged
 

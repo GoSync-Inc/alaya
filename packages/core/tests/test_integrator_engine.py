@@ -661,3 +661,134 @@ async def test_cycle_detection_includes_dedup_count():
     assert not (result.convergence_reason == "cycle_detected" and result.pass_count == 2), (
         "Cycle detected at pass 2 despite dedup counts differing (1 vs 0) between passes"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test: noise_removed counter counts only remove_noise actions (Fix — holistic review)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_noise_removed_counts_only_remove_noise_actions():
+    """noise_removed in run result should count only remove_noise panoramic actions.
+
+    When a mix of remove_noise and non-noise action types is returned from
+    _apply_panoramic_actions (2 total applied), noise_removed must equal 1,
+    not 2.  We patch _apply_panoramic_actions so both actions "succeed"
+    regardless of entity state, isolating the counter accumulation logic.
+    """
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicAction, PanoramicResult
+    from alayaos_core.extraction.integrator.schemas import EnrichmentResult
+
+    entity_id_a = uuid.uuid4()
+    entity_id_b = uuid.uuid4()
+
+    engine = _make_engine()
+    engine._enricher = AsyncMock()
+    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+
+    # 1 remove_noise + 1 rewrite — rewrite is NOT a noise action
+    pass1_actions = [
+        PanoramicAction(
+            action="remove_noise",
+            entity_id=entity_id_a,
+            params={"reason": "garbage"},
+            confidence=0.95,
+            rationale="looks like garbage",
+        ),
+        PanoramicAction(
+            action="rewrite",
+            entity_id=entity_id_b,
+            params={"new_name": "Better Name"},
+            confidence=0.8,
+            rationale="should be renamed",
+        ),
+    ]
+    pass1_result = PanoramicResult(actions=pass1_actions)
+
+    run_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    session = AsyncMock()
+    session.flush = AsyncMock()
+
+    # _apply_panoramic_actions is patched to always return 2 (both applied successfully)
+    # but the real noise counter should still count only 1 remove_noise action
+    async def fake_apply(actions, *args, **kwargs):
+        return len(actions)  # both "succeed" → returns 2
+
+    with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_pp:
+        pano_instance = AsyncMock()
+        pano_instance.run = AsyncMock(side_effect=[pass1_result, PanoramicResult(actions=[])])
+        mock_pp.return_value = pano_instance
+        engine._dedup_v2 = AsyncMock(return_value=0)
+        engine._apply_panoramic_actions = fake_apply
+
+        result = await engine._run_locked(ws_id, run_id, session)
+
+    # noise_removed must equal 1 (only the remove_noise action), not 2 (total panoramic)
+    assert result.noise_removed == 1, (
+        f"Expected noise_removed=1 (only remove_noise actions), got {result.noise_removed}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test: _merge_duplicates writes IntegratorAction audit records (Fix — holistic review)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_merge_duplicates_writes_audit_records():
+    """_merge_duplicates must create IntegratorAction audit records when action_repo is provided."""
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_a = MagicMock()
+    entity_a.id = entity_a_id
+    entity_a.name = "Alice"
+    entity_a.aliases = []
+    entity_a.properties = {}
+
+    entity_b = MagicMock()
+    entity_b.id = entity_b_id
+    entity_b.name = "Alicia"
+    entity_b.aliases = ["Ali"]
+    entity_b.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(side_effect=lambda eid: entity_a if eid == entity_a_id else entity_b)
+    entity_repo.update = AsyncMock()
+    entity_repo.list_recent = AsyncMock(return_value=[])
+
+    engine = _make_engine(entity_repo=entity_repo)
+
+    session = AsyncMock()
+    session.execute = AsyncMock()
+
+    action_repo = AsyncMock()
+    action_repo.create = AsyncMock(return_value=MagicMock())
+
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="Alice",
+        entity_b_name="Alicia",
+        score=0.95,
+        method="vector_shortlist",
+    )
+
+    merged = await engine._merge_duplicates([pair], ws_id, session, run_id=run_id, action_repo=action_repo)
+
+    assert merged == 1
+    # action_repo.create must have been called once for the merge audit record
+    action_repo.create.assert_called_once()
+    call_kwargs = action_repo.create.call_args
+    # Verify the audit record has action_type="merge" and correct entity references
+    action_data = call_kwargs.kwargs.get("data") or call_kwargs.args[1]
+    assert action_data.action_type == "merge"
+    assert action_data.entity_id == entity_a_id
+    assert str(entity_b_id) in str(action_data.params)

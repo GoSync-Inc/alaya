@@ -565,6 +565,88 @@ class TestIntegratorActionRollback:
         assert result.conflicts == []
 
     @pytest.mark.asyncio
+    async def test_rollback_rewrite_params_with_new_name_key(self) -> None:
+        """Rollback of rewrite works when params use 'new_name'/'new_description' keys (engine format)."""
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        entity_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="rewrite")
+        action.entity_id = entity_id
+        action.status = "applied"
+        # Engine stores params with 'new_name'/'new_description' keys
+        action.params = {"new_name": "New Name", "new_description": "New Desc"}
+        action.inverse = {"name": "Old Name", "description": "Old Desc"}
+
+        entity = L1Entity(
+            id=entity_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="New Name",
+            description="New Desc",
+            properties={},
+            is_deleted=False,
+        )
+        entity.external_ids = []
+
+        session = make_session()
+        session.execute.side_effect = [make_result(action), make_result(entity)]
+
+        repo = IntegratorActionRepository(session, ws_id)
+        result = await repo.apply_rollback(ws_id, action.id)
+        assert result.conflicts == []
+        assert entity.name == "Old Name"
+        assert entity.description == "Old Desc"
+        assert action.status == "rolled_back"
+
+    @pytest.mark.asyncio
+    async def test_rollback_rewrite_conflict_detection_with_new_name_key(self) -> None:
+        """Conflict detection works when params use 'new_name'/'new_description' keys.
+
+        When entity name was changed after the rewrite action (downstream edit),
+        rollback must detect the conflict even if params use 'new_name' key.
+        """
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        entity_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="rewrite")
+        action.entity_id = entity_id
+        action.status = "applied"
+        # Engine stores params with 'new_name'/'new_description' keys
+        action.params = {"new_name": "New Name", "new_description": "New Desc"}
+        action.inverse = {"name": "Old Name", "description": "Old Desc"}
+
+        entity = L1Entity(
+            id=entity_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            # Someone changed the name AFTER the rewrite action was applied
+            name="Someone Changed This",
+            description="New Desc",
+            properties={},
+            is_deleted=False,
+        )
+        entity.external_ids = []
+
+        session = make_session()
+        session.execute.side_effect = [make_result(action), make_result(entity)]
+
+        repo = IntegratorActionRepository(session, ws_id)
+        result = await repo.apply_rollback(ws_id, action.id)
+        # Must detect conflict: entity.name != params["new_name"]
+        assert len(result.conflicts) > 0, (
+            "Conflict detection failed: should detect name changed since action when using 'new_name' key"
+        )
+        assert "name" in result.conflicts[0]
+        # Entity name must NOT be reverted
+        assert entity.name == "Someone Changed This"
+
+    @pytest.mark.asyncio
     async def test_rollback_unknown_action_type_returns_conflict_not_rolled_back(self) -> None:
         """apply_rollback with unknown action_type returns conflict message and does NOT mark action as rolled_back."""
         from alayaos_core.repositories.integrator_action import IntegratorActionRepository

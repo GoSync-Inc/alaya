@@ -193,8 +193,9 @@ async def _rollback_rewrite(
     if action.entity_id is None:
         return []
 
-    new_name = action.params.get("name")
-    new_desc = action.params.get("description")
+    # Engine stores params as 'new_name'/'new_description'; legacy records may use 'name'/'description'
+    new_name = action.params.get("new_name") or action.params.get("name")
+    new_desc = action.params.get("new_description") or action.params.get("description")
     old_name = action.inverse.get("name")
     old_desc = action.inverse.get("description")
 

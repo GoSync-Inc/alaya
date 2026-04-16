@@ -6,7 +6,7 @@ Workflow per pass (up to max_passes=3):
   1. PanoramicPass — holistic triage: remove_noise, reclassify, rewrite,
                      create_from_cluster, link_cross_type.
   2. DeduplicatorV2 — batch-oriented entity deduplication.
-  3. Commit after each pass.
+  3. Flush after each pass (outer session.begin() handles commit).
   4. Converge if:
      a) total_actions == 0  → convergence_reason = "no_actions"
      b) action_hash unchanged from prior pass → "cycle_detected"
@@ -173,44 +173,7 @@ class IntegratorEngine:
         all_entity_ids = dirty_entity_ids | {e.id for e in window_entities}
 
         # Step 4: Load entity context for each unique entity ID
-        entities_with_context: list[EntityWithContext] = []
-        for entity_id in all_entity_ids:
-            entity = await self.entity_repo.get_by_id(entity_id)
-            if entity is None or getattr(entity, "is_deleted", False):
-                continue
-
-            # Load claims for this entity
-            claims, _, _ = await self.claim_repo.list(entity_id=entity_id, limit=50)
-            claims_dicts = [{"predicate": c.predicate, "value": c.value, "status": c.status} for c in claims]
-
-            # Load relations for this entity
-            relations, _, _ = await self.relation_repo.list(entity_id=entity_id, limit=50)
-            relations_dicts = [
-                {
-                    "source": str(r.source_entity_id),
-                    "target": str(r.target_entity_id),
-                    "type": r.relation_type,
-                }
-                for r in relations
-            ]
-
-            # Resolve entity type slug
-            try:
-                entity_type_slug = entity.entity_type.slug
-            except Exception:
-                entity_type_slug = "unknown"
-
-            entities_with_context.append(
-                EntityWithContext(
-                    id=entity.id,
-                    name=entity.name,
-                    entity_type=entity_type_slug,
-                    aliases=list(entity.aliases or []),
-                    properties=dict(entity.properties or {}),
-                    claims=claims_dicts,
-                    relations=relations_dicts,
-                )
-            )
+        entities_with_context = await self._load_entities_with_context(workspace_id, all_entity_ids)
 
         entities_scanned = len(entities_with_context)
         entities_deduplicated = 0
@@ -235,6 +198,16 @@ class IntegratorEngine:
         previous_hash: int | None = None
 
         for pass_number in range(1, _MAX_PASSES + 1):
+            # Re-fetch entities on pass 2+ to avoid stale data after mutations.
+            # Re-query the window so newly created entities (e.g. from create_from_cluster)
+            # are picked up, and deleted entities are excluded.
+            if pass_number > 1:
+                fresh_window = await self.entity_repo.list_recent(workspace_id, hours=window_hours)
+                all_entity_ids = dirty_entity_ids | {e.id for e in fresh_window}
+                entities_with_context = await self._load_entities_with_context(workspace_id, all_entity_ids)
+                claims_by_entity = {e.id: e.claims for e in entities_with_context}
+                relations_by_entity = {e.id: e.relations for e in entities_with_context}
+
             log.info(
                 "integrator_pass_start",
                 workspace_id=str(workspace_id),
@@ -273,8 +246,9 @@ class IntegratorEngine:
                 )
                 entities_deduplicated += applied_d
 
-            # Commit after each pass so the next pass sees the updated graph
-            await session.commit()
+            # Flush after each pass; the outer session.begin() context manager handles commit.
+            # (Calling session.commit() here would close the managed transaction in workers.)
+            await session.flush()
 
             total_actions = applied_p + applied_d
             log.info(
@@ -291,8 +265,10 @@ class IntegratorEngine:
                 convergence_reason = "no_actions"
                 break
 
-            # Convergence check 2: cycle detection via action signature hash
-            action_hash = hash(frozenset(str(a) for a in panoramic_result.actions))
+            # Convergence check 2: cycle detection via action signature hash.
+            # Include both panoramic actions and dedup count so that a pass where
+            # only dedup changes (not panoramic) does not trigger a false cycle.
+            action_hash = hash(frozenset([str(a) for a in panoramic_result.actions] + [f"dedup:{applied_d}"]))
             if previous_hash is not None and action_hash == previous_hash:
                 convergence_reason = "cycle_detected"
                 break
@@ -525,6 +501,57 @@ class IntegratorEngine:
                         rationale=action.rationale,
                     ),
                 )
+
+    # ---------------------------------------------------------------------------
+    # Entity loading helper
+    # ---------------------------------------------------------------------------
+
+    async def _load_entities_with_context(
+        self,
+        workspace_id: uuid.UUID,
+        entity_ids: set[uuid.UUID],
+    ) -> list[EntityWithContext]:
+        """Load entities with claims and relations for the given entity ID set.
+
+        Used both for the initial load and for refreshing between passes so that
+        mutations from the previous pass are visible to the next one.
+        """
+        entities_with_context: list[EntityWithContext] = []
+        for entity_id in entity_ids:
+            entity = await self.entity_repo.get_by_id(entity_id)
+            if entity is None or getattr(entity, "is_deleted", False):
+                continue
+
+            claims, _, _ = await self.claim_repo.list(entity_id=entity_id, limit=50)
+            claims_dicts = [{"predicate": c.predicate, "value": c.value, "status": c.status} for c in claims]
+
+            relations, _, _ = await self.relation_repo.list(entity_id=entity_id, limit=50)
+            relations_dicts = [
+                {
+                    "source": str(r.source_entity_id),
+                    "target": str(r.target_entity_id),
+                    "type": r.relation_type,
+                }
+                for r in relations
+            ]
+
+            try:
+                entity_type_slug = entity.entity_type.slug
+            except Exception:
+                entity_type_slug = "unknown"
+
+            entities_with_context.append(
+                EntityWithContext(
+                    id=entity.id,
+                    name=entity.name,
+                    entity_type=entity_type_slug,
+                    aliases=list(entity.aliases or []),
+                    properties=dict(entity.properties or {}),
+                    claims=claims_dicts,
+                    relations=relations_dicts,
+                )
+            )
+        return entities_with_context
 
     # ---------------------------------------------------------------------------
     # Embedding service

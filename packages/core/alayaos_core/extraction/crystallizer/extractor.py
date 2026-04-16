@@ -14,14 +14,14 @@ if TYPE_CHECKING:
 
 # Domain → relevant entity types for cache snapshot filtering
 _DOMAIN_TO_TYPES: dict[str, list[str]] = {
-    "project": ["project", "task", "milestone"],
+    "project": ["project", "task"],
     "decision": ["decision", "meeting"],
-    "strategic": ["project", "goal"],
-    "risk": ["risk", "issue"],
+    "strategic": ["project", "goal", "north_star"],
+    "risk": ["topic", "decision"],
     "people": ["person", "team"],
-    "engineering": ["document", "project"],
+    "engineering": ["document", "project", "task"],
     "knowledge": ["document", "process"],
-    "customer": ["person", "organization"],
+    "customer": ["person", "team"],
     "smalltalk": [],
 }
 

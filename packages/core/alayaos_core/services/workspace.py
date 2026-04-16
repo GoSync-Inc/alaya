@@ -19,7 +19,17 @@ CORE_ENTITY_TYPES = [
     {"slug": "tool", "display_name": "Tool", "description": "A tool or service"},
     {"slug": "process", "display_name": "Process", "description": "A process or workflow"},
     {"slug": "event", "display_name": "Event", "description": "An organizational event"},
+    {"slug": "task", "display_name": "Task", "description": "A work item, typically daily to weekly scope"},
+    {"slug": "goal", "display_name": "Goal", "description": "A quarterly to monthly objective composed of projects"},
+    {"slug": "north_star", "display_name": "North Star", "description": "A yearly to multi-year strategic objective"},
 ]
+
+ENTITY_TYPE_TIER_RANK: dict[str, int] = {
+    "task": 1,
+    "project": 2,
+    "goal": 3,
+    "north_star": 4,
+}
 
 CORE_PREDICATES = [
     {"slug": "deadline", "display_name": "Deadline", "value_type": "date", "supersession_strategy": "latest_wins"},
@@ -87,6 +97,12 @@ CORE_PREDICATES = [
         "slug": "preferred_language",
         "display_name": "Preferred Language",
         "value_type": "text",
+        "supersession_strategy": "accumulate",
+    },
+    {
+        "slug": "part_of",
+        "display_name": "Part Of",
+        "value_type": "entity_ref",
         "supersession_strategy": "accumulate",
     },
 ]

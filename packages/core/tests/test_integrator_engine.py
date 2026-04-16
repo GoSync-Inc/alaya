@@ -435,3 +435,229 @@ async def test_dedup_v2_receives_real_run_id():
     for rid in captured_run_ids:
         assert rid != placeholder, "_dedup_v2 received placeholder run_id uuid.UUID(int=0)"
     assert real_run_id in captured_run_ids, f"Expected real_run_id {real_run_id} in calls"
+
+
+# ---------------------------------------------------------------------------
+# Test: entity refresh between passes (Fix 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_entities_reloaded_between_passes():
+    """entities_with_context is reloaded after commit so pass 2 sees updated graph."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicAction, PanoramicResult
+    from alayaos_core.extraction.integrator.schemas import EnrichmentResult
+
+    # Two entities: pass 1 sees [entity_old], pass 2 should see [entity_new]
+    entity_old_id = uuid.uuid4()
+    entity_new_id = uuid.uuid4()
+
+    entity_old_mock = MagicMock()
+    entity_old_mock.id = entity_old_id
+    entity_old_mock.name = "OldName"
+    entity_old_mock.is_deleted = False
+    entity_old_mock.aliases = []
+    entity_old_mock.properties = {}
+    entity_old_mock.entity_type = MagicMock()
+    entity_old_mock.entity_type.slug = "person"
+
+    entity_new_mock = MagicMock()
+    entity_new_mock.id = entity_new_id
+    entity_new_mock.name = "NewName"
+    entity_new_mock.is_deleted = False
+    entity_new_mock.aliases = []
+    entity_new_mock.properties = {}
+    entity_new_mock.entity_type = MagicMock()
+    entity_new_mock.entity_type.slug = "person"
+
+    # First list_recent call (initial load) returns old entity
+    # Second list_recent call (pass 2 refresh) returns new entity
+    entity_repo = AsyncMock()
+    entity_repo.list_recent = AsyncMock(
+        side_effect=[
+            [entity_old_mock],  # initial
+            [entity_new_mock],  # refresh in pass 2
+        ]
+    )
+    entity_repo.get_by_id = AsyncMock(
+        side_effect=lambda eid: entity_old_mock if eid == entity_old_id else entity_new_mock
+    )
+
+    claim_repo = AsyncMock()
+    claim_repo.list = AsyncMock(return_value=([], None, False))
+    relation_repo = AsyncMock()
+    relation_repo.list = AsyncMock(return_value=([], None, False))
+    entity_cache = AsyncMock()
+    entity_cache.warm = AsyncMock()
+
+    settings = _make_settings()
+    redis_mock = _make_redis_mock()
+
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=claim_repo,
+        relation_repo=relation_repo,
+        entity_cache=entity_cache,
+        redis=redis_mock,
+        settings=settings,
+    )
+    engine._enricher = AsyncMock()
+    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+
+    pass_entities_seen: list[list[uuid.UUID]] = []
+
+    async def pano_run(*args, **kwargs):
+        entities = kwargs.get("entities", args[1] if len(args) > 1 else [])
+        pass_entities_seen.append([e.id for e in entities])
+        if len(pass_entities_seen) == 1:
+            # Pass 1: emit one action so loop continues
+            return PanoramicResult(
+                actions=[
+                    PanoramicAction(
+                        action="remove_noise",
+                        entity_id=entity_old_id,
+                        params={},
+                        confidence=0.9,
+                        rationale="stale",
+                    )
+                ]
+            )
+        # Pass 2: no actions
+        return PanoramicResult(actions=[])
+
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    session = AsyncMock()
+    session.commit = AsyncMock()
+    session.flush = AsyncMock()
+
+    with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_pp:
+        pano_instance = AsyncMock()
+        pano_instance.run = AsyncMock(side_effect=pano_run)
+        mock_pp.return_value = pano_instance
+        engine._dedup_v2 = AsyncMock(return_value=0)
+        engine._apply_panoramic_actions = AsyncMock(side_effect=lambda actions, *a, **kw: len(actions))
+
+        result = await engine._run_locked(ws_id, run_id, session)
+
+    # 2 passes should have run
+    assert result.pass_count == 2, f"Expected 2 passes, got {result.pass_count}"
+    # Pass 2 must see the refreshed entity list (entity_new_id, not entity_old_id)
+    assert len(pass_entities_seen) == 2
+    assert entity_new_id in pass_entities_seen[1], (
+        "Pass 2 did not see the reloaded entity — entity refresh between passes is missing"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test: flush not commit inside loop (Fix 3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_flush_not_commit_in_loop():
+    """Engine calls session.flush (not session.commit) inside the multi-pass loop."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicResult
+    from alayaos_core.extraction.integrator.schemas import EnrichmentResult
+
+    engine = _make_engine()
+    engine._enricher = AsyncMock()
+    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+
+    run_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    session = AsyncMock()
+    session.commit = AsyncMock()
+    session.flush = AsyncMock()
+
+    with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_pp:
+        pano_instance = AsyncMock()
+        pano_instance.run = AsyncMock(return_value=PanoramicResult(actions=[]))
+        mock_pp.return_value = pano_instance
+        engine._dedup_v2 = AsyncMock(return_value=0)
+
+        await engine._run_locked(ws_id, run_id, session)
+
+    # session.commit must NOT have been called inside _run_locked
+    session.commit.assert_not_called()
+    # session.flush must have been called (at least once per pass)
+    session.flush.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Test: cycle detection includes dedup count (Fix 4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cycle_detection_includes_dedup_count():
+    """Cycle detection must not fire when panoramic is identical but dedup count varies.
+
+    If dedup is skipped (no entities), applied_d=0 both passes, hash repeats => cycle.
+    When entities are present and dedup count differs pass-to-pass, hash must differ
+    so cycle is NOT detected prematurely.
+    """
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicAction, PanoramicResult
+    from alayaos_core.extraction.integrator.schemas import EnrichmentResult
+
+    entity_id = uuid.uuid4()
+    entity_mock = MagicMock()
+    entity_mock.id = entity_id
+    entity_mock.name = "Alice"
+    entity_mock.is_deleted = False
+    entity_mock.aliases = []
+    entity_mock.properties = {}
+    entity_mock.entity_type = MagicMock()
+    entity_mock.entity_type.slug = "person"
+
+    entity_repo = AsyncMock()
+    entity_repo.list_recent = AsyncMock(return_value=[entity_mock])
+    entity_repo.get_by_id = AsyncMock(return_value=entity_mock)
+
+    engine = _make_engine(entity_repo=entity_repo)
+    engine._enricher = AsyncMock()
+    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+
+    # Same panoramic action every pass — would trigger cycle_detected if hash ignores dedup
+    repeated_action = PanoramicAction(
+        action="remove_noise",
+        entity_id=entity_id,
+        params={"reason": "cycle"},
+        confidence=0.9,
+        rationale="cycling",
+    )
+    same_panoramic_result = PanoramicResult(actions=[repeated_action])
+
+    dedup_call_count = [0]
+    # Dedup returns different counts per pass: 1 on pass 1, 0 on pass 2
+    # This means hash(panoramic + dedup:1) != hash(panoramic + dedup:0) → no cycle
+    dedup_returns = [1, 0]
+
+    async def dedup_v2_side_effect(*args, **kwargs):
+        idx = min(dedup_call_count[0], len(dedup_returns) - 1)
+        count = dedup_returns[idx]
+        dedup_call_count[0] += 1
+        return count
+
+    run_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    session = AsyncMock()
+    session.flush = AsyncMock()
+
+    with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_pp:
+        pano_instance = AsyncMock()
+        pano_instance.run = AsyncMock(return_value=same_panoramic_result)
+        mock_pp.return_value = pano_instance
+        engine._dedup_v2 = AsyncMock(side_effect=dedup_v2_side_effect)
+        engine._apply_panoramic_actions = AsyncMock(return_value=1)
+
+        result = await engine._run_locked(ws_id, run_id, session)
+
+    # With different dedup counts (1 vs 0), cycle_detected should NOT fire at pass 2.
+    # It may converge via no_actions (pass 3: both=0) or max_passes, but not cycle at pass 2.
+    assert not (result.convergence_reason == "cycle_detected" and result.pass_count == 2), (
+        "Cycle detected at pass 2 despite dedup counts differing (1 vs 0) between passes"
+    )

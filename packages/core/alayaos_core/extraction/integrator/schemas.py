@@ -7,6 +7,28 @@ import uuid
 from pydantic import BaseModel, Field
 
 
+class MergeGroup(BaseModel):
+    """A group of duplicate entities identified by the LLM batch deduplicator.
+
+    winner_id  — entity to keep (gets merged_name, merged_description, union aliases)
+    loser_ids  — entities to soft-delete and reassign claims/relations from
+    """
+
+    winner_id: uuid.UUID
+    loser_ids: list[uuid.UUID]
+    merged_name: str
+    merged_description: str
+    merged_aliases: list[str]
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: str = Field(max_length=280)
+
+
+class DedupResult(BaseModel):
+    """Result from a batch LLM deduplication call."""
+
+    groups: list[MergeGroup] = Field(default_factory=list)
+
+
 class EntityWithContext(BaseModel):
     """Entity with its associated claims, relations, and metadata for integrator processing."""
 

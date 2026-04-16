@@ -71,6 +71,10 @@ class FakeLLMAdapter:
             "is_same_entity": True,
             "reasoning": "names match (fake adapter)",
         },
+        # DedupResult defaults to empty groups (no merges) — tests override as needed
+        "DedupResult": {
+            "groups": [],
+        },
     }
 
     @classmethod

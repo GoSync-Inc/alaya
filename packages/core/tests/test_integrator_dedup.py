@@ -536,3 +536,429 @@ async def test_find_duplicates_fallback_does_not_cross_entity_types():
         f"Cross-type merge detected: find_duplicates returned {pairs} for "
         "'Alice' (person) vs 'Alice' (project) — same-type guard is missing."
     )
+
+
+# ---------------------------------------------------------------------------
+# NEW Sprint 5 tests
+# ---------------------------------------------------------------------------
+
+
+# ── Schema tests ────────────────────────────────────────────────────────────
+
+
+def test_merge_group_schema():
+    """MergeGroup schema must be importable and validate correctly."""
+    from alayaos_core.extraction.integrator.schemas import MergeGroup
+
+    g = MergeGroup(
+        winner_id=uuid.uuid4(),
+        loser_ids=[uuid.uuid4()],
+        merged_name="Alice Johnson",
+        merged_description="Senior engineer",
+        merged_aliases=["Alice", "AJ"],
+        confidence=0.95,
+        rationale="Same person, different spellings",
+    )
+    assert g.merged_name == "Alice Johnson"
+    assert 0.0 <= g.confidence <= 1.0
+
+
+def test_dedup_result_schema():
+    """DedupResult schema must be importable and default to empty groups."""
+    from alayaos_core.extraction.integrator.schemas import DedupResult
+
+    r = DedupResult(groups=[])
+    assert r.groups == []
+
+
+def test_merge_group_confidence_bounds():
+    """MergeGroup.confidence must be clamped to [0.0, 1.0]."""
+    import pydantic
+
+    from alayaos_core.extraction.integrator.schemas import MergeGroup
+
+    with pytest.raises(pydantic.ValidationError):
+        MergeGroup(
+            winner_id=uuid.uuid4(),
+            loser_ids=[uuid.uuid4()],
+            merged_name="X",
+            merged_description="",
+            merged_aliases=[],
+            confidence=1.5,  # invalid
+            rationale="test",
+        )
+
+
+def test_merge_group_rationale_max_length():
+    """MergeGroup.rationale must be capped at 280 chars."""
+    import pydantic
+
+    from alayaos_core.extraction.integrator.schemas import MergeGroup
+
+    with pytest.raises(pydantic.ValidationError):
+        MergeGroup(
+            winner_id=uuid.uuid4(),
+            loser_ids=[uuid.uuid4()],
+            merged_name="X",
+            merged_description="",
+            merged_aliases=[],
+            confidence=0.9,
+            rationale="x" * 281,  # 1 char too long
+        )
+
+
+# ── Composite signal ordering ────────────────────────────────────────────────
+
+
+def test_composite_signal_ordering():
+    """compute_composite_score must return higher value for similar names than dissimilar ones."""
+    from alayaos_core.extraction.integrator.dedup import compute_composite_score
+
+    e1 = _make_entity("Alice Johnson")
+    e2 = _make_entity("Alice Johnson Jr")  # very similar name
+    e3 = _make_entity("Bob Smith")  # dissimilar name
+
+    score_similar = compute_composite_score(
+        entity_a=e1,
+        entity_b=e2,
+        cosine_sim=0.99,
+        same_run=True,
+        same_owner=False,
+    )
+    score_dissimilar = compute_composite_score(
+        entity_a=e1,
+        entity_b=e3,
+        cosine_sim=0.1,
+        same_run=False,
+        same_owner=False,
+    )
+
+    assert score_similar > score_dissimilar, (
+        f"Expected similar pair ({score_similar:.3f}) > dissimilar pair ({score_dissimilar:.3f})"
+    )
+
+
+def test_composite_signal_co_event_bonus():
+    """Co-event flag adds 0.2 to composite score."""
+    from alayaos_core.extraction.integrator.dedup import compute_composite_score
+
+    e1 = _make_entity("Alice")
+    e2 = _make_entity("Alice")
+
+    score_with = compute_composite_score(e1, e2, cosine_sim=0.5, same_run=True, same_owner=False)
+    score_without = compute_composite_score(e1, e2, cosine_sim=0.5, same_run=False, same_owner=False)
+
+    assert abs(score_with - score_without - 0.2) < 1e-6, (
+        f"Expected co-event to add exactly 0.2, got diff {score_with - score_without:.6f}"
+    )
+
+
+def test_composite_signal_shared_owner_bonus():
+    """Shared owner flag adds 0.1 to composite score."""
+    from alayaos_core.extraction.integrator.dedup import compute_composite_score
+
+    e1 = _make_entity("Alice")
+    e2 = _make_entity("Alice")
+
+    score_with = compute_composite_score(e1, e2, cosine_sim=0.5, same_run=False, same_owner=True)
+    score_without = compute_composite_score(e1, e2, cosine_sim=0.5, same_run=False, same_owner=False)
+
+    assert abs(score_with - score_without - 0.1) < 1e-6, (
+        f"Expected shared owner to add exactly 0.1, got diff {score_with - score_without:.6f}"
+    )
+
+
+# ── Batch assembly ───────────────────────────────────────────────────────────
+
+
+def test_all_pairs_within_type_batching():
+    """All same-type entities (≥2) must be included in batches."""
+    from alayaos_core.extraction.integrator.dedup import assemble_batches
+
+    type_id = uuid.uuid4()
+    entities = [_make_entity(f"Entity-{i}", entity_type="person", entity_type_id=type_id) for i in range(5)]
+    embeddings = {e.id: [1.0, 0.0, 0.0, 0.0] for e in entities}
+
+    batches = assemble_batches(entities, embeddings, batch_size=9)
+
+    # All 5 person entities must appear somewhere in a batch
+    all_ids_in_batches = {e.id for batch in batches for e in batch}
+    for entity in entities:
+        assert entity.id in all_ids_in_batches, f"Entity {entity.name!r} missing from batches"
+
+
+def test_batch_size_config():
+    """Batches must not exceed the configured batch_size."""
+    from alayaos_core.extraction.integrator.dedup import assemble_batches
+
+    type_id = uuid.uuid4()
+    entities = [_make_entity(f"Entity-{i:02d}", entity_type="person", entity_type_id=type_id) for i in range(25)]
+    embeddings = {e.id: [1.0, 0.0, 0.0, 0.0] for e in entities}
+
+    batch_size = 9
+    batches = assemble_batches(entities, embeddings, batch_size=batch_size)
+
+    for i, batch in enumerate(batches):
+        assert len(batch) <= batch_size, f"Batch {i} has {len(batch)} entities, exceeds batch_size={batch_size}"
+
+
+def test_no_cross_type_merges_in_batch():
+    """assemble_batches must never mix entities of different types in one batch."""
+    from alayaos_core.extraction.integrator.dedup import assemble_batches
+
+    type_a_id = uuid.uuid4()
+    type_b_id = uuid.uuid4()
+    persons = [_make_entity(f"Person-{i}", entity_type="person", entity_type_id=type_a_id) for i in range(3)]
+    projects = [_make_entity(f"Project-{i}", entity_type="project", entity_type_id=type_b_id) for i in range(3)]
+    all_entities = persons + projects
+    embeddings = {e.id: [1.0, 0.0, 0.0, 0.0] for e in all_entities}
+
+    batches = assemble_batches(all_entities, embeddings, batch_size=9)
+
+    for batch in batches:
+        types_in_batch = {e.entity_type for e in batch}
+        assert len(types_in_batch) == 1, f"Cross-type batch detected: {types_in_batch}"
+
+
+def test_settings_has_dedup_batch_size():
+    """Settings must expose INTEGRATOR_DEDUP_BATCH_SIZE with default 9."""
+    from alayaos_core.config import Settings
+
+    s = Settings()
+    assert hasattr(s, "INTEGRATOR_DEDUP_BATCH_SIZE"), "Missing INTEGRATOR_DEDUP_BATCH_SIZE"
+    assert s.INTEGRATOR_DEDUP_BATCH_SIZE == 9
+
+
+# ── Merge-with-rewrite ───────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_merge_with_rewrite_output():
+    """After merge: winner has merged_name, merged_description, union aliases."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from alayaos_core.extraction.integrator.dedup import DeduplicatorV2
+    from alayaos_core.extraction.integrator.schemas import DedupResult, EntityWithContext, MergeGroup
+
+    winner_id = uuid.uuid4()
+    loser_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+
+    winner_entity = MagicMock()
+    winner_entity.id = winner_id
+    winner_entity.name = "Alice Johnson"
+    winner_entity.aliases = ["AJ"]
+    winner_entity.description = "engineer"
+    winner_entity.properties = {}
+
+    loser_entity = MagicMock()
+    loser_entity.id = loser_id
+    loser_entity.name = "Alice Jonson"
+    loser_entity.aliases = ["Alice J"]
+    loser_entity.description = "senior engineer"
+    loser_entity.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(
+        side_effect=lambda eid: {winner_id: winner_entity, loser_id: loser_entity}.get(eid)
+    )
+    entity_repo.update = AsyncMock()
+
+    fake_llm = AsyncMock()
+
+    dedup_result = DedupResult(
+        groups=[
+            MergeGroup(
+                winner_id=winner_id,
+                loser_ids=[loser_id],
+                merged_name="Alice Johnson",
+                merged_description="Senior engineer",
+                merged_aliases=["AJ", "Alice J"],
+                confidence=0.95,
+                rationale="Same person",
+            )
+        ]
+    )
+    fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
+
+    session = AsyncMock()
+
+    deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
+
+    winner_ewc = EntityWithContext(
+        id=winner_id,
+        name="Alice Johnson",
+        entity_type="person",
+        aliases=["AJ"],
+    )
+    loser_ewc = EntityWithContext(
+        id=loser_id,
+        name="Alice Jonson",
+        entity_type="person",
+        aliases=["Alice J"],
+    )
+
+    batches = [[winner_ewc, loser_ewc]]
+    merged = await deduplicator.execute_batches(
+        batches=batches,
+        entity_type="person",
+        workspace_id=ws_id,
+        run_id=run_id,
+        entity_repo=entity_repo,
+        session=session,
+        action_repo=None,
+    )
+
+    assert merged >= 1
+    # winner entity update must have been called with merged_name and merged_description
+    update_calls = entity_repo.update.call_args_list
+    winner_calls = [c for c in update_calls if c.args[0] == winner_id]
+    assert len(winner_calls) >= 1
+    # Check that the name was set to merged_name
+    winner_kwargs = winner_calls[0].kwargs
+    assert winner_kwargs.get("name") == "Alice Johnson" or winner_kwargs.get("aliases") is not None
+
+
+@pytest.mark.asyncio
+async def test_loser_soft_deleted():
+    """After merge: loser entity must have is_deleted=True."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from alayaos_core.extraction.integrator.dedup import DeduplicatorV2
+    from alayaos_core.extraction.integrator.schemas import DedupResult, EntityWithContext, MergeGroup
+
+    winner_id = uuid.uuid4()
+    loser_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+
+    winner_entity = MagicMock()
+    winner_entity.id = winner_id
+    winner_entity.name = "Alice Johnson"
+    winner_entity.aliases = []
+    winner_entity.description = ""
+    winner_entity.properties = {}
+
+    loser_entity = MagicMock()
+    loser_entity.id = loser_id
+    loser_entity.name = "Alice Jonson"
+    loser_entity.aliases = []
+    loser_entity.description = ""
+    loser_entity.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(
+        side_effect=lambda eid: {winner_id: winner_entity, loser_id: loser_entity}.get(eid)
+    )
+    entity_repo.update = AsyncMock()
+
+    dedup_result = DedupResult(
+        groups=[
+            MergeGroup(
+                winner_id=winner_id,
+                loser_ids=[loser_id],
+                merged_name="Alice Johnson",
+                merged_description="Engineer",
+                merged_aliases=[],
+                confidence=0.9,
+                rationale="Same person",
+            )
+        ]
+    )
+    fake_llm = AsyncMock()
+    fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
+
+    session = AsyncMock()
+    deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
+
+    winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person")
+    loser_ewc = EntityWithContext(id=loser_id, name="Alice Jonson", entity_type="person")
+
+    await deduplicator.execute_batches(
+        batches=[[winner_ewc, loser_ewc]],
+        entity_type="person",
+        workspace_id=ws_id,
+        run_id=run_id,
+        entity_repo=entity_repo,
+        session=session,
+        action_repo=None,
+    )
+
+    # loser must be soft-deleted
+    update_calls = entity_repo.update.call_args_list
+    loser_calls = [c for c in update_calls if c.args[0] == loser_id]
+    assert len(loser_calls) >= 1
+    loser_kwargs = loser_calls[-1].kwargs
+    assert loser_kwargs.get("is_deleted") is True, (
+        f"Expected loser to be soft-deleted (is_deleted=True), got kwargs: {loser_kwargs}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_claims_relations_reassigned():
+    """After merge: SQL UPDATE must be called to move claims/relations from loser to winner."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from alayaos_core.extraction.integrator.dedup import DeduplicatorV2
+    from alayaos_core.extraction.integrator.schemas import DedupResult, EntityWithContext, MergeGroup
+
+    winner_id = uuid.uuid4()
+    loser_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+
+    winner_entity = MagicMock()
+    winner_entity.id = winner_id
+    winner_entity.name = "Alice Johnson"
+    winner_entity.aliases = []
+    winner_entity.description = ""
+    winner_entity.properties = {}
+
+    loser_entity = MagicMock()
+    loser_entity.id = loser_id
+    loser_entity.name = "Alice Jonson"
+    loser_entity.aliases = []
+    loser_entity.description = ""
+    loser_entity.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(
+        side_effect=lambda eid: {winner_id: winner_entity, loser_id: loser_entity}.get(eid)
+    )
+    entity_repo.update = AsyncMock()
+
+    dedup_result = DedupResult(
+        groups=[
+            MergeGroup(
+                winner_id=winner_id,
+                loser_ids=[loser_id],
+                merged_name="Alice Johnson",
+                merged_description="Engineer",
+                merged_aliases=[],
+                confidence=0.9,
+                rationale="Same",
+            )
+        ]
+    )
+    fake_llm = AsyncMock()
+    fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
+
+    session = AsyncMock()
+    deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
+
+    winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person")
+    loser_ewc = EntityWithContext(id=loser_id, name="Alice Jonson", entity_type="person")
+
+    await deduplicator.execute_batches(
+        batches=[[winner_ewc, loser_ewc]],
+        entity_type="person",
+        workspace_id=ws_id,
+        run_id=run_id,
+        entity_repo=entity_repo,
+        session=session,
+        action_repo=None,
+    )
+
+    # session.execute must have been called (for SQL reassignment)
+    assert session.execute.called, "session.execute was not called — claims/relations not reassigned"

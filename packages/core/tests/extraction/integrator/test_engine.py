@@ -220,14 +220,14 @@ async def test_engine_dedup_called():
         redis=redis_mock,
         settings=_make_settings(),
     )
-    # Inject shortlist dedup mock (Sprint S6: engine now uses _shortlist_dedup, not find_duplicates)
-    shortlist_dedup_mock = AsyncMock(return_value=[])
-    engine._shortlist_dedup = shortlist_dedup_mock
+    # Inject dedup v2 mock (Sprint 5: engine now uses _dedup_v2, not _shortlist_dedup)
+    dedup_v2_mock = AsyncMock(return_value=0)
+    engine._dedup_v2 = dedup_v2_mock
 
     session = AsyncMock()
     await engine.run(ws_id, session)
 
-    shortlist_dedup_mock.assert_called_once()
+    dedup_v2_mock.assert_called_once()
 
 
 @pytest.mark.asyncio

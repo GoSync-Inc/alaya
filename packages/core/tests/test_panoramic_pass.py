@@ -309,3 +309,299 @@ def test_panoramic_result_schema():
     )
     assert len(result.actions) == 1
     assert result.actions[0].action == "rewrite"
+
+
+# ---------------------------------------------------------------------------
+# Test Fix 1: single-entity actions without entity_id are filtered out
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_single_entity_action_without_entity_id_filtered():
+    """remove_noise/reclassify/rewrite with entity_id=None are dropped."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicPass, PanoramicResult
+
+    entity = _make_entity("real-entity")
+    actions = [
+        {
+            "action": "remove_noise",
+            "entity_id": None,  # missing entity_id — must be rejected
+            "params": {},
+            "confidence": 0.9,
+            "rationale": "noise entity",
+        }
+    ]
+    fake_llm = _make_fake_llm_with_actions(actions)
+    session = _make_session()
+
+    panoramic = PanoramicPass(llm_service=fake_llm, session=session)
+    result = await panoramic.run(
+        workspace_id=uuid.uuid4(),
+        entities=[entity],
+        entity_types=[],
+        claims_by_entity={},
+        relations_by_entity={},
+    )
+
+    assert isinstance(result, PanoramicResult)
+    assert len(result.actions) == 0, "remove_noise with entity_id=None must be filtered out"
+
+
+@pytest.mark.asyncio
+async def test_reclassify_without_entity_id_filtered():
+    """reclassify with entity_id=None is dropped."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicPass, PanoramicResult
+
+    entity = _make_entity("some-entity")
+    actions = [
+        {
+            "action": "reclassify",
+            "entity_id": None,
+            "params": {"from_type": "person", "to_type": "project"},
+            "confidence": 0.8,
+            "rationale": "wrong type",
+        }
+    ]
+    fake_llm = _make_fake_llm_with_actions(actions)
+    session = _make_session()
+
+    panoramic = PanoramicPass(llm_service=fake_llm, session=session)
+    result = await panoramic.run(
+        workspace_id=uuid.uuid4(),
+        entities=[entity],
+        entity_types=[],
+        claims_by_entity={},
+        relations_by_entity={},
+    )
+
+    assert isinstance(result, PanoramicResult)
+    assert len(result.actions) == 0, "reclassify with entity_id=None must be filtered out"
+
+
+@pytest.mark.asyncio
+async def test_rewrite_without_entity_id_filtered():
+    """rewrite with entity_id=None is dropped."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicPass, PanoramicResult
+
+    entity = _make_entity("some-entity")
+    actions = [
+        {
+            "action": "rewrite",
+            "entity_id": None,
+            "params": {"new_name": "Short Name"},
+            "confidence": 0.7,
+            "rationale": "name too long",
+        }
+    ]
+    fake_llm = _make_fake_llm_with_actions(actions)
+    session = _make_session()
+
+    panoramic = PanoramicPass(llm_service=fake_llm, session=session)
+    result = await panoramic.run(
+        workspace_id=uuid.uuid4(),
+        entities=[entity],
+        entity_types=[],
+        claims_by_entity={},
+        relations_by_entity={},
+    )
+
+    assert isinstance(result, PanoramicResult)
+    assert len(result.actions) == 0, "rewrite with entity_id=None must be filtered out"
+
+
+# ---------------------------------------------------------------------------
+# Test Fix 2: create_from_cluster with invalid child_ids is filtered
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_from_cluster_with_invalid_child_ids_filtered():
+    """create_from_cluster referencing unknown child_ids is dropped."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicPass, PanoramicResult
+
+    real_entity = _make_entity("task-a")
+    fake_child_id = uuid.uuid4()  # not in entity list
+
+    actions = [
+        {
+            "action": "create_from_cluster",
+            "entity_id": None,
+            "params": {
+                "child_ids": [str(fake_child_id)],
+                "entity_type": "project",
+                "name": "New Project",
+                "description": "cluster of tasks",
+            },
+            "confidence": 0.75,
+            "rationale": "cluster detected",
+        }
+    ]
+    fake_llm = _make_fake_llm_with_actions(actions)
+    session = _make_session()
+
+    panoramic = PanoramicPass(llm_service=fake_llm, session=session)
+    result = await panoramic.run(
+        workspace_id=uuid.uuid4(),
+        entities=[real_entity],
+        entity_types=[],
+        claims_by_entity={},
+        relations_by_entity={},
+    )
+
+    assert isinstance(result, PanoramicResult)
+    assert len(result.actions) == 0, "create_from_cluster with unknown child_ids must be filtered out"
+
+
+@pytest.mark.asyncio
+async def test_create_from_cluster_with_valid_child_ids_passes():
+    """create_from_cluster referencing all valid child_ids is kept."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicPass, PanoramicResult
+
+    child_a = _make_entity("task-a")
+    child_b = _make_entity("task-b")
+    child_c = _make_entity("task-c")
+
+    actions = [
+        {
+            "action": "create_from_cluster",
+            "entity_id": None,
+            "params": {
+                "child_ids": [str(child_a.id), str(child_b.id), str(child_c.id)],
+                "entity_type": "project",
+                "name": "New Project",
+                "description": "cluster of tasks",
+            },
+            "confidence": 0.85,
+            "rationale": "cluster detected",
+        }
+    ]
+    fake_llm = _make_fake_llm_with_actions(actions)
+    session = _make_session()
+
+    panoramic = PanoramicPass(llm_service=fake_llm, session=session)
+    result = await panoramic.run(
+        workspace_id=uuid.uuid4(),
+        entities=[child_a, child_b, child_c],
+        entity_types=[],
+        claims_by_entity={},
+        relations_by_entity={},
+    )
+
+    assert isinstance(result, PanoramicResult)
+    assert len(result.actions) == 1, "create_from_cluster with all valid child_ids must pass through"
+
+
+# ---------------------------------------------------------------------------
+# Test Fix 2: link_cross_type with invalid source_id / target_id is filtered
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_link_cross_type_with_invalid_source_id_filtered():
+    """link_cross_type referencing unknown source_id is dropped."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicPass, PanoramicResult
+
+    real_entity = _make_entity("entity-a")
+    fake_source_id = uuid.uuid4()
+
+    actions = [
+        {
+            "action": "link_cross_type",
+            "entity_id": None,
+            "params": {
+                "source_id": str(fake_source_id),
+                "target_id": str(real_entity.id),
+                "relation_type": "part_of",
+            },
+            "confidence": 0.8,
+            "rationale": "related entities",
+        }
+    ]
+    fake_llm = _make_fake_llm_with_actions(actions)
+    session = _make_session()
+
+    panoramic = PanoramicPass(llm_service=fake_llm, session=session)
+    result = await panoramic.run(
+        workspace_id=uuid.uuid4(),
+        entities=[real_entity],
+        entity_types=[],
+        claims_by_entity={},
+        relations_by_entity={},
+    )
+
+    assert isinstance(result, PanoramicResult)
+    assert len(result.actions) == 0, "link_cross_type with unknown source_id must be filtered out"
+
+
+@pytest.mark.asyncio
+async def test_link_cross_type_with_invalid_target_id_filtered():
+    """link_cross_type referencing unknown target_id is dropped."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicPass, PanoramicResult
+
+    real_entity = _make_entity("entity-a")
+    fake_target_id = uuid.uuid4()
+
+    actions = [
+        {
+            "action": "link_cross_type",
+            "entity_id": None,
+            "params": {
+                "source_id": str(real_entity.id),
+                "target_id": str(fake_target_id),
+                "relation_type": "part_of",
+            },
+            "confidence": 0.8,
+            "rationale": "related entities",
+        }
+    ]
+    fake_llm = _make_fake_llm_with_actions(actions)
+    session = _make_session()
+
+    panoramic = PanoramicPass(llm_service=fake_llm, session=session)
+    result = await panoramic.run(
+        workspace_id=uuid.uuid4(),
+        entities=[real_entity],
+        entity_types=[],
+        claims_by_entity={},
+        relations_by_entity={},
+    )
+
+    assert isinstance(result, PanoramicResult)
+    assert len(result.actions) == 0, "link_cross_type with unknown target_id must be filtered out"
+
+
+@pytest.mark.asyncio
+async def test_link_cross_type_with_valid_ids_passes():
+    """link_cross_type with both valid source and target IDs is kept."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicPass, PanoramicResult
+
+    entity_a = _make_entity("entity-a")
+    entity_b = _make_entity("entity-b")
+
+    actions = [
+        {
+            "action": "link_cross_type",
+            "entity_id": None,
+            "params": {
+                "source_id": str(entity_a.id),
+                "target_id": str(entity_b.id),
+                "relation_type": "part_of",
+            },
+            "confidence": 0.9,
+            "rationale": "clearly related",
+        }
+    ]
+    fake_llm = _make_fake_llm_with_actions(actions)
+    session = _make_session()
+
+    panoramic = PanoramicPass(llm_service=fake_llm, session=session)
+    result = await panoramic.run(
+        workspace_id=uuid.uuid4(),
+        entities=[entity_a, entity_b],
+        entity_types=[],
+        claims_by_entity={},
+        relations_by_entity={},
+    )
+
+    assert isinstance(result, PanoramicResult)
+    assert len(result.actions) == 1, "link_cross_type with valid source and target IDs must pass through"

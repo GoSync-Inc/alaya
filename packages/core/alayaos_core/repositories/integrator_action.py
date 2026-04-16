@@ -99,10 +99,14 @@ class IntegratorActionRepository(BaseRepository):
                 conflicts=[],
             )
 
-        conflicts: list[str] = []
         handler = _ROLLBACK_HANDLERS.get(action.action_type)
-        if handler is not None:
-            conflicts = await handler(self, action, force=force)
+        if handler is None:
+            return IntegratorActionRollbackResponse(
+                reverted_action_id=action.id,
+                conflicts=[f"No rollback handler for action_type '{action.action_type}'"],
+            )
+
+        conflicts: list[str] = await handler(self, action, force=force)
 
         if not conflicts or force:
             action.status = "rolled_back"

@@ -189,4 +189,17 @@ async def rollback_integrator_action(
     result = await repo.apply_rollback(api_key.workspace_id, action_id, force=force)
     if result is None:
         raise _action_not_found(str(action_id))
+    if result.conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": {
+                    "code": "action.rollback_conflict",
+                    "message": "Rollback blocked by conflicts.",
+                    "hint": result.conflicts,
+                    "docs": None,
+                    "request_id": None,
+                }
+            },
+        )
     return data_response(IntegratorActionRollbackResponse.model_validate(result))

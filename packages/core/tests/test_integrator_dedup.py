@@ -800,7 +800,7 @@ async def test_merge_with_rewrite_output():
     )
 
     batches = [[winner_ewc, loser_ewc]]
-    merged = await deduplicator.execute_batches(
+    merged, _sigs = await deduplicator.execute_batches(
         batches=batches,
         entity_type="person",
         workspace_id=ws_id,

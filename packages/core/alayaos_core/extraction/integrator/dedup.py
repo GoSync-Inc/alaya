@@ -476,14 +476,16 @@ class DeduplicatorV2:
         entity_repo,
         session,
         action_repo,
-    ) -> int:
+    ) -> tuple[int, list[str]]:
         """Call LLM for each batch, then apply MergeGroups.
 
-        Returns the total number of merges performed (loser entities soft-deleted).
+        Returns (total_merged, merge_signatures) where merge_signatures is a list of
+        strings like "merge:<winner_id>:[<loser_ids>]" for use in cycle detection hashing.
         """
         from alayaos_core.extraction.integrator.schemas import DedupResult
 
         total_merged = 0
+        merge_signatures: list[str] = []
         for batch in batches:
             prompt = _build_dedup_prompt(batch, entity_type)
             try:
@@ -527,8 +529,11 @@ class DeduplicatorV2:
                     action_repo=action_repo,
                 )
                 total_merged += merged
+                if merged > 0:
+                    sig = f"merge:{group.winner_id}:{sorted(str(lid) for lid in valid_loser_ids)}"
+                    merge_signatures.append(sig)
 
-        return total_merged
+        return total_merged, merge_signatures
 
     async def _apply_merge_group(
         self,

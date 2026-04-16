@@ -260,17 +260,37 @@ async def _rollback_create_from_cluster(
     *,
     force: bool = False,
 ) -> list[str]:
-    """Soft-delete the synthetic entity created from cluster."""
+    """Soft-delete the synthetic entity created from cluster and delete its part_of relations."""
     if action.entity_id is None:
         return []
 
     from alayaos_core.models.entity import L1Entity
+    from alayaos_core.models.relation import L1Relation
 
     stmt = select(L1Entity).where(L1Entity.id == action.entity_id).where(L1Entity.workspace_id == action.workspace_id)
     result = await repo.session.execute(stmt)
     entity = result.scalar_one_or_none()
     if entity is not None:
         entity.is_deleted = True
+
+    # Delete part_of relations stored as plain UUID strings in targets
+    if action.targets:
+        for target in action.targets:
+            rel_id_str = target if isinstance(target, str) else None
+            if not rel_id_str:
+                continue
+            try:
+                rel_id = uuid.UUID(rel_id_str)
+            except ValueError:
+                continue
+            rel_stmt = (
+                select(L1Relation).where(L1Relation.id == rel_id).where(L1Relation.workspace_id == action.workspace_id)
+            )
+            rel_result = await repo.session.execute(rel_stmt)
+            rel = rel_result.scalar_one_or_none()
+            if rel is not None:
+                repo.session.delete(rel)
+
     return []
 
 

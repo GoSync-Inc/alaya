@@ -103,7 +103,8 @@ async def test_integrator_runs_in_workspace_isolation():
     assert isinstance(result, IntegratorRunResult)
 
     # Verify list_recent was called with workspace A
-    entity_repo_a.list_recent.assert_called_once()
+    # Note: called at least twice — initial load and post-convergence reload (Fix 3)
+    assert entity_repo_a.list_recent.call_count >= 1
     call_args = entity_repo_a.list_recent.call_args
     called_ws_id = call_args[0][0] if call_args[0] else call_args[1].get("workspace_id")
     assert called_ws_id == ws_a, f"Expected workspace {ws_a}, got {called_ws_id}"

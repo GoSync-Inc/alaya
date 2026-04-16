@@ -23,7 +23,7 @@ packages/
 │       ├── extraction/             # Multi-stage intelligence pipeline
 │       │   ├── cortex/             # Chunker + classifier (L0 → L0Chunks with domain scores)
 │       │   ├── crystallizer/       # LLM extractor + verifier (L0Chunks → claims with confidence tiers)
-│       │   ├── integrator/         # Dedup (vector shortlist → LLM verify), enricher, date normalizer, KG integration engine
+│       │   ├── integrator/         # Multi-pass KG consolidation: panoramic triage, dedup v2 (composite signal, N=9 batches, merge-with-rewrite), enricher, date normalizer; passes/ subpackage (panoramic.py)
 │       │   ├── pipeline.py         # Orchestration: run_extraction, run_write, run_enrich, should_extract
 │       │   ├── monitoring.py       # Structlog anomaly detection events
 │       │   ├── writer.py           # Atomic persist, dirty-set trigger, workspace lock
@@ -81,6 +81,8 @@ Run before every commit:
 - `ALAYA_TRUSTED_HOSTS` should be configured to the public hostnames served by ingress/Caddy, unless host validation is enforced upstream.
 - `INTEGRATOR_DEDUP_SHORTLIST_K` (default `5`) — max nearest-neighbours per entity in vector-shortlist dedup phase.
 - `INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD` (default `0.9`) — minimum cosine similarity to forward a pair to LLM verification; lower values increase recall at the cost of more LLM calls.
+- `INTEGRATOR_DEDUP_BATCH_SIZE` (default `9`) — entities per LLM batch in dedup v2 composite-signal pass.
+- `CONSOLIDATOR_PANORAMIC_MAX_ENTITIES` (default `500`) — entity cap for the panoramic triage pass; configurable via constructor param.
 
 ## Architecture Rules
 
@@ -106,12 +108,12 @@ Run before every commit:
 
 ## Data Model
 
-22 tables: 7 full (workspace, event, entity, entity_type, predicate, entity_external_id, api_key) + 11 stubs + extraction_run + l0_chunks + pipeline_traces + integrator_runs.
-Core predicates: 20 seeded per workspace (deadline, status, owner, role, title, member_of, reports_to, etc.)
-Core entity types: 10 seeded per workspace (person, project, team, document, decision, meeting, etc.)
+23 tables: 7 full (workspace, event, entity, entity_type, predicate, entity_external_id, api_key) + 11 stubs + extraction_run + l0_chunks + pipeline_traces + integrator_runs + integrator_actions.
+Core predicates: 21 seeded per workspace (deadline, status, owner, role, title, member_of, reports_to, part_of, etc.)
+Core entity types: 13 seeded per workspace (person, project, team, document, decision, meeting, task, goal, north_star, etc.)
 Claims and relations carry `extraction_run_id` for full provenance tracing.
 
-## API Endpoints (41 total)
+## API Endpoints (43 total)
 
 Health: `/health/live`, `/health/ready`
 Workspaces: POST, GET, GET/{id}, PATCH/{id} — bootstrap key required for create
@@ -127,6 +129,7 @@ Ingestion: POST `/ingest` — trigger extraction pipeline
 Chunks: GET (event_id, processing_stage, is_crystal filters), GET/{id}
 Pipeline Traces: GET /events/{id}/trace
 Integrator Runs: GET, GET/{id}, POST /trigger
+Integrator Actions: GET /integrator-actions, POST /integrator-actions/{id}/rollback
 Search: POST /search — hybrid 3-channel RRF (vector + FTS + entity name)
 Ask: POST /ask — LLM Q&A with citation validation
 Tree: GET /tree, GET /tree/{path}, POST /tree/export
@@ -149,4 +152,4 @@ Model-agnostic: `LLMServiceInterface` with provider adapters.
 Config: per-stage model selection via `CORTEX_CLASSIFIER_MODEL`, `CRYSTALLIZER_MODEL`, `INTEGRATOR_MODEL`.
 Provider-specific features preserved — no lowest common denominator.
 
-<!-- updated-by-superflow:2026-04-14 -->
+<!-- updated-by-superflow:2026-04-16 -->

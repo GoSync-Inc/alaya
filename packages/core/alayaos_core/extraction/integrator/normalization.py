@@ -35,7 +35,7 @@ def strip_legal_suffixes(name: str) -> str:
     """
     # \u00ab = left guillemet, \u00bb = right guillemet
     parts = name.split()
-    filtered = [p for p in parts if p.strip("\u00ab\u00bb\"'") not in LEGAL_SUFFIXES]
+    filtered = [p for p in parts if p.strip("\u00ab\u00bb\"'.") not in LEGAL_SUFFIXES]
     return " ".join(filtered).strip()
 
 

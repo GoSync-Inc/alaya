@@ -203,6 +203,8 @@ class PanoramicPass:
             return PanoramicResult()
 
         # Validate entity_ids: drop actions referencing unknown UUIDs
+        # Fix 1: single-entity actions (remove_noise, reclassify, rewrite) MUST have entity_id
+        single_entity_actions = {"remove_noise", "reclassify", "rewrite"}
         validated_actions: list[PanoramicAction] = []
         for action in result.actions:
             if action.entity_id is not None and action.entity_id not in valid_ids:
@@ -213,6 +215,59 @@ class PanoramicPass:
                     entity_id=str(action.entity_id),
                 )
                 continue
+
+            # Fix 1: single-entity actions without entity_id are invalid
+            if action.action in single_entity_actions and action.entity_id is None:
+                log.warning(
+                    "panoramic_pass_missing_entity_id",
+                    workspace_id=str(workspace_id),
+                    action=action.action,
+                )
+                continue
+
+            # Fix 2: validate params-level entity references
+            if action.action == "create_from_cluster":
+                child_ids_raw: list[str] = action.params.get("child_ids", [])
+                invalid_children = []
+                for cid in child_ids_raw:
+                    try:
+                        parsed = uuid.UUID(str(cid))
+                    except (ValueError, AttributeError):
+                        invalid_children.append(cid)
+                        continue
+                    if parsed not in valid_ids:
+                        invalid_children.append(cid)
+                if invalid_children:
+                    log.warning(
+                        "panoramic_pass_invalid_child_ids",
+                        workspace_id=str(workspace_id),
+                        invalid_ids=invalid_children,
+                    )
+                    continue
+
+            if action.action == "link_cross_type":
+                source_raw = action.params.get("source_id")
+                target_raw = action.params.get("target_id")
+                invalid_ref = None
+                for ref_name, ref_val in (("source_id", source_raw), ("target_id", target_raw)):
+                    if ref_val is not None:
+                        try:
+                            parsed_ref = uuid.UUID(str(ref_val))
+                        except (ValueError, AttributeError):
+                            invalid_ref = ref_name
+                            break
+                        if parsed_ref not in valid_ids:
+                            invalid_ref = ref_name
+                            break
+                if invalid_ref is not None:
+                    log.warning(
+                        "panoramic_pass_invalid_params_ref",
+                        workspace_id=str(workspace_id),
+                        action=action.action,
+                        invalid_param=invalid_ref,
+                    )
+                    continue
+
             validated_actions.append(action)
 
         return PanoramicResult(actions=validated_actions)

@@ -59,6 +59,20 @@ class TestStripLegalSuffixes:
         result = strip_legal_suffixes("Apple Inc")
         assert result == "Apple"
 
+    def test_strip_legal_suffixes_inc_with_dot(self):
+        """'Apple Inc.' -> 'Apple' (trailing dot stripped before suffix matching)."""
+        from alayaos_core.extraction.integrator.normalization import strip_legal_suffixes
+
+        result = strip_legal_suffixes("Apple Inc.")
+        assert result == "Apple"
+
+    def test_strip_legal_suffixes_ltd_with_dot(self):
+        """'Acme Ltd.' -> 'Acme'"""
+        from alayaos_core.extraction.integrator.normalization import strip_legal_suffixes
+
+        result = strip_legal_suffixes("Acme Ltd.")
+        assert result == "Acme"
+
 
 class TestNormalizeForHint:
     def test_normalize_for_hint_cyrillic(self):

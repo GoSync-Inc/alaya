@@ -156,10 +156,10 @@ class TestCreateWorkspace:
         session.flush.assert_called()
 
     def test_core_entity_types_count(self) -> None:
-        assert len(CORE_ENTITY_TYPES) == 10
+        assert len(CORE_ENTITY_TYPES) == 13
 
     def test_core_predicates_count(self) -> None:
-        assert len(CORE_PREDICATES) == 20
+        assert len(CORE_PREDICATES) == 21
 
     def test_core_predicates_have_supersession_strategy(self) -> None:
         valid_strategies = {"latest_wins", "explicit_only", "accumulate"}

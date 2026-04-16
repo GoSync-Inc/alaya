@@ -23,6 +23,8 @@ class IntegratorRunRead(BaseModel):
     tokens_used: int | None = 0
     cost_usd: float | None = 0.0
     duration_ms: int | None = 0
+    pass_count: int | None = 1
+    convergence_reason: str | None = None
     status: str | None
     error_message: str | None
     started_at: datetime

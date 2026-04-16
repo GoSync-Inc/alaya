@@ -197,3 +197,78 @@ class TestIntegratorRunsRouter:
         response = client.post("/api/v1/integrator-runs/trigger", headers={"X-Api-Key": RAW_KEY})
 
         assert response.status_code == 403
+
+
+class TestIntegratorActionRollbackRouter:
+    def test_rollback_action_success_returns_200(self) -> None:
+        """Rollback with no conflicts returns 200."""
+        from alayaos_core.schemas.integrator_action import IntegratorActionRollbackResponse
+
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        action_id = uuid.uuid4()
+        response_obj = IntegratorActionRollbackResponse(
+            reverted_action_id=action_id,
+            conflicts=[],
+        )
+
+        with patch("alayaos_api.routers.integrator_runs.IntegratorActionRepository") as mock_cls:
+            repo = AsyncMock()
+            repo.apply_rollback = AsyncMock(return_value=response_obj)
+            mock_cls.return_value = repo
+
+            client = TestClient(app)
+            response = client.post(
+                f"/api/v1/integrator-actions/{action_id}/rollback",
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 200
+
+    def test_rollback_action_not_found_returns_404(self) -> None:
+        """Rollback on missing action returns 404."""
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        action_id = uuid.uuid4()
+
+        with patch("alayaos_api.routers.integrator_runs.IntegratorActionRepository") as mock_cls:
+            repo = AsyncMock()
+            repo.apply_rollback = AsyncMock(return_value=None)
+            mock_cls.return_value = repo
+
+            client = TestClient(app)
+            response = client.post(
+                f"/api/v1/integrator-actions/{action_id}/rollback",
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "resource.not_found"
+
+    def test_rollback_action_with_conflicts_returns_409(self) -> None:
+        """Rollback with conflicts (action not rolled back) returns HTTP 409."""
+        from alayaos_core.schemas.integrator_action import IntegratorActionRollbackResponse
+
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        action_id = uuid.uuid4()
+        response_obj = IntegratorActionRollbackResponse(
+            reverted_action_id=action_id,
+            conflicts=["name changed since action: expected 'Old', found 'New'"],
+        )
+
+        with patch("alayaos_api.routers.integrator_runs.IntegratorActionRepository") as mock_cls:
+            repo = AsyncMock()
+            repo.apply_rollback = AsyncMock(return_value=response_obj)
+            mock_cls.return_value = repo
+
+            client = TestClient(app)
+            response = client.post(
+                f"/api/v1/integrator-actions/{action_id}/rollback",
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 409
+        body = response.json()
+        assert "error" in body
+        assert body["error"]["code"] == "action.rollback_conflict"

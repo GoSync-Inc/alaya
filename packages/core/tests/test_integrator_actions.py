@@ -563,3 +563,23 @@ class TestIntegratorActionRollback:
         result = await repo.apply_rollback(ws_id, action.id)
         assert result is not None
         assert result.conflicts == []
+
+    @pytest.mark.asyncio
+    async def test_rollback_unknown_action_type_returns_conflict_not_rolled_back(self) -> None:
+        """apply_rollback with unknown action_type returns conflict message and does NOT mark action as rolled_back."""
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        action = _make_action(ws_id=ws_id, action_type="unknown_future_action")
+        action.status = "applied"
+
+        session = make_session()
+        session.execute.return_value = make_result(action)
+
+        repo = IntegratorActionRepository(session, ws_id)
+        result = await repo.apply_rollback(ws_id, action.id)
+        assert result is not None
+        assert len(result.conflicts) == 1
+        assert "unknown_future_action" in result.conflicts[0]
+        # action must remain applied, not rolled_back
+        assert action.status == "applied"

@@ -45,3 +45,41 @@ def test_integrator_run_read_none_fields_default_to_zero():
     # None is passed; schema allows None via Optional
     assert run.entities_scanned is None
     assert run.status == "completed"
+
+
+def test_integrator_run_read_has_pass_count_and_convergence_reason():
+    """IntegratorRunRead exposes pass_count (default 1) and convergence_reason (default None)."""
+    data = {
+        "id": uuid.uuid4(),
+        "workspace_id": uuid.uuid4(),
+        "trigger": "manual",
+        "scope_description": None,
+        "llm_model": None,
+        "status": "completed",
+        "error_message": None,
+        "started_at": datetime.now(UTC),
+        "completed_at": None,
+    }
+    run = IntegratorRunRead(**data)
+    assert run.pass_count == 1
+    assert run.convergence_reason is None
+
+
+def test_integrator_run_read_pass_count_and_convergence_reason_explicit_values():
+    """IntegratorRunRead accepts explicit pass_count and convergence_reason values."""
+    data = {
+        "id": uuid.uuid4(),
+        "workspace_id": uuid.uuid4(),
+        "trigger": "manual",
+        "scope_description": None,
+        "llm_model": None,
+        "status": "completed",
+        "error_message": None,
+        "started_at": datetime.now(UTC),
+        "completed_at": None,
+        "pass_count": 3,
+        "convergence_reason": "no_changes",
+    }
+    run = IntegratorRunRead(**data)
+    assert run.pass_count == 3
+    assert run.convergence_reason == "no_changes"

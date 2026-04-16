@@ -87,3 +87,5 @@ class IntegratorRunResult(BaseModel):
     tokens_used: int = 0
     cost_usd: float = 0.0
     duration_ms: int = 0
+    pass_count: int = 1
+    convergence_reason: str | None = None

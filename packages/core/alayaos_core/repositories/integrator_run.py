@@ -81,6 +81,8 @@ class IntegratorRunRepository(BaseRepository):
         tokens_used: int = 0,
         cost_usd: float = 0.0,
         duration_ms: int = 0,
+        pass_count: int = 1,
+        convergence_reason: str | None = None,
     ) -> IntegratorRun | None:
         run = await self.get_by_id(run_id)
         if run is None:
@@ -94,6 +96,8 @@ class IntegratorRunRepository(BaseRepository):
         run.tokens_used = tokens_used
         run.cost_usd = cost_usd
         run.duration_ms = duration_ms
+        run.pass_count = pass_count
+        run.convergence_reason = convergence_reason
         await self.session.flush()
         return run
 

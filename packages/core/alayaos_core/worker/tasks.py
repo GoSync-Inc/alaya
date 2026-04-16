@@ -741,7 +741,7 @@ async def job_integrate(workspace_id: str, integrator_run_id: str | None = None)
                 settings=settings,
             )
 
-            result = await engine.run(ws_uuid, session)
+            result = await engine.run(ws_uuid, session, run_id=run_uuid)
 
             # Update IntegratorRun with counters
             await run_repo.update_status(
@@ -760,6 +760,8 @@ async def job_integrate(workspace_id: str, integrator_run_id: str | None = None)
                 tokens_used=result.tokens_used,
                 cost_usd=result.cost_usd,
                 duration_ms=result.duration_ms,
+                pass_count=result.pass_count,
+                convergence_reason=result.convergence_reason,
             )
     except Exception as exc:
         if run_uuid is not None:

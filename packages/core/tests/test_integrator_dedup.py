@@ -962,3 +962,186 @@ async def test_claims_relations_reassigned():
 
     # session.execute must have been called (for SQL reassignment)
     assert session.execute.called, "session.execute was not called — claims/relations not reassigned"
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: batch rebalance — trailing entity must not be dropped
+# ---------------------------------------------------------------------------
+
+
+def test_assemble_batches_10_entities_batch_size_9_produces_balanced_batches():
+    """10 entities with batch_size=9 must produce [5,5] not [9, drop].
+
+    This is the core regression: when group size == batch_size*n+1,
+    the trailing 1-entity chunk was silently dropped.
+    After the fix, every entity must appear in some batch and
+    no batch should contain a single entity without a peer.
+    """
+    from alayaos_core.extraction.integrator.dedup import assemble_batches
+
+    type_id = uuid.uuid4()
+    entities = [_make_entity(f"Entity-{i:02d}", entity_type="person", entity_type_id=type_id) for i in range(10)]
+    embeddings = {e.id: [1.0, 0.0, 0.0, 0.0] for e in entities}
+
+    batches = assemble_batches(entities, embeddings, batch_size=9)
+
+    # Every entity must appear in some batch
+    all_ids_in_batches = {e.id for batch in batches for e in batch}
+    for entity in entities:
+        assert entity.id in all_ids_in_batches, f"Entity {entity.name!r} was dropped from batches"
+
+    # The trailing entity must not be alone (each batch must have ≥2 entities)
+    for i, batch in enumerate(batches):
+        assert len(batch) >= 2, f"Batch {i} has only {len(batch)} entity — trailing entity was not rebalanced"
+
+    # All batches must fit within batch_size (rebalancing must not overflow)
+    for i, batch in enumerate(batches):
+        assert len(batch) <= 9, f"Batch {i} has {len(batch)} entities, exceeds batch_size=9"
+
+
+def test_assemble_batches_drops_no_entity_for_various_sizes():
+    """For group sizes 2-19, every entity must appear in some batch."""
+    from alayaos_core.extraction.integrator.dedup import assemble_batches
+
+    type_id = uuid.uuid4()
+    batch_size = 9
+
+    for n in range(2, 20):
+        entities = [_make_entity(f"E-{i}", entity_type="person", entity_type_id=type_id) for i in range(n)]
+        embeddings = {e.id: [1.0, 0.0, 0.0, 0.0] for e in entities}
+
+        batches = assemble_batches(entities, embeddings, batch_size=batch_size)
+
+        all_ids = {e.id for batch in batches for e in batch}
+        for entity in entities:
+            assert entity.id in all_ids, (
+                f"n={n}: Entity {entity.name!r} dropped from batches. Batches sizes: {[len(b) for b in batches]}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: co_event_score via extraction_run_id — graceful fallback documented
+# ---------------------------------------------------------------------------
+
+
+def test_get_extraction_run_id_reads_from_properties():
+    """_get_extraction_run_id must return value from entity.properties when present."""
+    from alayaos_core.extraction.integrator.dedup import _get_extraction_run_id
+
+    run_id = str(uuid.uuid4())
+    entity = _make_entity("Alice")
+    # Inject extraction_run_id via properties (the documented path)
+    entity.properties["extraction_run_id"] = run_id
+
+    result = _get_extraction_run_id(entity)
+    assert result == run_id, f"Expected {run_id!r}, got {result!r}"
+
+
+def test_get_extraction_run_id_returns_none_when_absent():
+    """_get_extraction_run_id must return None when extraction_run_id is not in properties."""
+    from alayaos_core.extraction.integrator.dedup import _get_extraction_run_id
+
+    entity = _make_entity("Alice")
+    # No extraction_run_id in properties
+    result = _get_extraction_run_id(entity)
+    assert result is None, f"Expected None, got {result!r}"
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: relation dedup after merge — duplicate (source, target, type) removed
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_relation_dedup_after_merge_removes_duplicates():
+    """After reassigning loser→winner relations, duplicate (source,target,type) rows must be deleted.
+
+    The test verifies that session.execute is called with a DELETE statement that
+    references ROW_NUMBER() or equivalent dedup logic, or at minimum that a DELETE
+    is issued to clean up duplicate relations after the UPDATE reassignment.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from alayaos_core.extraction.integrator.dedup import DeduplicatorV2
+    from alayaos_core.extraction.integrator.schemas import DedupResult, EntityWithContext, MergeGroup
+
+    winner_id = uuid.uuid4()
+    loser_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+
+    winner_entity = MagicMock()
+    winner_entity.id = winner_id
+    winner_entity.name = "Alice Johnson"
+    winner_entity.aliases = []
+    winner_entity.description = ""
+    winner_entity.properties = {}
+
+    loser_entity = MagicMock()
+    loser_entity.id = loser_id
+    loser_entity.name = "Alice Jonson"
+    loser_entity.aliases = []
+    loser_entity.description = ""
+    loser_entity.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(
+        side_effect=lambda eid: {winner_id: winner_entity, loser_id: loser_entity}.get(eid)
+    )
+    entity_repo.update = AsyncMock()
+
+    dedup_result = DedupResult(
+        groups=[
+            MergeGroup(
+                winner_id=winner_id,
+                loser_ids=[loser_id],
+                merged_name="Alice Johnson",
+                merged_description="Engineer",
+                merged_aliases=[],
+                confidence=0.9,
+                rationale="Same person",
+            )
+        ]
+    )
+    fake_llm = AsyncMock()
+    fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
+
+    session = AsyncMock()
+    deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
+
+    winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person")
+    loser_ewc = EntityWithContext(id=loser_id, name="Alice Jonson", entity_type="person")
+
+    await deduplicator.execute_batches(
+        batches=[[winner_ewc, loser_ewc]],
+        entity_type="person",
+        workspace_id=ws_id,
+        run_id=run_id,
+        entity_repo=entity_repo,
+        session=session,
+        action_repo=None,
+    )
+
+    # Check that at least one DELETE statement was issued targeting l1_relations
+    # with duplicate-dedup logic (ROW_NUMBER or ctid-based delete)
+    execute_calls = session.execute.call_args_list
+    sql_texts = [str(c.args[0]) if c.args else "" for c in execute_calls]
+
+    # We need a DELETE that specifically targets duplicate relations on the winner
+    # This must be a separate DELETE from the self-ref cleanup DELETEs (which target b_id rows)
+    dedup_deletes = [
+        s
+        for s in sql_texts
+        if "DELETE" in s.upper()
+        and "l1_relations" in s
+        and (
+            "ROW_NUMBER" in s.upper() or "row_number" in s or "ctid" in s
+            # Alternative: a DELETE that references winner_id as both source and target
+            # to clean up duplicates after reassignment
+        )
+    ]
+
+    assert len(dedup_deletes) >= 1, (
+        "Expected at least one relation dedup DELETE (ROW_NUMBER or ctid-based) after merge. "
+        "SQL statements issued:\n" + "\n".join(sql_texts[:20])
+    )

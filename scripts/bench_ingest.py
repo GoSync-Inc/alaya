@@ -16,7 +16,7 @@ Usage:
 import argparse
 import json
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +28,8 @@ def _parse_occurred_at(raw: str | None) -> str | None:
     if not raw:
         return None
     try:
+        if re.fullmatch(r"\d+(\.\d+)?", raw):
+            return datetime.fromtimestamp(float(raw), tz=UTC).isoformat()
         s = raw.replace(" ", "T")
         # Normalize bare ±HH offset (no minutes) → ±HH:00
         s = re.sub(r"([+-]\d{2})$", r"\1:00", s)

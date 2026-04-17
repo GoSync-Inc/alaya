@@ -47,7 +47,7 @@ No open items — all addressed during Run 2.
 
 | ID | P | Title | Where | Details |
 |----|---|-------|-------|---------|
-| RUN3.01 | P1 | Entity dedup: soft-delete only, no claim/relation reassignment | `integrator/engine.py` | Dedup soft-deletes entity_b, merges aliases, but does NOT reassign claims/relations from B to A. Needs `UPDATE l2_claims SET entity_id = A WHERE entity_id = B`. |
+| ~~RUN3.01~~ | P1 | Entity dedup: soft-delete only, no claim/relation reassignment | `integrator/engine.py` | Dedup soft-deletes entity_b, merges aliases, but does NOT reassign claims/relations from B to A. Needs `UPDATE l2_claims SET entity_id = A WHERE entity_id = B`. **Closed in Run 5.4 — see §"Closed in Run 5.4".** |
 | RUN3.02 | P1 | Integration tests all skipped (18) | `tests/test_rls.py`, `test_composite_fk.py` | Need conftest with temp DB, migrations, seed data. |
 | RUN3.03 | P1 | Redis health check "unavailable" | `api/routers/health.py` | May not use `Settings.REDIS_URL` consistently. |
 
@@ -223,7 +223,6 @@ Post-merge audit (local, not tracked): `docs/superflow/audits/2026-04-17-run5.4-
 
 | ID | P | Title | Where | Details |
 |----|---|-------|-------|---------|
-| RUN5.4.FU.05 | P2 | Reconcile brief-deferred items into backlog | `docs/backlog/BACKLOG.md` (this file) | Brief's "Items deferred" table listed RUN5.4.10 (Slack handle → user name, requires Slack connector), RUN5.4.11 (LLM decision cache for panoramic), RUN5.4.12 (action review UI), RUN5.4.13 (per-workspace dedup/panoramic thresholds), RUN5.4.14 (Cortex verify/classify ordering — dup of prior RUN5.3 follow-up #4), RUN5.4.15 (`tokens_in` rename/split — dup of prior RUN5.3 follow-up #2). None were propagated here until now. See §"Run 5.4 brief-deferred items" below for the actual entries. |
 | RUN5.4.FU.06 | P2 | Wire `CONSOLIDATOR_PANORAMIC_MAX_ENTITIES` through `Settings` | `packages/core/alayaos_core/config.py`, `packages/core/alayaos_core/extraction/integrator/passes/panoramic.py:150` | `CLAUDE.md:85` advertises it as an env var; implementation reads only the constructor param. The env var is inert today — panoramic cap is fixed at whatever the caller passes. |
 | RUN5.4.FU.07 | P2 | Synthetic dedup-gold fixture | `tests/fixtures/`, `test_integrator_dedup.py` | Dedup tests use FakeLLM with hand-crafted batches. No regression fixture for abbreviation/transliteration pairs (Орг/Орги, КС/Ticketscloud). Run 5.3 follow-up #5, still open post-Run 5.4. |
 

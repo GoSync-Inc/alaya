@@ -9,8 +9,7 @@ Preconditions:
   - A valid API key created in the target workspace
 
 Usage:
-    uv run python scripts/bench_ingest.py --key ak_xxx
-    uv run python scripts/bench_ingest.py --key ak_xxx --file data/slack_export/slack_sample_40.jsonl --out results.json
+    uv run python scripts/bench_ingest.py --key ak_xxx --file path/to/events.jsonl
 """
 
 import argparse
@@ -42,7 +41,11 @@ def _parse_occurred_at(raw: str | None) -> str | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark ingest: POST events to /ingest/text")
     parser.add_argument("--key", required=True, help="API key (ak_xxx)")
-    parser.add_argument("--file", default="data/slack_export/slack_sample_40.jsonl", help="JSONL events file")
+    parser.add_argument(
+        "--file",
+        required=True,
+        help="JSONL events file (one event per line; expected keys: id, raw_text, optionally ts/channel_id/actor)",
+    )
     parser.add_argument("--api", default="http://localhost:8000/api/v1", help="API base URL")
     parser.add_argument(
         "--out", default="bench_runs.json", help="Output JSON file path (default: bench_runs.json in CWD)"

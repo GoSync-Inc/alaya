@@ -22,14 +22,15 @@ from typing import Any
 import httpx
 
 
-def _parse_occurred_at(raw: str | None) -> str | None:
+def _parse_occurred_at(raw: str | int | float | None) -> str | None:
     """Parse a Slack/PG-style timestamp into an ISO 8601 string, or return None."""
-    if not raw:
+    if raw is None or raw == "":
         return None
+    raw_str = str(raw)
     try:
-        if re.fullmatch(r"\d+(\.\d+)?", raw):
-            return datetime.fromtimestamp(float(raw), tz=UTC).isoformat()
-        s = raw.replace(" ", "T")
+        if re.fullmatch(r"\d+(\.\d+)?", raw_str):
+            return datetime.fromtimestamp(float(raw_str), tz=UTC).isoformat()
+        s = raw_str.replace(" ", "T")
         # Normalize bare ±HH offset (no minutes) → ±HH:00
         s = re.sub(r"([+-]\d{2})$", r"\1:00", s)
         return datetime.fromisoformat(s).isoformat()

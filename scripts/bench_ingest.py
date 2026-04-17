@@ -15,10 +15,26 @@ Usage:
 
 import argparse
 import json
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+
+def _parse_occurred_at(raw: str | None) -> str | None:
+    """Parse a Slack/PG-style timestamp into an ISO 8601 string, or return None."""
+    if not raw:
+        return None
+    try:
+        s = raw.replace(" ", "T")
+        # Normalize bare ±HH offset (no minutes) → ±HH:00
+        s = re.sub(r"([+-]\d{2})$", r"\1:00", s)
+        return datetime.fromisoformat(s).isoformat()
+    except Exception:
+        print(f"  warn: could not parse occurred_at from {raw!r}")
+        return None
 
 
 def main() -> None:
@@ -41,7 +57,8 @@ def main() -> None:
     results: list[dict[str, object]] = []
     with httpx.Client(timeout=30.0) as client:
         for i, ev in enumerate(events):
-            body = {
+            occurred_at = _parse_occurred_at(ev.get("ts"))
+            body: dict[str, Any] = {
                 "text": ev["raw_text"],
                 "source_type": "slack",
                 "source_id": ev["id"],
@@ -53,6 +70,8 @@ def main() -> None:
                     "ts": ev.get("ts"),
                 },
             }
+            if occurred_at is not None:
+                body["occurred_at"] = occurred_at
             try:
                 r = client.post(
                     f"{args.api}/ingest/text",

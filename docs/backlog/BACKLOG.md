@@ -200,3 +200,55 @@ Source: `docs/vision/alaya-master-vision-session-summary-ru.md`, `alaya-operatio
 | PROD.01 | strategic | Alaya Sync — local daemon as paid tier | Отдельный продукт и репо, не часть core. Локальный демон (macOS/Win/Linux), который: (1) наблюдает AI-инструменты (Claude Code hooks, Cursor logs, Zed AI, Raycast AI), (2) инжектирует briefing на SessionStart, (3) захватывает PreCompact/SessionEnd → events в Alaya. Зачем: скиллы и хуки в агентах нестабильны — нужен managed sync-слой между AI-tools и корпоративной памятью. Depends on: стабильный MCP-контракт в Run 6 (MCP должен быть достаточно богат, чтобы sync-daemon мог им пользоваться). MVP: Claude Code + Cursor, macOS. Ценовая модель: seat-based subscription поверх OSS core. |
 | PROD.02 | strategic | AlayaOS (B2B chief of staff) vs Between (personal) — product split | Vision фиксирует две продуктовые оси над общим ядром. Сейчас фокус — только AlayaOS / corporate memory. Between делается отдельно, carve-out ядра не делаем. Это напоминание, чтобы не плодить абстракции «на будущее». |
 | PROD.03 | strategic | Alaya Workflow — stateless SaaS для бизнес-процессов | Отдельный paid SaaS поверх open-core Alaya. **Не хранит клиентских данных** — работает через API-ключ к Core клиента (self-host или managed cloud). Содержит: (1) библиотеку recipe'ов для типовых бизнес-процессов, (2) domain packs (sales / ops / HR / compliance), (3) visual orchestration, (4) webhooks-мост к внешним системам, (5) trigger-слой поверх state-changes в Core. Граница с Core: в open-core остаются **workflow primitives** (TaskIQ triggers, reminders, stale-detection), в Workflow — **готовые бизнес-процессы и domain recipes**. Depends on: VGAP.01 Action Loop MVP в core + стабильный MCP-контракт. Ценовая модель: per-workspace subscription, возможно metered по числу триггеров/recipe-runs. Strategic angle: трёхслойная продуктовая линия Core (OSS) + Workflow (SaaS) + Sync (desktop) — все работают через один API-контракт, ни один не дублирует storage друг друга. |
+
+---
+
+## Run 5.4: Knowledge Graph Consolidation (2026-04-16)
+
+Merged 2026-04-16 via PRs #87–#94.
+Brief: `docs/superflow/specs/2026-04-15-run5.4-knowledge-graph-consolidation-brief.md`
+Plan: `docs/superflow/plans/2026-04-16-run5.4-knowledge-graph-consolidation.md`
+Post-merge audit (local, not tracked): `docs/superflow/audits/2026-04-17-run5.4-post-merge.md`
+
+### P1 — must fix next
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.4.FU.01 | P1 | Enforce `ENTITY_TYPE_TIER_RANK` on `part_of` writes | `packages/core/alayaos_core/repositories/relation.py`, `packages/core/alayaos_core/services/workspace.py:27-32` | Spec §1b: "if both entities have a `tier_rank`, require `parent.tier_rank > child.tier_rank`". The constant exists and is referenced in the panoramic prompt (`passes/panoramic.py:117`), but no runtime check on `L1Relation.create`. Any non-panoramic path (direct POST on `/relations`, future connectors) can write tier-inverted `part_of` edges. |
+| RUN5.4.FU.02 | P1 | `_rollback_merge` does not reverse FK reassignment | `packages/core/alayaos_core/repositories/integrator_action.py:228-254` | Brief's edge-case explicitly requires: "Reversing a `merge` must resurrect the soft-deleted entity AND move claims/relations/chunks back". Current implementation only flips `loser.is_deleted = False`; claims/relations/chunks stay assigned to the winner. Audit-log invariant is broken for the merge action type. |
+| RUN5.4.FU.03 | P1 | Complete RUN5.4.09 integrator cost observability | `packages/core/alayaos_core/extraction/integrator/engine.py`, `packages/core/alayaos_core/extraction/integrator/schemas.py:87-88`, `packages/core/alayaos_core/worker/tasks.py:761` | `IntegratorRunResult.cost_usd` / `tokens_used` default 0.0 / 0 and are never populated. `update_counters` accepts the field but the worker forwards values that were never set. No `pipeline_traces → integrator_runs` aggregation mirror of the Run 5.3 `recalc_usage` pattern was added. Two paths to close: (a) mirror `recalc_usage` for integrator by summing `pipeline_traces` joined on `run_id`; (b) plumb LLM usage returns from `PanoramicPass` + `DeduplicatorV2` back through `_run_locked`. Cross-link: prior RUN5.3 follow-up #1. |
+| RUN5.4.FU.04 | P1 | Run post-merge Step D benchmark on 40-event fixture | `scripts/bench_ingest.py`, `data/slack_export/slack_sample_40.jsonl` (local) | Run 5.4 audit records every quality-facing brief target as ⚠️ "unverified — benchmark deferred" because no re-benchmark was executed after PR #94 merged. Items that resolve only after Step D: dedup merge count, garbage remaining, description-fill rate, task/goal/north_star usage, synthetic project count, multi-pass wallclock, `extraction_runs.cost_usd` under multi-pass. |
+
+### P2 — important hygiene
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.4.FU.05 | P2 | Reconcile brief-deferred items into backlog | `docs/backlog/BACKLOG.md` (this file) | Brief's "Items deferred" table listed RUN5.4.10 (Slack handle → user name, requires Slack connector), RUN5.4.11 (LLM decision cache for panoramic), RUN5.4.12 (action review UI), RUN5.4.13 (per-workspace dedup/panoramic thresholds), RUN5.4.14 (Cortex verify/classify ordering — dup of prior RUN5.3 follow-up #4), RUN5.4.15 (`tokens_in` rename/split — dup of prior RUN5.3 follow-up #2). None were propagated here until now. See §"Run 5.4 brief-deferred items" below for the actual entries. |
+| RUN5.4.FU.06 | P2 | Wire `CONSOLIDATOR_PANORAMIC_MAX_ENTITIES` through `Settings` | `packages/core/alayaos_core/config.py`, `packages/core/alayaos_core/extraction/integrator/passes/panoramic.py:150` | `CLAUDE.md:85` advertises it as an env var; implementation reads only the constructor param. The env var is inert today — panoramic cap is fixed at whatever the caller passes. |
+| RUN5.4.FU.07 | P2 | Synthetic dedup-gold fixture | `tests/fixtures/`, `test_integrator_dedup.py` | Dedup tests use FakeLLM with hand-crafted batches. No regression fixture for abbreviation/transliteration pairs (Орг/Орги, КС/Ticketscloud). Run 5.3 follow-up #5, still open post-Run 5.4. |
+
+### P3 — nice to have
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.4.FU.08 | P3 | Document v1 fallback path retention | `CLAUDE.md`, in-code docstrings on `EntityDeduplicator` and `DeduplicatorV2` | `DeduplicatorV2` is the intended path; `EntityDeduplicator` (v1) remains for the no-embeddings case. No doc explains when each fires or the deprecation plan for v1. Cross-link: prior RUN3.01 (claimed closed in code by dedup v2, not marked closed in backlog until now). |
+| RUN5.4.FU.09 | P3 | Tidy unreachable `IntegratorAction.status='failed'` enum value | `alembic/versions/006_consolidator_schema.py:32`, `packages/core/alayaos_core/repositories/integrator_action.py` | Migration declares `failed` in the allowed values; no code path writes it. Either wire the failed state into the apply_action error path or drop from the enum. |
+
+### Run 5.4 brief-deferred items
+
+Ported verbatim from the brief's "Items deferred" table (RUN5.4.10–15).
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.4.10 | P2 | Slack handle → user name resolution | `packages/core/alayaos_core/extraction/resolver.py` | `<@UXXXXXX>` persists as a `person` entity name. Needs the Slack connector (Run 5a, not started) to populate a user table with handle→name mapping. Cross-link: prior RUN5.3.11. |
+| RUN5.4.11 | P2 | LLM decision cache for panoramic pass | new | Panoramic LLM call is the dominant per-pass cost. Repeated runs over overlapping entity sets could cache the decision. Out of scope in Run 5.4 because benchmark-driven evidence does not yet exist. |
+| RUN5.4.12 | P3 | Action review UI | new | `integrator_actions` is a full audit table, but there is no UI/CLI surface to review pending actions before apply or to batch-rollback. Deferred until Web UI (Run 7). |
+| RUN5.4.13 | P3 | Per-workspace dedup / panoramic thresholds | `packages/core/alayaos_core/config.py` | Thresholds (`INTEGRATOR_DEDUP_*`, `CONSOLIDATOR_PANORAMIC_MAX_ENTITIES`) are global-per-deployment today. Per-workspace tuning needs a workspace-level settings table. Not needed until multi-tenant deployments appear. |
+| RUN5.4.14 | P2 | Cortex verify-vs-classify ordering fix | `packages/core/alayaos_core/extraction/cortex/classifier.py` | Duplicate of prior RUN5.3 follow-up #4. Benchmark in Run 5.3 showed `verify` changes scores in 38/40 chunks without demonstrable quality improvement. Either drop `verify` by default (`CORTEX_VERIFY_ENABLED=false`) or fix the ordering so `verify` runs on top of `classify` rather than standalone. |
+| RUN5.4.15 | P2 | `tokens_in` split into `input`/`output`/`cache_*` | `packages/core/alayaos_core/models/extraction_run.py`, `models/pipeline_trace.py` | Duplicate of prior RUN5.3 follow-up #2. Current single `tokens_in` column conflates all Anthropic token classes, so cache efficiency cannot be measured against total spend. Needs schema change + `recalc_usage` update. |
+
+### Closed in Run 5.4 (audit verification)
+
+| Backlog ID | Title | Evidence |
+|-----------|-------|----------|
+| RUN3.01 | Entity dedup: soft-delete only, no claim/relation reassignment | Closed in code by DeduplicatorV2 (`packages/core/alayaos_core/extraction/integrator/dedup.py:589-640`) and the v1 fallback fix (`packages/core/alayaos_core/extraction/integrator/engine.py:807-860`). Raw-SQL reassignment of claims, relations, chunks now runs on every merge path. |

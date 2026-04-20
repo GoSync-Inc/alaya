@@ -40,11 +40,24 @@ class L1Relation(Base, TimestampMixin):
 
 
 class RelationSource(Base):
-    """Join table — no workspace_id."""
+    """Join table — workspace_id added in migration 007."""
 
     __tablename__ = "relation_sources"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "relation_id"],
+            ["l1_relations.workspace_id", "l1_relations.id"],
+            name="fk_relation_sources_relation",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "event_id"],
+            ["l0_events.workspace_id", "l0_events.id"],
+            name="fk_relation_sources_event",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    relation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("l1_relations.id"), nullable=False)
-    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("l0_events.id"), nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    relation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

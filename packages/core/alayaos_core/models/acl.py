@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, ForeignKeyConstraint, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,13 +37,26 @@ class AccessGroup(Base, TimestampMixin):
 
 
 class AccessGroupMember(Base):
-    """Join table — no workspace_id."""
+    """Join table — workspace_id added in migration 007."""
 
     __tablename__ = "access_group_members"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "group_id"],
+            ["access_groups.workspace_id", "access_groups.id"],
+            name="fk_agm_group",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "member_id"],
+            ["workspace_members.workspace_id", "workspace_members.id"],
+            name="fk_agm_member",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("access_groups.id"), nullable=False)
-    member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workspace_members.id"), nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    group_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    member_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 

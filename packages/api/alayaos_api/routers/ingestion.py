@@ -135,11 +135,18 @@ async def ingest_text(
             terminal = ("completed", "failed", "skipped")
             active = [r for r in existing_runs if r.status not in terminal]
             if active:
-                # Most-recent active run; prefer pending (retriable) over in-progress.
-                run = max(active, key=lambda r: r.created_at)
-                # Only recovery-re-enqueue if still pending; don't touch runs
-                # the worker has already picked up.
-                should_enqueue = run.status == "pending"
+                # Prefer pending runs so concurrent-ingest races can still
+                # recover an orphaned pending run (e.g. two requests raced
+                # through list_by_event()/create(); one started processing
+                # while the other stayed pending). Only fall back to the
+                # most recent in-progress run when no pending exists.
+                pending = [r for r in active if r.status == "pending"]
+                if pending:
+                    run = max(pending, key=lambda r: r.created_at)
+                    should_enqueue = True  # recovery on dropped first kiq
+                else:
+                    run = max(active, key=lambda r: r.created_at)
+                    should_enqueue = False  # worker already has it
             else:
                 # All prior runs are terminal — start a fresh extraction.
                 parent_id = max(existing_runs, key=lambda r: r.created_at).id if existing_runs else None

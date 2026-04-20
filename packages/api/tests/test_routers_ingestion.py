@@ -334,6 +334,52 @@ class TestIngestionRouter:
         # Fresh kiq for the new run.
         mock_job_extract.kiq.assert_called_once()
 
+    def test_ingest_text_prefers_pending_over_newer_extracting(self) -> None:
+        """When both pending and extracting runs exist (concurrent-ingest race),
+        a retry must pick the pending one so recovery works (codex 8th review).
+        """
+        from contextlib import ExitStack
+
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        event = make_event()
+        old_pending = make_run(event.id)
+        old_pending.status = "pending"
+        new_extracting = make_run(event.id)
+        new_extracting.status = "extracting"
+        # Newer timestamp on the in-progress run: simulates race where the
+        # second concurrent request's run started processing first.
+        new_extracting.created_at = old_pending.created_at.replace(microsecond=999999)
+
+        with ExitStack() as stack:
+            _patch_rate_limiter()(stack)
+            mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
+            mock_run_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
+            mock_job_extract = stack.enter_context(patch("alayaos_core.worker.tasks.job_extract"))
+            mock_job_extract.kiq = AsyncMock()
+
+            event_repo = AsyncMock()
+            event_repo.create_or_update = AsyncMock(return_value=(event, False))
+            mock_event_cls.return_value = event_repo
+
+            run_repo = AsyncMock()
+            run_repo.list_by_event = AsyncMock(return_value=[old_pending, new_extracting])
+            run_repo.create = AsyncMock()
+            mock_run_cls.return_value = run_repo
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/v1/ingest/text",
+                json={"text": "retry", "source_id": str(event.source_id)},
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 202
+        # Must return the pending run (recovery target), NOT the newer extracting one.
+        assert str(old_pending.id) == response.json()["data"]["extraction_run_id"]
+        # Recovery-re-enqueue must happen.
+        mock_job_extract.kiq.assert_called_once()
+
     def test_ingest_text_does_not_reenqueue_extracting_run(self) -> None:
         """Retry while worker is processing (run.status='extracting') must NOT re-kiq.
 

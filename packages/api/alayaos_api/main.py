@@ -29,6 +29,9 @@ def _validate_production_secrets(settings: Settings) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = Settings()
+    # Redundant guard — create_app() also validates at import time so
+    # the check stays effective even when lifespan is skipped
+    # (e.g. `uvicorn --lifespan off` or ASGI wrappers).
     _validate_production_secrets(settings)
     setup_logging(
         json_output=settings.ENV == "production",
@@ -51,6 +54,10 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = Settings()
+    # Fail fast at import time — some deployment paths skip lifespan
+    # (uvicorn --lifespan off, test fixtures, ASGI wrappers), so the
+    # production-secret validation must run here too.
+    _validate_production_secrets(settings)
     docs_enabled = settings.API_DOCS_ENABLED
     if docs_enabled is None:
         docs_enabled = settings.ENV != "production"

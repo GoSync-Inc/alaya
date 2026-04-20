@@ -50,6 +50,7 @@ def test_create_app_disables_docs_in_production(monkeypatch) -> None:
     from alayaos_api.main import create_app
 
     monkeypatch.setenv("ALAYA_ENV", "production")
+    monkeypatch.setenv("ALAYA_SECRET_KEY", "a-real-production-secret-value")
     monkeypatch.delenv("ALAYA_API_DOCS_ENABLED", raising=False)
 
     app = create_app()
@@ -64,6 +65,7 @@ def test_create_app_allows_docs_override_in_production(monkeypatch) -> None:
     from alayaos_api.main import create_app
 
     monkeypatch.setenv("ALAYA_ENV", "production")
+    monkeypatch.setenv("ALAYA_SECRET_KEY", "a-real-production-secret-value")
     monkeypatch.setenv("ALAYA_API_DOCS_ENABLED", "true")
 
     app = create_app()
@@ -113,6 +115,7 @@ def test_create_app_warns_when_production_has_no_trusted_hosts(monkeypatch) -> N
     from alayaos_api.main import create_app
 
     monkeypatch.setenv("ALAYA_ENV", "production")
+    monkeypatch.setenv("ALAYA_SECRET_KEY", "a-real-production-secret-value")
     monkeypatch.delenv("ALAYA_TRUSTED_HOSTS", raising=False)
 
     with patch("alayaos_api.main.log.warning") as mock_warning:
@@ -122,6 +125,23 @@ def test_create_app_warns_when_production_has_no_trusted_hosts(monkeypatch) -> N
         "trusted_hosts_not_configured_for_production",
         message="Host validation is not configured for production. Set ALAYA_TRUSTED_HOSTS or enforce trusted hosts at ingress.",
     )
+
+
+def test_create_app_raises_on_default_secret_in_production(monkeypatch) -> None:
+    """Import-time fail-fast covers paths that skip lifespan (e.g. --lifespan off).
+
+    Regression for codex review P2 on PR #98: guard must run in
+    create_app(), not only inside the lifespan hook.
+    """
+    import pytest
+
+    from alayaos_api.main import create_app
+
+    monkeypatch.setenv("ALAYA_ENV", "production")
+    monkeypatch.delenv("ALAYA_SECRET_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        create_app()
 
 
 # -----------------------------------------------------------------------------

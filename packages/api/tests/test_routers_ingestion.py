@@ -261,11 +261,8 @@ class TestIngestionRouter:
         assert response.json()["error"]["code"] == "server.rate_limit_unavailable"
 
     def test_ingest_text_idempotent_retry_skips_rate_limit(self) -> None:
-        """Idempotent retry (existing event + pending run) must not consume a slot.
-
-        Regression for codex review P2 on PR #98: transient client retries
-        with the same source_id used to burn rate-limit slots even though
-        no new LLM work was queued.
+        """Idempotent retry (existing event + pending run) must not consume a slot
+        AND must not re-enqueue job_extract (codex review P2 + follow-up P1).
         """
         from contextlib import ExitStack
 
@@ -279,6 +276,11 @@ class TestIngestionRouter:
             mock_limiter_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.RateLimiterService"))
             mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
             mock_run_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
+
+            # job_extract is imported lazily INSIDE the route, so patch the
+            # symbol in its real home. Regression for re-enqueue-on-pending.
+            mock_job_extract = stack.enter_context(patch("alayaos_core.worker.tasks.job_extract"))
+            mock_job_extract.kiq = AsyncMock()
 
             event_repo = AsyncMock()
             # created=False → existing event
@@ -304,4 +306,6 @@ class TestIngestionRouter:
         mock_redis.assert_not_called()
         # No new run created; existing pending returned.
         run_repo.create.assert_not_called()
+        # No duplicate kiq() — existing worker will pick up the pending run.
+        mock_job_extract.kiq.assert_not_called()
         assert str(pending_run.id) == response.json()["data"]["extraction_run_id"]

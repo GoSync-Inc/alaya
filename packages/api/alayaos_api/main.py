@@ -12,9 +12,24 @@ from alayaos_core.logging import setup_logging
 log = structlog.get_logger()
 
 
+_DEFAULT_SECRET_KEY = "change-me-in-production"  # noqa: S105  sentinel only
+
+
+def _validate_production_secrets(settings: Settings) -> None:
+    """Fail-fast if production is running with insecure defaults."""
+    if settings.ENV != "production":
+        return
+    if settings.SECRET_KEY.get_secret_value() == _DEFAULT_SECRET_KEY:
+        raise RuntimeError(
+            "ALAYA_SECRET_KEY must be set to a non-default value in production. "
+            "Generate a strong random value and set ALAYA_SECRET_KEY env var."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = Settings()
+    _validate_production_secrets(settings)
     setup_logging(
         json_output=settings.ENV == "production",
         log_level=settings.LOG_LEVEL,

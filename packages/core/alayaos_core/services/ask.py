@@ -155,10 +155,17 @@ def _estimate_tokens(text: str) -> int:
 
 
 _SANITIZER_PATTERNS = [
+    # Direct prompt-injection via role tags.
     r"<system>.*?</system>",
     r"<assistant>.*?</assistant>",
+    # Classic instruction-override phrase — specific enough to avoid
+    # false positives in ordinary narrative.
     r"(?i)ignore\s+(all\s+)?(previous|above|all)\s+instructions?",
-    r"(?i)you\s+are\s+(now|a)\s+",
+    # Narrower variant: "you are now a <AI/bot/assistant/model/hacker>"
+    # — the generic "you are a" catches benign text like "you are a
+    # developer" and destructively rewrites unrelated multilingual
+    # snippets. Keep just the injection-flavoured suffixes.
+    r"(?i)you\s+are\s+now\s+[\w\s]{0,40}(AI|bot|assistant|model|jailb(?:roken|reak))",
 ]
 
 

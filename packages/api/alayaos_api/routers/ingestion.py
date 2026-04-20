@@ -153,14 +153,14 @@ async def ingest_text(
                     run = max(pending, key=lambda r: r.created_at)
                     should_enqueue = True  # recovery on dropped first kiq
                 else:
-                    run = max(active, key=lambda r: r.created_at)
-                    # Best-effort stuck-run recovery: if the worker has
-                    # held the run past the stale threshold without
-                    # advancing it to terminal, assume the job was
-                    # dropped and re-enqueue. Worker-side status
-                    # transitions remain the source of truth for
-                    # preventing duplicate LLM work.
-                    age = datetime.now(UTC) - run.created_at
+                    run = max(active, key=lambda r: r.updated_at)
+                    # Best-effort stuck-run recovery: measure time since
+                    # the LAST status transition (updated_at). Using
+                    # created_at would misclassify a run that sat pending
+                    # in a backlog for >10min and only just flipped to
+                    # 'extracting' — it would look stale and we'd
+                    # re-enqueue, causing double-processing.
+                    age = datetime.now(UTC) - run.updated_at
                     should_enqueue = age > _STALE_ACTIVE_RUN_THRESHOLD
             else:
                 # All prior runs are terminal — start a fresh extraction.

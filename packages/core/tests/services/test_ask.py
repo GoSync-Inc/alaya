@@ -43,6 +43,22 @@ def test_sanitize_context_strips_you_are_now():
     assert "[REDACTED]" in result
 
 
+def test_sanitize_context_does_not_flag_generic_you_are():
+    """Ordinary narrative "you are a developer" must not trigger redaction.
+
+    Regression for codex 10th review P3: the broader pattern caught
+    benign text and destructively rewrote unrelated multilingual
+    content in the same snippet.
+    """
+    from alayaos_core.services.ask import _sanitize_context
+
+    text = "Note: you are a backend engineer on the project 👨\u200d💻"
+    result = _sanitize_context(text)
+    # Pattern must NOT match → original preserved, ZWJ emoji intact.
+    assert result == text
+    assert "\u200d" in result
+
+
 def test_sanitize_context_passes_clean_text():
     from alayaos_core.services.ask import _sanitize_context
 

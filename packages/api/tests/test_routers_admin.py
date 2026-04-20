@@ -71,25 +71,25 @@ class TestBackfillEmbeddings:
         assert response.status_code == 403
 
     def test_backfill_returns_200_with_counts(self) -> None:
-        """Endpoint returns processed/failed/total counts."""
+        """Endpoint returns processed/failed/total counts (non-bootstrap, own workspace)."""
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
 
         # Mock the session execute calls:
-        # First call returns rows (chunks needing embedding)
-        # Second call is the UPDATE (via begin_nested savepoint)
+        # First call: SET LOCAL; second call returns rows; third: UPDATE (begin_nested)
         chunk_id = uuid.uuid4()
         mock_row = MagicMock()
         mock_row.id = chunk_id
         mock_row.content = "hello world"
 
+        set_local_result = MagicMock()
         fetch_result = MagicMock()
         fetch_result.all.return_value = [mock_row]
 
         update_result = MagicMock()
 
         session_mock = AsyncMock()
-        session_mock.execute = AsyncMock(side_effect=[fetch_result, update_result])
+        session_mock.execute = AsyncMock(side_effect=[set_local_result, fetch_result, update_result])
         # begin_nested returns an async context manager
         nested_cm = AsyncMock()
         nested_cm.__aenter__ = AsyncMock(return_value=nested_cm)
@@ -104,7 +104,8 @@ class TestBackfillEmbeddings:
         app.dependency_overrides[get_session] = override_session
 
         client = TestClient(app)
-        response = client.post("/admin/backfill-embeddings", json={})
+        # Must provide own workspace_id for non-bootstrap key
+        response = client.post("/admin/backfill-embeddings", json={"workspace_id": str(WS_ID)})
 
         assert response.status_code == 200
         body = response.json()
@@ -113,7 +114,7 @@ class TestBackfillEmbeddings:
         assert body["total"] == 1
 
     def test_backfill_no_chunks_returns_zero_counts(self) -> None:
-        """When no chunks need embedding, all counts are zero."""
+        """When no chunks need embedding, all counts are zero (non-bootstrap, own workspace)."""
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
 
@@ -121,7 +122,8 @@ class TestBackfillEmbeddings:
         fetch_result.all.return_value = []
 
         session_mock = AsyncMock()
-        session_mock.execute = AsyncMock(return_value=fetch_result)
+        # First call: SET LOCAL; second: SELECT
+        session_mock.execute = AsyncMock(side_effect=[MagicMock(), fetch_result])
 
         async def override_session():
             yield session_mock
@@ -131,7 +133,8 @@ class TestBackfillEmbeddings:
         app.dependency_overrides[get_session] = override_session
 
         client = TestClient(app)
-        response = client.post("/admin/backfill-embeddings", json={})
+        # Provide own workspace_id for non-bootstrap key
+        response = client.post("/admin/backfill-embeddings", json={"workspace_id": str(WS_ID)})
 
         assert response.status_code == 200
         body = response.json()
@@ -140,9 +143,24 @@ class TestBackfillEmbeddings:
         assert body["total"] == 0
 
     def test_backfill_filters_by_workspace_id(self) -> None:
-        """When workspace_id is provided, execute is called with a filter."""
-        api_key = make_api_key()
-        app = make_app_with_mock_session(api_key)
+        """Bootstrap key with any workspace_id → execute called with SET LOCAL + SELECT filter."""
+        import hashlib
+
+        raw = "ak_bootstrap_key_1234567890abcdef"
+        bootstrap_key = APIKey(
+            id=uuid.uuid4(),
+            workspace_id=WS_ID,
+            name="Bootstrap Key",
+            key_prefix=raw[:12],
+            key_hash=hashlib.sha256(raw.encode()).hexdigest(),
+            scopes=["read", "write", "admin"],
+            revoked_at=None,
+            expires_at=None,
+            is_bootstrap=True,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        app = make_app_with_mock_session(bootstrap_key)
 
         fetch_result = MagicMock()
         fetch_result.all.return_value = []
@@ -188,3 +206,76 @@ class TestBackfillEmbeddings:
         response = client.post("/admin/backfill-embeddings", json={"batch_size": 0})
 
         assert response.status_code in (400, 422)
+
+
+class TestBackfillEmbeddingsScopeEnforcement:
+    """Tests for workspace-scoped access enforcement on /admin/backfill-embeddings."""
+
+    def _make_bootstrap_key(self) -> APIKey:
+        import hashlib
+
+        raw = "ak_bootstrap_key_1234567890abcdef"
+        return APIKey(
+            id=uuid.uuid4(),
+            workspace_id=WS_ID,
+            name="Bootstrap Key",
+            key_prefix=raw[:12],
+            key_hash=hashlib.sha256(raw.encode()).hexdigest(),
+            scopes=["read", "write", "admin"],
+            revoked_at=None,
+            expires_at=None,
+            is_bootstrap=True,
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+
+    def test_backfill_workspace_id_required_without_bootstrap(self) -> None:
+        """Non-bootstrap admin key without workspace_id → 422."""
+        api_key = make_api_key()  # is_bootstrap=False
+        app = make_app_with_mock_session(api_key)
+
+        client = TestClient(app)
+        response = client.post("/admin/backfill-embeddings", json={})
+
+        assert response.status_code == 422
+        body = response.json()
+        assert body["error"]["code"] == "workspace_required_for_admin_scope"
+
+    def test_backfill_cross_workspace_denied(self) -> None:
+        """Non-bootstrap admin key with different workspace_id → 403."""
+        api_key = make_api_key()  # workspace_id=WS_ID, is_bootstrap=False
+        app = make_app_with_mock_session(api_key)
+
+        other_ws_id = str(uuid.uuid4())
+        client = TestClient(app)
+        response = client.post("/admin/backfill-embeddings", json={"workspace_id": other_ws_id})
+
+        assert response.status_code == 403
+        body = response.json()
+        assert body["error"]["code"] == "auth.cross_workspace_denied"
+
+    def test_bootstrap_can_backfill_any_workspace(self) -> None:
+        """Bootstrap key with any workspace_id → 200."""
+        api_key = self._make_bootstrap_key()
+        app = make_app_with_mock_session(api_key)
+
+        # Give an empty result so the handler exits early
+        fetch_result = MagicMock()
+        fetch_result.all.return_value = []
+
+        session_mock = AsyncMock()
+        # First call: SET LOCAL; second call: SELECT
+        session_mock.execute = AsyncMock(side_effect=[MagicMock(), fetch_result])
+
+        async def override_session():
+            yield session_mock
+
+        from alayaos_api.deps import get_session
+
+        app.dependency_overrides[get_session] = override_session
+
+        other_ws_id = str(uuid.uuid4())
+        client = TestClient(app)
+        response = client.post("/admin/backfill-embeddings", json={"workspace_id": other_ws_id})
+
+        assert response.status_code == 200

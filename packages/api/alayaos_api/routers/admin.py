@@ -46,10 +46,43 @@ async def backfill_embeddings(
 ) -> BackfillResponse:
     """Backfill missing embeddings in vector_chunks.
 
-    When workspace_id is provided, SET LOCAL app.workspace_id is applied so RLS
-    filters to that workspace. When omitted, this is a cross-workspace admin
-    operation — the admin key bypasses RLS by design.
+    Non-bootstrap admin keys must provide workspace_id and may only operate on
+    their own workspace.  Bootstrap keys may specify any workspace_id or omit it
+    to operate across all workspaces.
     """
+    from fastapi import HTTPException
+
+    from alayaos_api.deps import _error_response  # type: ignore[attr-defined]
+
+    if not api_key.is_bootstrap:
+        # Non-bootstrap: workspace_id is required.
+        if request.workspace_id is None:
+            log.warning("admin_cross_workspace_attempt", key_prefix=api_key.key_prefix, reason="missing_workspace_id")
+            raise HTTPException(
+                status_code=422,
+                detail=_error_response(
+                    "workspace_required_for_admin_scope",
+                    "workspace_id is required for non-bootstrap admin keys.",
+                    hint="Provide the workspace_id you own, or use a bootstrap key for cross-workspace operations.",
+                ),
+            )
+        # Non-bootstrap: can only operate on their own workspace.
+        if request.workspace_id != api_key.workspace_id:
+            log.warning(
+                "admin_cross_workspace_attempt",
+                key_prefix=api_key.key_prefix,
+                requested_workspace=str(request.workspace_id),
+                key_workspace=str(api_key.workspace_id),
+            )
+            raise HTTPException(
+                status_code=403,
+                detail=_error_response(
+                    "auth.cross_workspace_denied",
+                    "Admin key may not operate on a different workspace.",
+                    hint="Use a bootstrap key for cross-workspace operations.",
+                ),
+            )
+
     # Apply RLS workspace filter when workspace_id is provided.
     if request.workspace_id is not None:
         validated_wid = str(uuid.UUID(str(request.workspace_id)))

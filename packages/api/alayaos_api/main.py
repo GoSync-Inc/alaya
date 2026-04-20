@@ -12,7 +12,7 @@ from alayaos_core.logging import setup_logging
 log = structlog.get_logger()
 
 
-_DEFAULT_SECRET_KEY = "change-me-in-production"  # noqa: S105  sentinel only
+_DEFAULT_SECRET_KEY = "change-me-in-production"
 
 
 def _validate_production_secrets(settings: Settings) -> None:

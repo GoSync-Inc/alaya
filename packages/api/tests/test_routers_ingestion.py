@@ -206,14 +206,21 @@ class TestIngestionRouter:
         uuid.UUID(str(source_id))
 
     def test_ingest_text_returns_429_when_rate_limited(self) -> None:
-        """Rate limit exceeded → 429 with Retry-After header."""
+        """Rate limit exceeded for new event → 429 with Retry-After header."""
         from contextlib import ExitStack
 
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
+        event = make_event()
 
         with ExitStack() as stack:
             _patch_rate_limiter(allowed=False, retry_after=12, backend_available=True)(stack)
+            mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
+            stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
+
+            event_repo = AsyncMock()
+            event_repo.create_or_update = AsyncMock(return_value=(event, True))
+            mock_event_cls.return_value = event_repo
 
             client = TestClient(app)
             response = client.post(
@@ -227,14 +234,21 @@ class TestIngestionRouter:
         assert response.json()["error"]["code"] == "rate_limit.exceeded"
 
     def test_ingest_text_returns_503_when_rate_limiter_backend_unavailable(self) -> None:
-        """Redis outage → fail-closed with 503, not unthrottled passthrough."""
+        """Redis outage on a new event → fail-closed with 503, not unthrottled passthrough."""
         from contextlib import ExitStack
 
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
+        event = make_event()
 
         with ExitStack() as stack:
             _patch_rate_limiter(allowed=False, retry_after=None, backend_available=False)(stack)
+            mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
+            stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
+
+            event_repo = AsyncMock()
+            event_repo.create_or_update = AsyncMock(return_value=(event, True))
+            mock_event_cls.return_value = event_repo
 
             client = TestClient(app)
             response = client.post(
@@ -245,3 +259,49 @@ class TestIngestionRouter:
 
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "server.rate_limit_unavailable"
+
+    def test_ingest_text_idempotent_retry_skips_rate_limit(self) -> None:
+        """Idempotent retry (existing event + pending run) must not consume a slot.
+
+        Regression for codex review P2 on PR #98: transient client retries
+        with the same source_id used to burn rate-limit slots even though
+        no new LLM work was queued.
+        """
+        from contextlib import ExitStack
+
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        event = make_event()
+        pending_run = make_run(event.id)
+
+        with ExitStack() as stack:
+            mock_redis = stack.enter_context(patch("alayaos_api.routers.ingestion.aioredis.from_url"))
+            mock_limiter_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.RateLimiterService"))
+            mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
+            mock_run_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
+
+            event_repo = AsyncMock()
+            # created=False → existing event
+            event_repo.create_or_update = AsyncMock(return_value=(event, False))
+            mock_event_cls.return_value = event_repo
+
+            run_repo = AsyncMock()
+            # Existing pending run for this event
+            run_repo.list_by_event = AsyncMock(return_value=[pending_run])
+            run_repo.create = AsyncMock()  # must NOT be called on this path
+            mock_run_cls.return_value = run_repo
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/v1/ingest/text",
+                json={"text": "retry", "source_id": str(event.source_id)},
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 202
+        # Rate-limiter must not have been constructed or checked.
+        mock_limiter_cls.assert_not_called()
+        mock_redis.assert_not_called()
+        # No new run created; existing pending returned.
+        run_repo.create.assert_not_called()
+        assert str(pending_run.id) == response.json()["data"]["extraction_run_id"]

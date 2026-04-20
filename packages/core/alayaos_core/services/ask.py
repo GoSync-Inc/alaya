@@ -146,25 +146,36 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
+_SANITIZER_PATTERNS = [
+    r"<system>.*?</system>",
+    r"<assistant>.*?</assistant>",
+    r"(?i)ignore\s+(all\s+)?(previous|above|all)\s+instructions?",
+    r"(?i)you\s+are\s+(now|a)\s+",
+]
+
+
 def _sanitize_context(text: str) -> str:
     """Strip instruction-like patterns from evidence content.
 
-    Normalizes via NFKC and strips ALL Unicode format characters
-    (category ``Cf``) before regex matching — zero-width joiners,
-    bidi overrides (LRM/RLM), BOM, WJ, language-tag chars, etc.
-    A whitelist of specific code points leaves easy bypasses
-    (e.g. ``ign\u200eore previous instructions``); stripping the
-    whole ``Cf`` category is future-proof.
+    Detects injection attempts on a normalized view (NFKC + stripped
+    ``Cf``-category chars) so obfuscated payloads like
+    ``ign\u200eore previous instructions`` are caught. When nothing
+    suspicious is found the **original** ``text`` is returned untouched
+    — this preserves legitimate multilingual content (Persian/Urdu
+    ZWNJ, emoji ZWJ, fullwidth forms) that would otherwise be
+    destructively rewritten on every query.
     """
-    text = unicodedata.normalize("NFKC", text)
-    text = "".join(c for c in text if unicodedata.category(c) != "Cf")
+    normalized = unicodedata.normalize("NFKC", text)
+    normalized = "".join(c for c in normalized if unicodedata.category(c) != "Cf")
 
-    patterns = [
-        r"<system>.*?</system>",
-        r"<assistant>.*?</assistant>",
-        r"(?i)ignore\s+(all\s+)?(previous|above|all)\s+instructions?",
-        r"(?i)you\s+are\s+(now|a)\s+",
-    ]
-    for pattern in patterns:
-        text = re.sub(pattern, "[REDACTED]", text, flags=re.DOTALL)
-    return text
+    suspicious = any(re.search(pattern, normalized, flags=re.DOTALL) for pattern in _SANITIZER_PATTERNS)
+    if not suspicious:
+        return text
+
+    # Attack detected — return the normalized + redacted form. Losing
+    # multilingual nuance is acceptable here because the evidence was
+    # already carrying an injection payload.
+    redacted = normalized
+    for pattern in _SANITIZER_PATTERNS:
+        redacted = re.sub(pattern, "[REDACTED]", redacted, flags=re.DOTALL)
+    return redacted

@@ -137,7 +137,7 @@ Source: `docs/vision/alaya-master-vision-session-summary-ru.md`, `alaya-operatio
 
 ## Run 5.4: Knowledge Graph Consolidation (2026-04-16)
 
-Merged 2026-04-16 via PRs #87–#94. Plan files not in repo (planning artifacts). Audit folder: `docs/superflow/audits/2026-04-17-full-audit/`.
+Merged 2026-04-16 via PRs #87–#94. Plan files not in repo (planning artifacts).
 
 ### P1 — must fix next
 
@@ -216,7 +216,7 @@ Security audit source: `docs/audits/2026-04-13-security-best-practices.md`
 | ID | SBP | Title | Status | Commit |
 |----|-----|-------|--------|--------|
 | RUN5.04 | SBP-001 | Memory-read scope enforcement | DONE | `a9d1fd4` fix: harden read auth and rate limit boundaries |
-| RUN5.05 | SBP-002 | Rate limiting fail-closed on Redis outage | DONE | `135bed2` fix: rate limiter unique members + fail-open on Redis error |
+| RUN5.05 | SBP-002 | Rate limiting fail-closed on Redis outage | DONE | `a9d1fd4` fix: rate limiter unique members + fail-open on Redis error |
 | RUN5.06 | SBP-003 | Disable OpenAPI/docs in production | DONE | `6909204` fix: add production Caddyfile, migration error handling, docs |
 | RUN5.07 | SBP-004 | TrustedHost validation | DONE | `6909204` fix: add production Caddyfile, migration error handling, docs |
 | RUN5.08 | SBP-005 | Reduce anonymous readiness detail leakage | DONE | `34c9e3a` fix: reduce health and cli secret leakage (`HEALTH_READY_VERBOSE` flag) |

@@ -186,3 +186,33 @@ def test_validate_production_secrets_passes_with_real_secret(monkeypatch) -> Non
     settings = Settings()
     # Should not raise.
     _validate_production_secrets(settings)
+
+
+def test_validate_production_secrets_rejects_empty_secret(monkeypatch) -> None:
+    """Blank ALAYA_SECRET_KEY (=) must be rejected in production (codex 7th review)."""
+    import pytest
+
+    from alayaos_api.main import _validate_production_secrets
+    from alayaos_core.config import Settings
+
+    monkeypatch.setenv("ALAYA_ENV", "production")
+    monkeypatch.setenv("ALAYA_SECRET_KEY", "")
+
+    settings = Settings()
+    with pytest.raises(RuntimeError, match="non-empty"):
+        _validate_production_secrets(settings)
+
+
+def test_validate_production_secrets_rejects_whitespace_secret(monkeypatch) -> None:
+    """Whitespace-only SECRET_KEY (common Compose bug) must be rejected."""
+    import pytest
+
+    from alayaos_api.main import _validate_production_secrets
+    from alayaos_core.config import Settings
+
+    monkeypatch.setenv("ALAYA_ENV", "production")
+    monkeypatch.setenv("ALAYA_SECRET_KEY", "   \t\n  ")
+
+    settings = Settings()
+    with pytest.raises(RuntimeError, match="non-empty"):
+        _validate_production_secrets(settings)

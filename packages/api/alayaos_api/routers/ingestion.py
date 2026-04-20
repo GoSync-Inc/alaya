@@ -127,8 +127,13 @@ async def ingest_text(
             should_enqueue = True
         else:
             existing_runs = await run_repo.list_by_event(event.id)
-            # Any non-terminal run means extraction is in progress or queued.
-            active = [r for r in existing_runs if r.status not in ("completed", "failed")]
+            # Terminal statuses: extraction is done (cleanly, in error, or
+            # access-denied). A retry on a previously ``skipped`` run
+            # (e.g. access level was raised after ingest) must be able to
+            # start a fresh run, so we include ``skipped`` alongside
+            # completed/failed.
+            terminal = ("completed", "failed", "skipped")
+            active = [r for r in existing_runs if r.status not in terminal]
             if active:
                 # Most-recent active run; prefer pending (retriable) over in-progress.
                 run = max(active, key=lambda r: r.created_at)
@@ -136,7 +141,7 @@ async def ingest_text(
                 # the worker has already picked up.
                 should_enqueue = run.status == "pending"
             else:
-                # Event has only terminal runs — start a fresh extraction.
+                # All prior runs are terminal — start a fresh extraction.
                 parent_id = max(existing_runs, key=lambda r: r.created_at).id if existing_runs else None
                 run = await run_repo.create(
                     workspace_id=api_key.workspace_id,

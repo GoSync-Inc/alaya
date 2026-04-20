@@ -17,8 +17,8 @@ packages/
 ├── core/                           # Brain: models, schemas, repositories, services
 │   └── alayaos_core/
 │       ├── models/                 # SQLAlchemy 2.0 (18 files)
-│       ├── schemas/                # Pydantic schemas (15 files)
-│       ├── repositories/           # Async repos with cursor pagination (14 files)
+│       ├── schemas/                # Pydantic schemas (17 files)
+│       ├── repositories/           # Async repos with cursor pagination (16 files)
 │       ├── services/               # workspace (seed), api_key (generate/verify), entity_cache (Redis)
 │       ├── extraction/             # Multi-stage intelligence pipeline
 │       │   ├── cortex/             # Chunker + classifier (L0 → L0Chunks with domain scores)
@@ -38,11 +38,10 @@ packages/
 │       ├── main.py                 # App factory + lifespan
 │       ├── deps.py                 # Auth, session, scope dependencies
 │       ├── middleware.py           # Error envelope, request ID
-│       └── routers/                # 14 routers: health, workspaces, entities, claims, chunks, pipeline_traces, integrator_runs, etc.
-├── cli/                            # Python CLI placeholder
+│       └── routers/                # 18 routers: health, workspaces, entities, claims, chunks, pipeline_traces, integrator_runs, integrator_actions, search, ask, tree, etc.
 ├── cli-go/                         # Go CLI (Cobra): search, ask, tree, entity, claim, ingest, key, setup agent
-└── connectors/                     # Placeholder (Run 5)
-alembic/                            # Migrations (001: 18 tables + RLS, 002: auth bypass, 004: intelligence pipeline)
+└── connectors/                     # Source connectors (placeholder)
+alembic/                            # Migrations (001: 18 tables + RLS, 002: auth bypass, 003: extraction schema, 004: intelligence pipeline, 005a/005b: search indexes, 006: consolidator schema)
 docker/                             # seed.py, init-db.sql, Caddyfile
 ```
 
@@ -83,6 +82,8 @@ Run before every commit:
 - `INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD` (default `0.9`) — minimum cosine similarity to forward a pair to LLM verification; lower values increase recall at the cost of more LLM calls.
 - `INTEGRATOR_DEDUP_BATCH_SIZE` (default `9`) — entities per LLM batch in dedup v2 composite-signal pass.
 - `CONSOLIDATOR_PANORAMIC_MAX_ENTITIES` (default `500`) — entity cap for the panoramic triage pass; configurable via constructor param.
+- `ASK_RATE_LIMIT_PER_MINUTE` (default `10`) / `ASK_RATE_LIMIT_PER_HOUR` (default `100`) — rate limits for `/ask` and `/search`; enforced fail-closed (503 when Redis is unavailable).
+- `SECRET_KEY` — must be set to a strong random value in production; defaults to `"change-me-in-production"` which is insecure.
 
 ## Architecture Rules
 
@@ -113,7 +114,7 @@ Core predicates: 21 seeded per workspace (deadline, status, owner, role, title, 
 Core entity types: 13 seeded per workspace (person, project, team, document, decision, meeting, task, goal, north_star, etc.)
 Claims and relations carry `extraction_run_id` for full provenance tracing.
 
-## API Endpoints (43 total)
+## API Endpoints (44 total)
 
 Health: `/health/live`, `/health/ready`
 Workspaces: POST, GET, GET/{id}, PATCH/{id} — bootstrap key required for create
@@ -125,7 +126,7 @@ API Keys: POST (raw key once), GET (prefix only), DELETE/{prefix} (revoke)
 Claims: GET, GET/{id}, GET (by entity)
 Relations: GET, GET/{id}
 Extraction Runs: GET, GET/{id}
-Ingestion: POST `/ingest` — trigger extraction pipeline
+Ingestion: POST `/ingest/text` — trigger extraction pipeline
 Chunks: GET (event_id, processing_stage, is_crystal filters), GET/{id}
 Pipeline Traces: GET /events/{id}/trace
 Integrator Runs: GET, GET/{id}, POST /trigger

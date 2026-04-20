@@ -206,21 +206,14 @@ class TestIngestionRouter:
         uuid.UUID(str(source_id))
 
     def test_ingest_text_returns_429_when_rate_limited(self) -> None:
-        """Rate limit exceeded for new event → 429 with Retry-After header."""
+        """Rate limit exceeded → 429 with Retry-After header (applied upstream)."""
         from contextlib import ExitStack
 
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
-        event = make_event()
 
         with ExitStack() as stack:
             _patch_rate_limiter(allowed=False, retry_after=12, backend_available=True)(stack)
-            mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
-            stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
-
-            event_repo = AsyncMock()
-            event_repo.create_or_update = AsyncMock(return_value=(event, True))
-            mock_event_cls.return_value = event_repo
 
             client = TestClient(app)
             response = client.post(
@@ -234,21 +227,14 @@ class TestIngestionRouter:
         assert response.json()["error"]["code"] == "rate_limit.exceeded"
 
     def test_ingest_text_returns_503_when_rate_limiter_backend_unavailable(self) -> None:
-        """Redis outage on a new event → fail-closed with 503, not unthrottled passthrough."""
+        """Redis outage → fail-closed with 503, not unthrottled passthrough."""
         from contextlib import ExitStack
 
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
-        event = make_event()
 
         with ExitStack() as stack:
             _patch_rate_limiter(allowed=False, retry_after=None, backend_available=False)(stack)
-            mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
-            stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
-
-            event_repo = AsyncMock()
-            event_repo.create_or_update = AsyncMock(return_value=(event, True))
-            mock_event_cls.return_value = event_repo
 
             client = TestClient(app)
             response = client.post(
@@ -260,9 +246,9 @@ class TestIngestionRouter:
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "server.rate_limit_unavailable"
 
-    def test_ingest_text_idempotent_retry_skips_rate_limit(self) -> None:
-        """Idempotent retry (existing event + pending run) must not consume a slot
-        AND must not re-enqueue job_extract (codex review P2 + follow-up P1).
+    def test_ingest_text_idempotent_retry_returns_same_pending_run(self) -> None:
+        """Retry with existing source_id → same pending run, kiq re-enqueued
+        (recovery path for broker outages — codex review).
         """
         from contextlib import ExitStack
 
@@ -272,25 +258,19 @@ class TestIngestionRouter:
         pending_run = make_run(event.id)
 
         with ExitStack() as stack:
-            mock_redis = stack.enter_context(patch("alayaos_api.routers.ingestion.aioredis.from_url"))
-            mock_limiter_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.RateLimiterService"))
+            _patch_rate_limiter()(stack)
             mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
             mock_run_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
-
-            # job_extract is imported lazily INSIDE the route, so patch the
-            # symbol in its real home. Regression for re-enqueue-on-pending.
             mock_job_extract = stack.enter_context(patch("alayaos_core.worker.tasks.job_extract"))
             mock_job_extract.kiq = AsyncMock()
 
             event_repo = AsyncMock()
-            # created=False → existing event
             event_repo.create_or_update = AsyncMock(return_value=(event, False))
             mock_event_cls.return_value = event_repo
 
             run_repo = AsyncMock()
-            # Existing pending run for this event
             run_repo.list_by_event = AsyncMock(return_value=[pending_run])
-            run_repo.create = AsyncMock()  # must NOT be called on this path
+            run_repo.create = AsyncMock()
             mock_run_cls.return_value = run_repo
 
             client = TestClient(app)
@@ -301,11 +281,8 @@ class TestIngestionRouter:
             )
 
         assert response.status_code == 202
-        # Rate-limiter must not have been constructed or checked.
-        mock_limiter_cls.assert_not_called()
-        mock_redis.assert_not_called()
-        # No new run created; existing pending returned.
+        # No new run created — same pending returned.
         run_repo.create.assert_not_called()
-        # No duplicate kiq() — existing worker will pick up the pending run.
-        mock_job_extract.kiq.assert_not_called()
+        # kiq IS re-enqueued so a dropped enqueue (broker outage) recovers.
+        mock_job_extract.kiq.assert_called_once()
         assert str(pending_run.id) == response.json()["data"]["extraction_run_id"]

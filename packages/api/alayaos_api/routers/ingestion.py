@@ -2,7 +2,6 @@
 
 import contextlib
 import uuid
-from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import redis.asyncio as aioredis
@@ -24,13 +23,6 @@ from alayaos_core.services.rate_limiter import RateLimiterService
 router = APIRouter()
 
 _MAX_TEXT_CHARS = 100_000
-
-# Best-effort stuck-run recovery: if a non-pending active run hasn't
-# advanced to terminal within this window, assume broker/worker drop
-# and re-enqueue on retry. A proper periodic reaper (RUN5.3.13) is
-# tracked separately; this covers the same scenario from the ingest
-# side without a background job.
-_STALE_ACTIVE_RUN_THRESHOLD = timedelta(minutes=10)
 
 
 def _rate_limit_error(code: str, message: str, hint: str | None = None) -> dict:
@@ -153,15 +145,14 @@ async def ingest_text(
                     run = max(pending, key=lambda r: r.created_at)
                     should_enqueue = True  # recovery on dropped first kiq
                 else:
+                    # Advanced active statuses (extracting, cortex_complete,
+                    # writing, enriching) are owned by downstream jobs;
+                    # re-enqueueing job_extract would be a no-op for them
+                    # because job_extract skips cortex_complete/completed.
+                    # Truly stuck non-pending runs need a periodic reaper
+                    # (RUN5.3.13) — out of scope for this security PR.
                     run = max(active, key=lambda r: r.updated_at)
-                    # Best-effort stuck-run recovery: measure time since
-                    # the LAST status transition (updated_at). Using
-                    # created_at would misclassify a run that sat pending
-                    # in a backlog for >10min and only just flipped to
-                    # 'extracting' — it would look stale and we'd
-                    # re-enqueue, causing double-processing.
-                    age = datetime.now(UTC) - run.updated_at
-                    should_enqueue = age > _STALE_ACTIVE_RUN_THRESHOLD
+                    should_enqueue = False
             else:
                 # All prior runs are terminal — start a fresh extraction.
                 parent_id = max(existing_runs, key=lambda r: r.created_at).id if existing_runs else None

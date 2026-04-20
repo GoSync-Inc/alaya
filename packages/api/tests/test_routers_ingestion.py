@@ -395,8 +395,10 @@ class TestIngestionRouter:
         event = make_event()
         extracting_run = make_run(event.id)
         extracting_run.status = "extracting"
-        # Fresh run — well inside the 10-min stale threshold.
-        extracting_run.created_at = datetime.now(UTC)
+        # Fresh transition — well inside the 10-min stale threshold.
+        now = datetime.now(UTC)
+        extracting_run.created_at = now
+        extracting_run.updated_at = now
 
         with ExitStack() as stack:
             _patch_rate_limiter()(stack)
@@ -440,8 +442,10 @@ class TestIngestionRouter:
         event = make_event()
         stuck_run = make_run(event.id)
         stuck_run.status = "extracting"
-        # 30 minutes old — clearly past the 10-min stale threshold.
-        stuck_run.created_at = datetime.now(UTC) - timedelta(minutes=30)
+        # Last transition 30 minutes ago — past the 10-min stale threshold.
+        stale = datetime.now(UTC) - timedelta(minutes=30)
+        stuck_run.created_at = stale
+        stuck_run.updated_at = stale
 
         with ExitStack() as stack:
             _patch_rate_limiter()(stack)

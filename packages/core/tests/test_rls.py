@@ -261,10 +261,7 @@ async def test_claim_sources_rls_isolation(session_ws_a, session_ws_b):
         {"id": claim_id, "ws": ws_a_id, "eid": entity_id},
     )
     await session_ws_a.execute(
-        text(
-            "INSERT INTO claim_sources (id, workspace_id, claim_id, event_id) "
-            "VALUES (:id, :ws, :cid, :eid)"
-        ),
+        text("INSERT INTO claim_sources (id, workspace_id, claim_id, event_id) VALUES (:id, :ws, :cid, :eid)"),
         {"id": row_id, "ws": ws_a_id, "cid": claim_id, "eid": event_id},
     )
     await session_ws_a.flush()
@@ -319,10 +316,7 @@ async def test_relation_sources_rls_isolation(session_ws_a, session_ws_b):
         {"id": relation_id, "ws": ws_a_id, "e1": e1, "e2": e2},
     )
     await session_ws_a.execute(
-        text(
-            "INSERT INTO relation_sources (id, workspace_id, relation_id, event_id) "
-            "VALUES (:id, :ws, :rid, :eid)"
-        ),
+        text("INSERT INTO relation_sources (id, workspace_id, relation_id, event_id) VALUES (:id, :ws, :rid, :eid)"),
         {"id": row_id, "ws": ws_a_id, "rid": relation_id, "eid": event_id},
     )
     await session_ws_a.flush()
@@ -358,10 +352,7 @@ async def test_access_group_members_rls_isolation(session_ws_a, session_ws_b):
         {"id": member_id, "ws": ws_a_id, "uid": str(uuid.uuid4())},
     )
     await session_ws_a.execute(
-        text(
-            "INSERT INTO access_group_members (id, workspace_id, group_id, member_id) "
-            "VALUES (:id, :ws, :gid, :mid)"
-        ),
+        text("INSERT INTO access_group_members (id, workspace_id, group_id, member_id) VALUES (:id, :ws, :gid, :mid)"),
         {"id": row_id, "ws": ws_a_id, "gid": group_id, "mid": member_id},
     )
     await session_ws_a.flush()

@@ -53,7 +53,7 @@ async def seed(session: AsyncSession) -> None:
 
 async def main() -> None:
     settings = Settings()
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
+    engine = create_async_engine(settings.DATABASE_URL.get_secret_value(), echo=False)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with session_factory() as session, session.begin():

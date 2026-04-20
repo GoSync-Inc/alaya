@@ -108,7 +108,10 @@ async def ask(
             tokens_used=tokens_used,
         )
 
-    context_text = _sanitize_context("\n".join(context_parts))
+    # Sanitize each evidence unit independently — otherwise one injection
+    # payload in any snippet would force NFKC/Cf-strip on the whole prompt,
+    # mangling unrelated benign Unicode (e.g. Persian ZWNJ in other units).
+    context_text = "\n".join(_sanitize_context(part) for part in context_parts)
     text = f"<context>\n{context_text}\n</context>\n\n<question>\n{question}\n</question>"
 
     response, usage = await llm.extract(

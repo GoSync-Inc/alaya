@@ -37,18 +37,36 @@ def _rate_limit_error(code: str, message: str, hint: str | None = None) -> dict:
     }
 
 
-async def _check_ingest_rate_limit(
-    settings: Settings,
-    api_key: APIKey,
-) -> None:
-    """Enforce the per-key ingest limit; raises 429/503 on decision.
+@router.post("/ingest/text", status_code=202)
+async def ingest_text(
+    body: IngestTextRequest,
+    session: Annotated[AsyncSession, Depends(get_workspace_session)],
+    api_key: Annotated[APIKey, Depends(require_scope("write"))],
+):
+    # Explicit text length validation with spec-defined error code
+    if len(body.text) > _MAX_TEXT_CHARS:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": {
+                    "code": "validation.text_too_long",
+                    "message": f"Text exceeds maximum length of {_MAX_TEXT_CHARS} characters.",
+                    "hint": "Split into smaller chunks or use batch ingestion.",
+                    "docs": None,
+                    "request_id": None,
+                }
+            },
+        )
 
-    Only called when an ingest would cause **new** extraction work
-    (either a new L0 event or a new extraction run on an existing one).
-    Idempotent retries that hit an already-pending run do not consume
-    a slot — otherwise transient client retries would burn budget
-    without any LLM cost being incurred downstream.
-    """
+    settings = Settings()
+
+    # Rate-limit upstream on every request. Idempotent retries DO consume
+    # slots — the alternative (skipping on dedup) opened two regressions:
+    # (a) pending-run retries skipped the limiter but still triggered
+    # duplicate job_extract.kiq() calls, and (b) when a kiq() failed on
+    # the first call the run stayed stuck because retries no longer
+    # re-enqueued it. Slightly tighter retry UX is the accepted trade-off
+    # — documented in CHANGELOG for operators.
     redis_client = None
     with contextlib.suppress(Exception):
         redis_client = aioredis.from_url(settings.REDIS_URL.get_secret_value())
@@ -74,91 +92,51 @@ async def _check_ingest_rate_limit(
                 detail=_rate_limit_error("rate_limit.exceeded", "Rate limit exceeded.", "Retry later."),
                 headers={"Retry-After": str(decision.retry_after or 60)},
             )
-    finally:
-        if redis_client:
-            await redis_client.aclose()
 
+        # Auto-generate source_id if not provided
+        source_id = body.source_id if body.source_id is not None else str(uuid.uuid4())
 
-@router.post("/ingest/text", status_code=202)
-async def ingest_text(
-    body: IngestTextRequest,
-    session: Annotated[AsyncSession, Depends(get_workspace_session)],
-    api_key: Annotated[APIKey, Depends(require_scope("write"))],
-):
-    # Explicit text length validation with spec-defined error code
-    if len(body.text) > _MAX_TEXT_CHARS:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "error": {
-                    "code": "validation.text_too_long",
-                    "message": f"Text exceeds maximum length of {_MAX_TEXT_CHARS} characters.",
-                    "hint": "Split into smaller chunks or use batch ingestion.",
-                    "docs": None,
-                    "request_id": None,
-                }
-            },
-        )
-
-    settings = Settings()
-
-    # Auto-generate source_id if not provided
-    source_id = body.source_id if body.source_id is not None else str(uuid.uuid4())
-
-    event_repo = EventRepository(session, api_key.workspace_id)
-    event, created = await event_repo.create_or_update(
-        workspace_id=api_key.workspace_id,
-        source_type=body.source_type,
-        source_id=source_id,
-        content={"text": body.text},
-        metadata=body.metadata,
-        raw_text=body.text,
-        access_level=body.access_level,
-        event_kind=body.event_kind,
-        occurred_at=body.occurred_at,
-    )
-
-    # Idempotency: only create extraction run for new events.
-    # ``enqueued`` tracks whether this request actually produces new
-    # extraction work — used to gate both the rate-limiter and the
-    # task-queue enqueue so retries against a pending run cannot
-    # (a) skip the budget cap while (b) spamming duplicate LLM work.
-    run_repo = ExtractionRunRepository(session, api_key.workspace_id)
-    enqueued = False
-    if created:
-        # New event → new extraction → rate-limited (LLM cost gate).
-        await _check_ingest_rate_limit(settings, api_key)
-        run = await run_repo.create(
+        event_repo = EventRepository(session, api_key.workspace_id)
+        event, created = await event_repo.create_or_update(
             workspace_id=api_key.workspace_id,
-            event_id=event.id,
-            status="pending",
+            source_type=body.source_type,
+            source_id=source_id,
+            content={"text": body.text},
+            metadata=body.metadata,
+            raw_text=body.text,
+            access_level=body.access_level,
+            event_kind=body.event_kind,
+            occurred_at=body.occurred_at,
         )
-        enqueued = True
-    else:
-        # Re-ingest: find existing pending run or create with parent_run_id
-        existing_runs = await run_repo.list_by_event(event.id)
-        pending = [r for r in existing_runs if r.status == "pending"]
-        if pending:
-            # Fully idempotent path — no LLM cost, no slot consumed,
-            # and no re-enqueue (existing worker will pick up the run).
-            run = pending[0]
-        else:
-            # Re-extract of an existing event = fresh extraction → rate-limited.
-            await _check_ingest_rate_limit(settings, api_key)
-            completed = [r for r in existing_runs if r.status == "completed"]
-            parent_id = completed[-1].id if completed else None
+
+        # Idempotency: only create extraction run for new events
+        run_repo = ExtractionRunRepository(session, api_key.workspace_id)
+        if created:
             run = await run_repo.create(
                 workspace_id=api_key.workspace_id,
                 event_id=event.id,
                 status="pending",
-                parent_run_id=parent_id,
             )
-            enqueued = True
+        else:
+            # Re-ingest: find existing pending run or create with parent_run_id
+            existing_runs = await run_repo.list_by_event(event.id)
+            pending = [r for r in existing_runs if r.status == "pending"]
+            if pending:
+                run = pending[0]
+            else:
+                completed = [r for r in existing_runs if r.status == "completed"]
+                parent_id = completed[-1].id if completed else None
+                run = await run_repo.create(
+                    workspace_id=api_key.workspace_id,
+                    event_id=event.id,
+                    status="pending",
+                    parent_run_id=parent_id,
+                )
 
-    # Only enqueue when this request produced new extraction work.
-    # Idempotent retries hitting an already-pending run fall through
-    # untouched — no duplicate kiq(), no duplicate LLM spend.
-    if enqueued:
+        # Always re-enqueue. Recovery on broker outage: if the first
+        # kiq() was dropped, a retry will re-enqueue against the same
+        # pending run. Worker-side status check (run.status=="pending"
+        # → "extracting") prevents duplicate LLM work.
         try:
             from alayaos_core.worker.tasks import job_extract
 
@@ -166,10 +144,13 @@ async def ingest_text(
         except Exception:
             pass  # Worker may not be running; run stays pending for manual pickup
 
-    return data_response(
-        IngestTextResponse(
-            event_id=event.id,
-            extraction_run_id=run.id,
-            status=run.status,
+        return data_response(
+            IngestTextResponse(
+                event_id=event.id,
+                extraction_run_id=run.id,
+                status=run.status,
+            )
         )
-    )
+    finally:
+        if redis_client:
+            await redis_client.aclose()

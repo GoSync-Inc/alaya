@@ -1,6 +1,7 @@
 """Dependency injection for FastAPI routes."""
 
 import hashlib
+import hmac
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Annotated
@@ -59,7 +60,7 @@ async def get_api_key(
     repo = APIKeyRepository(session)
     api_key = await repo.get_by_prefix(prefix)
 
-    if api_key is None or api_key.key_hash != key_hash:
+    if api_key is None or not hmac.compare_digest(api_key.key_hash, key_hash):
         raise HTTPException(
             status_code=401,
             detail=_error_response("auth.invalid_key", "API key not found or invalid."),

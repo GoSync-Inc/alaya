@@ -47,6 +47,10 @@ docker/                             # seed.py, init-db.sql, Caddyfile
 
 **Data flow:** Sources -> L0 Events -> Cortex (chunk + classify) -> Crystallizer (LLM extract) -> Write (resolve + persist) -> Integrator (dedup + enrich) -> L1 Entities + L2 Claims -> L3 Knowledge Tree -> CLI/MCP/API
 
+## Current Focus
+
+See `docs/ROADMAP.md` for the active phase and next runs. New agent sessions should read the roadmap before picking up work.
+
 ## Commands
 
 ```bash

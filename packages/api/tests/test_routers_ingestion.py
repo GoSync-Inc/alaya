@@ -287,6 +287,53 @@ class TestIngestionRouter:
         mock_job_extract.kiq.assert_called_once()
         assert str(pending_run.id) == response.json()["data"]["extraction_run_id"]
 
+    def test_ingest_text_after_skipped_run_starts_fresh_extraction(self) -> None:
+        """A previously ``skipped`` run (access denied) must not block retries.
+
+        Regression for codex 6th review: the ``active`` filter previously
+        treated ``skipped`` as a blocking status, preventing reprocessing
+        after access_level changes.
+        """
+        from contextlib import ExitStack
+
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        event = make_event()
+        skipped_run = make_run(event.id)
+        skipped_run.status = "skipped"
+        new_run = make_run(event.id)
+
+        with ExitStack() as stack:
+            _patch_rate_limiter()(stack)
+            mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
+            mock_run_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
+            mock_job_extract = stack.enter_context(patch("alayaos_core.worker.tasks.job_extract"))
+            mock_job_extract.kiq = AsyncMock()
+
+            event_repo = AsyncMock()
+            event_repo.create_or_update = AsyncMock(return_value=(event, False))
+            mock_event_cls.return_value = event_repo
+
+            run_repo = AsyncMock()
+            run_repo.list_by_event = AsyncMock(return_value=[skipped_run])
+            run_repo.create = AsyncMock(return_value=new_run)
+            mock_run_cls.return_value = run_repo
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/v1/ingest/text",
+                json={"text": "retry-after-access-change", "source_id": str(event.source_id)},
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 202
+        # New run created with parent_run_id pointing at the skipped one.
+        run_repo.create.assert_called_once()
+        create_kwargs = run_repo.create.call_args.kwargs
+        assert create_kwargs["parent_run_id"] == skipped_run.id
+        # Fresh kiq for the new run.
+        mock_job_extract.kiq.assert_called_once()
+
     def test_ingest_text_does_not_reenqueue_extracting_run(self) -> None:
         """Retry while worker is processing (run.status='extracting') must NOT re-kiq.
 

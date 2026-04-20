@@ -146,9 +146,7 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-_ZERO_WIDTH_CHARS = dict.fromkeys(
-    ord(c) for c in "\u200b\u200c\u200d\u2060\ufeff\u180e"
-)
+_ZERO_WIDTH_CHARS = dict.fromkeys(ord(c) for c in "\u200b\u200c\u200d\u2060\ufeff\u180e")
 
 
 def _sanitize_context(text: str) -> str:

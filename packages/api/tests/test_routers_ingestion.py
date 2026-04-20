@@ -112,9 +112,7 @@ def _patch_rate_limiter(allowed: bool = True, retry_after: int | None = None, ba
         stack.enter_context(patch("alayaos_api.routers.ingestion.aioredis.from_url", return_value=redis_client))
         mock_limiter_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.RateLimiterService"))
         mock_limiter_cls.return_value.check = AsyncMock(
-            return_value=SimpleNamespace(
-                allowed=allowed, retry_after=retry_after, backend_available=backend_available
-            )
+            return_value=SimpleNamespace(allowed=allowed, retry_after=retry_after, backend_available=backend_available)
         )
 
     return _apply

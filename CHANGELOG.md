@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **BREAKING** `/admin/backfill-embeddings` is now workspace-bound for non-bootstrap admin keys.
+  Non-bootstrap keys must supply `workspace_id` (their own workspace); omitting it returns 422
+  `workspace_required_for_admin_scope`. Supplying a different workspace returns 403
+  `auth.cross_workspace_denied`. Bootstrap keys retain full cross-workspace access.
+  Cross-workspace attempts are logged as `admin_cross_workspace_attempt` audit events.
+
+### Added
+
+- **Migration 007** — multi-tenant hardening for three join tables that previously lacked
+  workspace-scoping (`claim_sources`, `relation_sources`, `access_group_members`):
+  - `workspace_id UUID NOT NULL` column backfilled from parent table before adding the constraint.
+  - Composite FK constraints: `(workspace_id, claim_id) → l2_claims`, `(workspace_id, event_id) → l0_events`,
+    `(workspace_id, relation_id) → l1_relations`, `(workspace_id, group_id) → access_groups`,
+    `(workspace_id, member_id) → workspace_members`.
+  - `CONCURRENTLY` indexes on `workspace_id` for each join table (safe for live installs with data).
+  - `ENABLE ROW LEVEL SECURITY + FORCE ROW LEVEL SECURITY + policy WITH CHECK` on all three tables.
+  - Fully reversible `downgrade()`: drops RLS, composite FKs, workspace_id, restores original single-column FKs.
+
 ## [0.1.0] - 2026-04-07
 
 First foundation release. Establishes the data model, REST API, and deployment infrastructure.

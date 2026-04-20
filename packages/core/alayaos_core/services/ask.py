@@ -108,10 +108,15 @@ async def ask(
             tokens_used=tokens_used,
         )
 
-    # Sanitize each evidence unit independently — otherwise one injection
-    # payload in any snippet would force NFKC/Cf-strip on the whole prompt,
-    # mangling unrelated benign Unicode (e.g. Persian ZWNJ in other units).
-    context_text = "\n".join(_sanitize_context(part) for part in context_parts)
+    # Two-pass sanitization.
+    #   Pass 1 per-unit preserves benign Unicode in independent snippets
+    #     (Persian ZWNJ, emoji ZWJ, fullwidth forms) when no per-unit
+    #     injection is detected.
+    #   Pass 2 on the joined string catches cross-unit attacks where an
+    #     attacker splits the payload across multiple search results
+    #     (e.g. "<system>" in snippet A, "</system>" in snippet B).
+    sanitized_units = [_sanitize_context(part) for part in context_parts]
+    context_text = _sanitize_context("\n".join(sanitized_units))
     text = f"<context>\n{context_text}\n</context>\n\n<question>\n{question}\n</question>"
 
     response, usage = await llm.extract(

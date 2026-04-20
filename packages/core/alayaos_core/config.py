@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     ASK_RATE_LIMIT_PER_MINUTE: int = 10
     ASK_RATE_LIMIT_PER_HOUR: int = 100
 
+    # Ingestion — every event triggers extraction (LLM cost);
+    # keep tighter than /search to cap per-key spend.
+    INGEST_RATE_LIMIT_PER_MINUTE: int = 30
+
     # Knowledge Tree
     TREE_BRIEFING_MODEL: str = "claude-sonnet-4-6"
     TREE_BRIEFING_CACHE_TTL: int = 900  # 15 minutes

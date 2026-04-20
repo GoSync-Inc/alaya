@@ -380,20 +380,23 @@ class TestIngestionRouter:
         # Recovery-re-enqueue must happen.
         mock_job_extract.kiq.assert_called_once()
 
-    def test_ingest_text_does_not_reenqueue_extracting_run(self) -> None:
-        """Retry while worker is processing (run.status='extracting') must NOT re-kiq.
+    def test_ingest_text_does_not_reenqueue_fresh_extracting_run(self) -> None:
+        """Retry while worker is processing (fresh 'extracting') must NOT re-kiq.
 
         Regression for codex review P1: job_extract only skips terminal
-        statuses, so re-enqueuing against an ``extracting`` run would
-        double-process the event.
+        statuses, so re-enqueuing against an ``extracting`` run within the
+        stale threshold would double-process the event.
         """
         from contextlib import ExitStack
+        from datetime import UTC, datetime
 
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
         event = make_event()
         extracting_run = make_run(event.id)
         extracting_run.status = "extracting"
+        # Fresh run — well inside the 10-min stale threshold.
+        extracting_run.created_at = datetime.now(UTC)
 
         with ExitStack() as stack:
             _patch_rate_limiter()(stack)
@@ -420,6 +423,51 @@ class TestIngestionRouter:
 
         assert response.status_code == 202
         run_repo.create.assert_not_called()
-        # Most important assertion: no duplicate kiq while worker is processing.
         mock_job_extract.kiq.assert_not_called()
         assert str(extracting_run.id) == response.json()["data"]["extraction_run_id"]
+
+    def test_ingest_text_reenqueues_stale_extracting_run(self) -> None:
+        """Stuck 'extracting' run past the stale threshold must re-kiq.
+
+        Regression for codex 9th review P1: without best-effort recovery,
+        a dead worker would leave events permanently stuck.
+        """
+        from contextlib import ExitStack
+        from datetime import UTC, datetime, timedelta
+
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        event = make_event()
+        stuck_run = make_run(event.id)
+        stuck_run.status = "extracting"
+        # 30 minutes old — clearly past the 10-min stale threshold.
+        stuck_run.created_at = datetime.now(UTC) - timedelta(minutes=30)
+
+        with ExitStack() as stack:
+            _patch_rate_limiter()(stack)
+            mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
+            mock_run_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
+            mock_job_extract = stack.enter_context(patch("alayaos_core.worker.tasks.job_extract"))
+            mock_job_extract.kiq = AsyncMock()
+
+            event_repo = AsyncMock()
+            event_repo.create_or_update = AsyncMock(return_value=(event, False))
+            mock_event_cls.return_value = event_repo
+
+            run_repo = AsyncMock()
+            run_repo.list_by_event = AsyncMock(return_value=[stuck_run])
+            run_repo.create = AsyncMock()
+            mock_run_cls.return_value = run_repo
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/v1/ingest/text",
+                json={"text": "retry", "source_id": str(event.source_id)},
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 202
+        run_repo.create.assert_not_called()  # reuse the stuck run, don't create new
+        # Recovery: kiq IS called to revive processing.
+        mock_job_extract.kiq.assert_called_once()
+        assert str(stuck_run.id) == response.json()["data"]["extraction_run_id"]

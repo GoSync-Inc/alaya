@@ -161,11 +161,11 @@ _SANITIZER_PATTERNS = [
     # Classic instruction-override phrase — specific enough to avoid
     # false positives in ordinary narrative.
     r"(?i)ignore\s+(all\s+)?(previous|above|all)\s+instructions?",
-    # Narrower variant: "you are now a <AI/bot/assistant/model/hacker>"
-    # — the generic "you are a" catches benign text like "you are a
-    # developer" and destructively rewrites unrelated multilingual
-    # snippets. Keep just the injection-flavoured suffixes.
-    r"(?i)you\s+are\s+now\s+[\w\s]{0,40}(AI|bot|assistant|model|jailb(?:roken|reak))",
+    # Role-reassignment injections. Accept both "you are now X" and
+    # "you are a/an X" when the noun is clearly an AI role — narrow
+    # enough to skip benign "you are a developer" while catching
+    # "You are a helpful assistant" style payloads.
+    r"(?i)you\s+are\s+(?:now\s+)?(?:a|an|the)\s+[\w\s]{0,40}?(assistant|AI|bot|model|chatbot|language\s+model|jailb(?:roken|reak))",
 ]
 
 

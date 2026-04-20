@@ -111,13 +111,14 @@ def upgrade() -> None:
 
     # --------------------------------------------------------------------------
     # 6. Create indexes CONCURRENTLY (may have data in user installations)
-    #    Note: CONCURRENTLY cannot run inside a transaction; use op.execute directly.
+    #    Note: wrapped in autocommit_block() so CONCURRENTLY works inside Alembic — otherwise it would fail under the default transaction-per-migration.
     # --------------------------------------------------------------------------
-    op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_claim_sources_ws ON claim_sources (workspace_id)")
-    op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_relation_sources_ws ON relation_sources (workspace_id)")
-    op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_access_group_members_ws ON access_group_members (workspace_id)"
-    )
+    with op.get_context().autocommit_block():
+        op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_claim_sources_ws ON claim_sources (workspace_id)")
+        op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_relation_sources_ws ON relation_sources (workspace_id)")
+        op.execute(
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_access_group_members_ws ON access_group_members (workspace_id)"
+        )
 
     # --------------------------------------------------------------------------
     # 7. Enable RLS + FORCE + workspace isolation policy on all three tables
@@ -143,9 +144,10 @@ def downgrade() -> None:
     # --------------------------------------------------------------------------
     # 2. Drop indexes
     # --------------------------------------------------------------------------
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_access_group_members_ws")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_relation_sources_ws")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_claim_sources_ws")
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_access_group_members_ws")
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_relation_sources_ws")
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_claim_sources_ws")
 
     # --------------------------------------------------------------------------
     # 3. Drop composite FKs

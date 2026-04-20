@@ -146,20 +146,18 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
-_ZERO_WIDTH_CHARS = dict.fromkeys(ord(c) for c in "\u200b\u200c\u200d\u2060\ufeff\u180e")
-
-
 def _sanitize_context(text: str) -> str:
     """Strip instruction-like patterns from evidence content.
 
-    Normalizes via NFKC and strips zero-width characters before regex
-    matching — otherwise attacker-controlled evidence can slip past
-    pattern matchers (e.g. ``ign\u200bore previous instructions``).
+    Normalizes via NFKC and strips ALL Unicode format characters
+    (category ``Cf``) before regex matching — zero-width joiners,
+    bidi overrides (LRM/RLM), BOM, WJ, language-tag chars, etc.
+    A whitelist of specific code points leaves easy bypasses
+    (e.g. ``ign\u200eore previous instructions``); stripping the
+    whole ``Cf`` category is future-proof.
     """
-    # Unicode normalization + zero-width stripping defeats homoglyph
-    # and invisible-character bypass attempts on the regex layer.
     text = unicodedata.normalize("NFKC", text)
-    text = text.translate(_ZERO_WIDTH_CHARS)
+    text = "".join(c for c in text if unicodedata.category(c) != "Cf")
 
     patterns = [
         r"<system>.*?</system>",

@@ -2,6 +2,7 @@
 
 import contextlib
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 import redis.asyncio as aioredis
@@ -23,6 +24,13 @@ from alayaos_core.services.rate_limiter import RateLimiterService
 router = APIRouter()
 
 _MAX_TEXT_CHARS = 100_000
+
+# Best-effort stuck-run recovery: if a non-pending active run hasn't
+# advanced to terminal within this window, assume broker/worker drop
+# and re-enqueue on retry. A proper periodic reaper (RUN5.3.13) is
+# tracked separately; this covers the same scenario from the ingest
+# side without a background job.
+_STALE_ACTIVE_RUN_THRESHOLD = timedelta(minutes=10)
 
 
 def _rate_limit_error(code: str, message: str, hint: str | None = None) -> dict:
@@ -146,7 +154,14 @@ async def ingest_text(
                     should_enqueue = True  # recovery on dropped first kiq
                 else:
                     run = max(active, key=lambda r: r.created_at)
-                    should_enqueue = False  # worker already has it
+                    # Best-effort stuck-run recovery: if the worker has
+                    # held the run past the stale threshold without
+                    # advancing it to terminal, assume the job was
+                    # dropped and re-enqueue. Worker-side status
+                    # transitions remain the source of truth for
+                    # preventing duplicate LLM work.
+                    age = datetime.now(UTC) - run.created_at
+                    should_enqueue = age > _STALE_ACTIVE_RUN_THRESHOLD
             else:
                 # All prior runs are terminal — start a fresh extraction.
                 parent_id = max(existing_runs, key=lambda r: r.created_at).id if existing_runs else None

@@ -183,10 +183,7 @@ async def test_claim_source_composite_fk_rejects_cross_workspace(session):
     # Composite FK (workspace_id, claim_id) → l2_claims should reject this.
     with pytest.raises(IntegrityError):
         await session.execute(
-            text(
-                "INSERT INTO claim_sources (id, workspace_id, claim_id, event_id) "
-                "VALUES (:id, :ws_b, :cid, :eid)"
-            ),
+            text("INSERT INTO claim_sources (id, workspace_id, claim_id, event_id) VALUES (:id, :ws_b, :cid, :eid)"),
             {"id": uuid.uuid4(), "ws_b": ws_b_id, "cid": claim_id, "eid": event_id},
         )
         await session.flush()

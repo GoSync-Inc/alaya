@@ -29,17 +29,9 @@ def upgrade() -> None:
     # --------------------------------------------------------------------------
     # 2. Backfill workspace_id from parent tables
     # --------------------------------------------------------------------------
+    op.execute("UPDATE claim_sources cs SET workspace_id = c.workspace_id FROM l2_claims c WHERE cs.claim_id = c.id")
     op.execute(
-        "UPDATE claim_sources cs "
-        "SET workspace_id = c.workspace_id "
-        "FROM l2_claims c "
-        "WHERE cs.claim_id = c.id"
-    )
-    op.execute(
-        "UPDATE relation_sources rs "
-        "SET workspace_id = r.workspace_id "
-        "FROM l1_relations r "
-        "WHERE rs.relation_id = r.id"
+        "UPDATE relation_sources rs SET workspace_id = r.workspace_id FROM l1_relations r WHERE rs.relation_id = r.id"
     )
     op.execute(
         "UPDATE access_group_members agm "
@@ -121,17 +113,10 @@ def upgrade() -> None:
     # 6. Create indexes CONCURRENTLY (may have data in user installations)
     #    Note: CONCURRENTLY cannot run inside a transaction; use op.execute directly.
     # --------------------------------------------------------------------------
+    op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_claim_sources_ws ON claim_sources (workspace_id)")
+    op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_relation_sources_ws ON relation_sources (workspace_id)")
     op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_claim_sources_ws "
-        "ON claim_sources (workspace_id)"
-    )
-    op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_relation_sources_ws "
-        "ON relation_sources (workspace_id)"
-    )
-    op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_access_group_members_ws "
-        "ON access_group_members (workspace_id)"
+        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_access_group_members_ws ON access_group_members (workspace_id)"
     )
 
     # --------------------------------------------------------------------------

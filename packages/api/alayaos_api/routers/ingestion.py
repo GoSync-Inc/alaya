@@ -109,40 +109,50 @@ async def ingest_text(
             occurred_at=body.occurred_at,
         )
 
-        # Idempotency: only create extraction run for new events
+        # Idempotency for extraction runs. ``should_enqueue`` gates kiq():
+        # re-enqueue only when a run is freshly-created OR stuck in
+        # ``pending`` (recovery path for a dropped first enqueue). If the
+        # worker has already advanced the run past ``pending`` we must
+        # NOT re-enqueue — job_extract only skips terminal statuses
+        # (completed/cortex_complete), so an "extracting"/"written"/etc
+        # run would otherwise get processed twice.
         run_repo = ExtractionRunRepository(session, api_key.workspace_id)
+        should_enqueue = False
         if created:
             run = await run_repo.create(
                 workspace_id=api_key.workspace_id,
                 event_id=event.id,
                 status="pending",
             )
+            should_enqueue = True
         else:
-            # Re-ingest: find existing pending run or create with parent_run_id
             existing_runs = await run_repo.list_by_event(event.id)
-            pending = [r for r in existing_runs if r.status == "pending"]
-            if pending:
-                run = pending[0]
+            # Any non-terminal run means extraction is in progress or queued.
+            active = [r for r in existing_runs if r.status not in ("completed", "failed")]
+            if active:
+                # Most-recent active run; prefer pending (retriable) over in-progress.
+                run = max(active, key=lambda r: r.created_at)
+                # Only recovery-re-enqueue if still pending; don't touch runs
+                # the worker has already picked up.
+                should_enqueue = run.status == "pending"
             else:
-                completed = [r for r in existing_runs if r.status == "completed"]
-                parent_id = completed[-1].id if completed else None
+                # Event has only terminal runs — start a fresh extraction.
+                parent_id = max(existing_runs, key=lambda r: r.created_at).id if existing_runs else None
                 run = await run_repo.create(
                     workspace_id=api_key.workspace_id,
                     event_id=event.id,
                     status="pending",
                     parent_run_id=parent_id,
                 )
+                should_enqueue = True
 
-        # Always re-enqueue. Recovery on broker outage: if the first
-        # kiq() was dropped, a retry will re-enqueue against the same
-        # pending run. Worker-side status check (run.status=="pending"
-        # → "extracting") prevents duplicate LLM work.
-        try:
-            from alayaos_core.worker.tasks import job_extract
+        if should_enqueue:
+            try:
+                from alayaos_core.worker.tasks import job_extract
 
-            await job_extract.kiq(str(event.id), str(run.id), str(api_key.workspace_id))
-        except Exception:
-            pass  # Worker may not be running; run stays pending for manual pickup
+                await job_extract.kiq(str(event.id), str(run.id), str(api_key.workspace_id))
+            except Exception:
+                pass  # Worker may not be running; run stays pending for manual pickup
 
         return data_response(
             IngestTextResponse(

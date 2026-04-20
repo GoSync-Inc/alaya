@@ -286,3 +286,47 @@ class TestIngestionRouter:
         # kiq IS re-enqueued so a dropped enqueue (broker outage) recovers.
         mock_job_extract.kiq.assert_called_once()
         assert str(pending_run.id) == response.json()["data"]["extraction_run_id"]
+
+    def test_ingest_text_does_not_reenqueue_extracting_run(self) -> None:
+        """Retry while worker is processing (run.status='extracting') must NOT re-kiq.
+
+        Regression for codex review P1: job_extract only skips terminal
+        statuses, so re-enqueuing against an ``extracting`` run would
+        double-process the event.
+        """
+        from contextlib import ExitStack
+
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        event = make_event()
+        extracting_run = make_run(event.id)
+        extracting_run.status = "extracting"
+
+        with ExitStack() as stack:
+            _patch_rate_limiter()(stack)
+            mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
+            mock_run_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
+            mock_job_extract = stack.enter_context(patch("alayaos_core.worker.tasks.job_extract"))
+            mock_job_extract.kiq = AsyncMock()
+
+            event_repo = AsyncMock()
+            event_repo.create_or_update = AsyncMock(return_value=(event, False))
+            mock_event_cls.return_value = event_repo
+
+            run_repo = AsyncMock()
+            run_repo.list_by_event = AsyncMock(return_value=[extracting_run])
+            run_repo.create = AsyncMock()
+            mock_run_cls.return_value = run_repo
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/v1/ingest/text",
+                json={"text": "retry", "source_id": str(event.source_id)},
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 202
+        run_repo.create.assert_not_called()
+        # Most important assertion: no duplicate kiq while worker is processing.
+        mock_job_extract.kiq.assert_not_called()
+        assert str(extracting_run.id) == response.json()["data"]["extraction_run_id"]

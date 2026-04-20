@@ -56,11 +56,24 @@ class L2Claim(Base, TimestampMixin):
 
 
 class ClaimSource(Base):
-    """Join table — no workspace_id."""
+    """Join table — workspace_id added in migration 007."""
 
     __tablename__ = "claim_sources"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "claim_id"],
+            ["l2_claims.workspace_id", "l2_claims.id"],
+            name="fk_claim_sources_claim",
+        ),
+        ForeignKeyConstraint(
+            ["workspace_id", "event_id"],
+            ["l0_events.workspace_id", "l0_events.id"],
+            name="fk_claim_sources_event",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("l2_claims.id"), nullable=False)
-    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("l0_events.id"), nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    claim_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

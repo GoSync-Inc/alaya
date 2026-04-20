@@ -56,16 +56,16 @@ def test_relation_source_tablename() -> None:
     assert RelationSource.__tablename__ == "relation_sources"
 
 
-def test_relation_source_has_no_workspace_id() -> None:
+def test_relation_source_has_workspace_id() -> None:
     mapper = inspect(RelationSource)
     cols = {c.key for c in mapper.columns}
-    assert "workspace_id" not in cols
+    assert "workspace_id" in cols
 
 
 def test_relation_source_columns() -> None:
     mapper = inspect(RelationSource)
     cols = {c.key for c in mapper.columns}
-    assert {"id", "relation_id", "event_id", "created_at"}.issubset(cols)
+    assert {"id", "workspace_id", "relation_id", "event_id", "created_at"}.issubset(cols)
 
 
 # ─── L2Claim ─────────────────────────────────────────────────────────────────
@@ -130,16 +130,16 @@ def test_claim_source_tablename() -> None:
     assert ClaimSource.__tablename__ == "claim_sources"
 
 
-def test_claim_source_has_no_workspace_id() -> None:
+def test_claim_source_has_workspace_id() -> None:
     mapper = inspect(ClaimSource)
     cols = {c.key for c in mapper.columns}
-    assert "workspace_id" not in cols
+    assert "workspace_id" in cols
 
 
 def test_claim_source_columns() -> None:
     mapper = inspect(ClaimSource)
     cols = {c.key for c in mapper.columns}
-    assert {"id", "claim_id", "event_id", "created_at"}.issubset(cols)
+    assert {"id", "workspace_id", "claim_id", "event_id", "created_at"}.issubset(cols)
 
 
 # ─── L1Entity tsvector ───────────────────────────────────────────────────────
@@ -320,16 +320,16 @@ def test_access_group_member_tablename() -> None:
     assert AccessGroupMember.__tablename__ == "access_group_members"
 
 
-def test_access_group_member_has_no_workspace_id() -> None:
+def test_access_group_member_has_workspace_id() -> None:
     mapper = inspect(AccessGroupMember)
     cols = {c.key for c in mapper.columns}
-    assert "workspace_id" not in cols
+    assert "workspace_id" in cols
 
 
 def test_access_group_member_columns() -> None:
     mapper = inspect(AccessGroupMember)
     cols = {c.key for c in mapper.columns}
-    assert {"id", "group_id", "member_id", "created_at"}.issubset(cols)
+    assert {"id", "workspace_id", "group_id", "member_id", "created_at"}.issubset(cols)
 
 
 def test_resource_grant_tablename() -> None:

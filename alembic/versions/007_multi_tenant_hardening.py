@@ -20,11 +20,66 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # --------------------------------------------------------------------------
+    # Overview of steps:
+    #   1.   Add workspace_id column (nullable)
+    #   1.5. Abort if any legacy join row has a cross-workspace reference
+    #   2.   Backfill workspace_id from parent tables
+    #   3.   Set NOT NULL
+    #   4.   Drop old single-column FKs
+    #   5.   Add composite FKs
+    #   6.   Create indexes CONCURRENTLY
+    #   7.   Enable RLS + FORCE + workspace isolation policy
+    # --------------------------------------------------------------------------
+
+    # --------------------------------------------------------------------------
     # 1. Add workspace_id column (nullable) to the three join tables
     # --------------------------------------------------------------------------
     op.add_column("claim_sources", sa.Column("workspace_id", UUID(as_uuid=True), nullable=True))
     op.add_column("relation_sources", sa.Column("workspace_id", UUID(as_uuid=True), nullable=True))
     op.add_column("access_group_members", sa.Column("workspace_id", UUID(as_uuid=True), nullable=True))
+
+    # --------------------------------------------------------------------------
+    # 1.5. Abort if any legacy join row has a cross-workspace reference.
+    # Pre-007 single-column FKs allowed mismatched parents; we cannot safely
+    # backfill workspace_id from only one side when the other side lives in
+    # a different workspace. Surface the count so operators can clean up.
+    # --------------------------------------------------------------------------
+    bind = op.get_bind()
+
+    cross_workspace_queries = {
+        "claim_sources": (
+            "SELECT COUNT(*) FROM claim_sources cs "
+            "JOIN l2_claims c ON cs.claim_id = c.id "
+            "JOIN l0_events e ON cs.event_id = e.id "
+            "WHERE c.workspace_id <> e.workspace_id"
+        ),
+        "relation_sources": (
+            "SELECT COUNT(*) FROM relation_sources rs "
+            "JOIN l1_relations r ON rs.relation_id = r.id "
+            "JOIN l0_events e ON rs.event_id = e.id "
+            "WHERE r.workspace_id <> e.workspace_id"
+        ),
+        "access_group_members": (
+            "SELECT COUNT(*) FROM access_group_members agm "
+            "JOIN access_groups ag ON agm.group_id = ag.id "
+            "JOIN workspace_members wm ON agm.member_id = wm.id "
+            "WHERE ag.workspace_id <> wm.workspace_id"
+        ),
+    }
+
+    violations: list[str] = []
+    for table, query in cross_workspace_queries.items():
+        count = bind.execute(sa.text(query)).scalar_one()
+        if count:
+            violations.append(f"{table}: {count} rows")
+
+    if violations:
+        raise RuntimeError(
+            "Migration 007 aborted: legacy cross-workspace rows detected in join tables. "
+            "Pre-007 schema allowed mismatched parents; we cannot safely choose a "
+            "single workspace_id for these rows. Resolve manually before re-running. "
+            "Counts: " + "; ".join(violations)
+        )
 
     # --------------------------------------------------------------------------
     # 2. Backfill workspace_id from parent tables

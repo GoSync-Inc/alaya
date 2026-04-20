@@ -9,7 +9,7 @@ from alayaos_core.config import Settings
 
 def create_broker() -> RedisStreamBroker:
     settings = Settings()
-    broker = RedisStreamBroker(url=settings.REDIS_URL)
+    broker = RedisStreamBroker(url=settings.REDIS_URL.get_secret_value())
     return broker
 
 

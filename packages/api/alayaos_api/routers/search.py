@@ -40,7 +40,7 @@ async def search(
     # Rate limiting
     redis_client = None
     with contextlib.suppress(Exception):
-        redis_client = aioredis.from_url(settings.REDIS_URL)
+        redis_client = aioredis.from_url(settings.REDIS_URL.get_secret_value())
     try:
         limiter = RateLimiterService(redis=redis_client)
         decision = await limiter.check(f"{api_key.key_prefix}:search", 60, 60)

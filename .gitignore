@@ -61,3 +61,7 @@ docker-compose.override.yml
 # OS
 .DS_Store
 Thumbs.db
+
+# Superflow runtime (events log, local config)
+.superflow/
+.superset/

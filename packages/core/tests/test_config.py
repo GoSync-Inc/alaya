@@ -6,13 +6,22 @@ from alayaos_core.config import Settings
 
 
 def test_settings_has_database_url() -> None:
+    from pydantic import SecretStr
+
     s = Settings()
-    assert "postgresql+asyncpg" in s.DATABASE_URL
+    assert isinstance(s.DATABASE_URL, SecretStr)
+    assert "postgresql+asyncpg" in s.DATABASE_URL.get_secret_value()
+    # SecretStr must hide the value in repr/str.
+    assert "postgresql" not in str(s.DATABASE_URL)
 
 
 def test_settings_has_redis_url() -> None:
+    from pydantic import SecretStr
+
     s = Settings()
-    assert "redis://" in s.REDIS_URL
+    assert isinstance(s.REDIS_URL, SecretStr)
+    assert "redis://" in s.REDIS_URL.get_secret_value()
+    assert "redis" not in str(s.REDIS_URL)
 
 
 def test_settings_env_default() -> None:

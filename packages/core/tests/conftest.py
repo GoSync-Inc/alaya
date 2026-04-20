@@ -16,7 +16,7 @@ from alayaos_core.models import Base
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def engine():
     settings = Settings()
-    db_url = settings.DATABASE_URL
+    db_url = settings.DATABASE_URL.get_secret_value()
     # Safety: refuse to run against the default development database.
     if "alaya_test" not in db_url and "test" not in db_url:
         pytest.skip(

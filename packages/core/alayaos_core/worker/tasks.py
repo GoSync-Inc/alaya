@@ -49,7 +49,7 @@ def _get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 def _build_worker_resources(settings: Settings) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
     engine = create_async_engine(
-        settings.DATABASE_URL,
+        settings.DATABASE_URL.get_secret_value(),
         echo=settings.DB_ECHO,
         pool_size=settings.DB_POOL_SIZE,
         max_overflow=settings.DB_MAX_OVERFLOW,
@@ -253,7 +253,7 @@ async def job_write(extraction_run_id: str, workspace_id: str) -> dict:
 
     redis_client = None
     with contextlib.suppress(Exception):
-        redis_client = aioredis.from_url(settings.REDIS_URL)
+        redis_client = aioredis.from_url(settings.REDIS_URL.get_secret_value())
 
     factory = _session_factory()
     try:
@@ -504,7 +504,7 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
     # Wire Redis so EntityCacheService can use the shared entity cache
     redis_client = None
     with contextlib.suppress(Exception):
-        redis_client = aioredis.from_url(settings.REDIS_URL)
+        redis_client = aioredis.from_url(settings.REDIS_URL.get_secret_value())
 
     entity_cache = EntityCacheService(redis=redis_client)
 
@@ -701,7 +701,7 @@ async def job_integrate(workspace_id: str, integrator_run_id: str | None = None)
 
     redis_client = None
     with contextlib.suppress(Exception):
-        redis_client = aioredis.from_url(settings.REDIS_URL)
+        redis_client = aioredis.from_url(settings.REDIS_URL.get_secret_value())
 
     factory = _session_factory()
     ws_uuid = uuid.UUID(workspace_id)
@@ -789,7 +789,7 @@ async def job_check_integrator() -> dict:
     from datetime import UTC, datetime
 
     settings = Settings()
-    redis_client = aioredis.from_url(settings.REDIS_URL)
+    redis_client = aioredis.from_url(settings.REDIS_URL.get_secret_value())
     factory = _session_factory()
     try:
         reaped = await _reap_stuck_integrator_runs(

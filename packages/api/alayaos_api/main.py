@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
         db_echo=settings.DB_ECHO,
     )
     engine = create_async_engine(
-        settings.DATABASE_URL,
+        settings.DATABASE_URL.get_secret_value(),
         echo=settings.DB_ECHO,
         pool_size=settings.DB_POOL_SIZE,
         max_overflow=settings.DB_MAX_OVERFLOW,

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
 
 
 def _make_redis_with_keys(keys: list[str], sizes: dict[str, int], created_ats: dict[str, str]):
@@ -54,7 +55,7 @@ async def test_job_check_integrator_triggers_when_threshold_met():
     )
 
     mock_settings = MagicMock()
-    mock_settings.REDIS_URL = "redis://localhost"
+    mock_settings.REDIS_URL = SecretStr("redis://localhost")
     mock_settings.INTEGRATOR_DIRTY_SET_THRESHOLD = 10
     mock_settings.INTEGRATOR_MAX_WAIT_SECONDS = 1800
 
@@ -98,7 +99,7 @@ async def test_job_check_integrator_triggers_when_age_exceeded():
     )
 
     mock_settings = MagicMock()
-    mock_settings.REDIS_URL = "redis://localhost"
+    mock_settings.REDIS_URL = SecretStr("redis://localhost")
     mock_settings.INTEGRATOR_DIRTY_SET_THRESHOLD = 10
     mock_settings.INTEGRATOR_MAX_WAIT_SECONDS = 1  # very short
 
@@ -136,7 +137,7 @@ async def test_job_check_integrator_skips_companion_keys():
     )
 
     mock_settings = MagicMock()
-    mock_settings.REDIS_URL = "redis://localhost"
+    mock_settings.REDIS_URL = SecretStr("redis://localhost")
     mock_settings.INTEGRATOR_DIRTY_SET_THRESHOLD = 10
     mock_settings.INTEGRATOR_MAX_WAIT_SECONDS = 1800
 
@@ -175,7 +176,7 @@ async def test_job_check_integrator_no_trigger_when_below_threshold():
     )
 
     mock_settings = MagicMock()
-    mock_settings.REDIS_URL = "redis://localhost"
+    mock_settings.REDIS_URL = SecretStr("redis://localhost")
     mock_settings.INTEGRATOR_DIRTY_SET_THRESHOLD = 10
     mock_settings.INTEGRATOR_MAX_WAIT_SECONDS = 1800  # 30 min
 
@@ -203,7 +204,7 @@ async def test_job_check_integrator_returns_status_checked():
     redis_mock = _make_redis_with_keys(keys=[], sizes={}, created_ats={})
 
     mock_settings = MagicMock()
-    mock_settings.REDIS_URL = "redis://localhost"
+    mock_settings.REDIS_URL = SecretStr("redis://localhost")
     mock_settings.INTEGRATOR_DIRTY_SET_THRESHOLD = 10
     mock_settings.INTEGRATOR_MAX_WAIT_SECONDS = 1800
 
@@ -286,7 +287,7 @@ async def test_job_check_integrator_reports_reaped_runs() -> None:
     redis_mock = _make_redis_with_keys(keys=[], sizes={}, created_ats={})
 
     mock_settings = MagicMock()
-    mock_settings.REDIS_URL = "redis://localhost"
+    mock_settings.REDIS_URL = SecretStr("redis://localhost")
     mock_settings.INTEGRATOR_DIRTY_SET_THRESHOLD = 10
     mock_settings.INTEGRATOR_MAX_WAIT_SECONDS = 1800
     mock_settings.INTEGRATOR_STUCK_RUN_SECONDS = 900

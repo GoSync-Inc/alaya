@@ -4,11 +4,13 @@ Single source of truth for all tech debt, known limitations, and research items 
 
 **Format:** `[RUN-N.NN]` prefix for traceability. Priority: P1 (next run), P2 (eventually), P3 (nice to have).
 
+_Last audited: 2026-04-17. Closed items moved to `## Closed` section with commit hashes._
+
 ---
 
 ## CC-Research Items (from Master Plan brainstorm)
 
-Referenced in `docs/superflow/plans/2026-04-07-alayaos-pivot.md`. Specs were planned but never written.
+Plan file `docs/superflow/plans/2026-04-07-alayaos-pivot.md` no longer exists (pre-Run-2 planning artifact). Specs were planned but never written.
 
 | ID | Title | Target Run | Status |
 |----|-------|-----------|--------|
@@ -17,7 +19,7 @@ Referenced in `docs/superflow/plans/2026-04-07-alayaos-pivot.md`. Specs were pla
 | BACKLOG-255 | Per-User Memory System | Run 8a | Open |
 | BACKLOG-256 | Autonomous Task Queue | Run 8d | Open |
 | BACKLOG-257 | Context Compaction (long Slack threads) | Run 2 | Partially done — CortexChunker handles chunking |
-| BACKLOG-258 | Resilient LLM Retry | Run 2 | Partially done — TaskIQ retry, but no cross-provider fallback |
+| BACKLOG-258 | Resilient LLM Retry | Run 2 | DONE — cross-provider fallback shipped (`16b0be6`) |
 | BACKLOG-259 | Org-Level Policy & Limits | Run 8m | Open |
 | BACKLOG-260 | Team Memory Sync (delta sync, ETag) | Run 5 | Open |
 | BACKLOG-261 | Deferred Tool Loading | Run 8p | Open |
@@ -32,32 +34,21 @@ No open items — all addressed during Run 2.
 
 ---
 
-## Run 2: Extraction Pipeline
-
-| ID | P | Title | Details |
-|----|---|-------|---------|
-| RUN2.01 | P2 | LLM cross-provider fallback | TaskIQ retries same provider. No fallback to OpenAI/Ollama on Anthropic outage. |
-| RUN2.02 | P3 | Consolidation agent stub | `job_enrich` is a no-op stub. Deferred — Integrator (Run 3) replaced this. |
-
----
-
 ## Run 3: Intelligence Pipeline
 
 ### P1 — Should fix in next run
 
 | ID | P | Title | Where | Details |
 |----|---|-------|-------|---------|
-| ~~RUN3.01~~ | P1 | Entity dedup: soft-delete only, no claim/relation reassignment | `integrator/engine.py` | Dedup soft-deletes entity_b, merges aliases, but does NOT reassign claims/relations from B to A. Needs `UPDATE l2_claims SET entity_id = A WHERE entity_id = B`. **Closed in Run 5.4 — see §"Closed in Run 5.4".** |
-| RUN3.02 | P1 | Integration tests all skipped (18) | `tests/test_rls.py`, `test_composite_fk.py` | Need conftest with temp DB, migrations, seed data. |
-| RUN3.03 | P1 | Redis health check "unavailable" | `api/routers/health.py` | May not use `Settings.REDIS_URL` consistently. |
+| RUN3.03 | P1 | Redis health check "unavailable" | `api/routers/health.py:55` | TODO comment present: `checks["redis"] = "unavailable"`. `Settings.REDIS_URL` not wired into health check. |
 
 ### P2 — Should fix eventually
 
 | ID | P | Title | Where | Details |
 |----|---|-------|-------|---------|
-| RUN3.04 | P2 | `update_type` fallback for unknown slugs | `integrator/engine.py` | LLM may return slugs not in EntityTypeDefinition. Silently dropped. |
-| RUN3.05 | P2 | INTEGRATOR_MAX_WAIT_SECONDS 1800 vs spec 300 | `config.py` | Intentional — 300s too aggressive for low-volume. Revisit with usage data. |
-| RUN3.06 | P2 | Entity cache warmed with score=0 | `integrator/engine.py` | `last_seen_at: 0` → no meaningful sorted set ordering for Crystallizer. Use `entity.updated_at`. |
+| RUN3.04 | P2 | `update_type` fallback for unknown slugs | `integrator/engine.py:924` | LLM may return slugs not in EntityTypeDefinition. If `et_repo.get_by_slug` returns None, update is silently dropped. |
+| RUN3.05 | P2 | INTEGRATOR_MAX_WAIT_SECONDS 1800 vs spec 300 | `config.py:63` | Intentional — 300s too aggressive for low-volume. Revisit with usage data. |
+| RUN3.06 | P2 | Entity cache warmed with score=0 | `integrator/engine.py:304` | `last_seen_at: 0` → no meaningful sorted set ordering for Crystallizer. Use `entity.updated_at`. |
 | RUN3.07 | P2 | DateNormalizer not wired into Writer | `date_normalizer.py` | Only used in Integrator enrichment, not in `write_claim` for date-type claims. |
 | RUN3.08 | P2 | No explicit workspace assertion in Integrator scope | `integrator/engine.py` | RLS protects in practice, but no assert that dirty-set IDs match workspace. |
 
@@ -71,68 +62,9 @@ No open items — all addressed during Run 2.
 
 ---
 
-## Run 5.1: Review Follow-up (2026-04-13)
-
-Detailed implementation plan:
-`docs/superflow/plans/2026-04-13-review-fixes.md`
-
-### P1 — Should fix next
-
-| ID | P | Title | Where | Details |
-|----|---|-------|-------|---------|
-| RUN5.01 | P1 | Write-stage correctness must not depend on Redis | `packages/core/alayaos_core/extraction/pipeline.py`, `packages/core/alayaos_core/repositories/workspace.py` | Replace correctness-critical write serialization with a DB-backed workspace lock. Keep Redis as an optional optimization only. |
-| RUN5.02 | P1 | Manual integrator trigger returns an orphan run | `packages/api/alayaos_api/routers/integrator_runs.py`, `packages/core/alayaos_core/worker/tasks.py` | Reuse the API-created `IntegratorRun` row instead of creating a second worker-owned row. |
-| RUN5.03 | P1 | Worker creates a new SQLAlchemy engine per task | `packages/core/alayaos_core/worker/tasks.py` | Reuse one async engine/session factory per worker process and add a cleanup hook for tests/shutdown. |
-
----
-
-## Run 5.2: Security Hardening (2026-04-13)
-
-Security report:
-`docs/audits/2026-04-13-security-best-practices.md`
-
-Detailed implementation plan:
-`docs/superflow/plans/2026-04-13-security-hardening.md`
-
-### P1 — Should fix next
-
-| ID | P | Title | Where | Details |
-|----|---|-------|-------|---------|
-| RUN5.04 | P1 | Memory-read endpoints must require read scope | `packages/api/alayaos_api/routers/search.py`, `packages/api/alayaos_api/routers/ask.py` | Fix `SBP-001`: enforce `require_scope("read")` and co-deliver the `key_prefix` runtime fix safely. |
-| RUN5.05 | P1 | Rate limiting must not fail open on Redis outages | `packages/core/alayaos_core/services/rate_limiter.py`, `packages/api/alayaos_api/routers/search.py`, `packages/api/alayaos_api/routers/ask.py` | Fix `SBP-002`: return explicit degraded/fail-closed behavior instead of silently allowing unthrottled expensive requests. |
-
-### P2 — Should fix soon
-
-| ID | P | Title | Where | Details |
-|----|---|-------|-------|---------|
-| RUN5.06 | P2 | Disable or protect OpenAPI/docs in production | `packages/api/alayaos_api/main.py`, `packages/core/alayaos_core/config.py` | Fix `SBP-003`: make docs exposure an explicit config choice rather than a production default. |
-| RUN5.07 | P2 | Add trusted host validation or document equivalent edge enforcement | `packages/api/alayaos_api/main.py`, `packages/core/alayaos_core/config.py` | Fix `SBP-004`: add `TrustedHostMiddleware` support and make the deployment expectation explicit. |
-
-### P3 — Nice to have after boundary hardening
-
-| ID | P | Title | Where | Details |
-|----|---|-------|-------|---------|
-| RUN5.08 | P3 | Reduce anonymous readiness detail leakage | `packages/api/alayaos_api/routers/health.py` | Fix `SBP-005`: keep health useful for operators while avoiding bootstrap and dependency-state disclosure by default. |
-| RUN5.09 | P3 | Redact CLI secret output by default | `packages/cli-go/internal/cmd/setup.go` | Fix `SBP-006`: avoid printing API keys to stdout unless the operator explicitly opts in. |
-
----
-
 ## Run 5.3: Extraction Pipeline Reliability (2026-04-14)
 
-Source: benchmark on 40 real Slack events (`docs/superflow/audits/2026-04-14-pre-benchmark-handoff.md` Step B).
-Brief: `docs/superflow/specs/2026-04-14-run5.3-pipeline-reliability-brief.md`
-Plan: `docs/superflow/plans/2026-04-14-run5.3-pipeline-reliability.md`
-
-### In scope for this run
-
-| ID | P | Title | Where | Details |
-|----|---|-------|-------|---------|
-| RUN5.3.01 | P1 | `EntityMatchResult.reasoning` max_length too short | `packages/core/alayaos_core/extraction/schemas.py`, `packages/core/alayaos_core/extraction/integrator/schemas.py` | LLM reasoning exceeds 200 chars — `ValidationError` aborts `job_write`, run stuck at `cortex_complete`. Raise limit to 1000 and add regression. |
-| RUN5.3.02 | P1 | Anthropic adapter: tolerate JSON-string for list fields | `packages/core/alayaos_core/llm/anthropic.py` | LLM sometimes returns list fields as a JSON-encoded string. Auto-parse when field annotation is `list[...]` and value is a parseable JSON array. |
-| RUN5.3.03 | P1 | Run status never transitions to `failed` on writer/crystallize crash | `packages/core/alayaos_core/worker/tasks.py` | Wrap task bodies in try/except. On any `Exception`, call `mark_failed` and re-raise. |
-| RUN5.3.04 | P1 | Integrator O(n²) dedup times out | `packages/core/alayaos_core/extraction/integrator/engine.py`, `dedup.py` | Replace all-pairs LLM loop with vector-similarity shortlist + LLM-verify top-k. New settings `INTEGRATOR_DEDUP_SHORTLIST_K`, `INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD`. |
-| RUN5.3.05 | P2 | Cortex `is_crystal`: smalltalk-aware rule | `packages/core/alayaos_core/extraction/cortex/classifier.py` | `is_crystal = not (smalltalk ≥ 0.8 AND max_non_smalltalk < 0.4)` AND `max_non_smalltalk ≥ threshold`. Filters chit-chat while keeping mixed-signal events. |
-| RUN5.3.06 | P2 | `extraction_runs.cost_usd` / `tokens_in` aggregation from traces | `packages/core/alayaos_core/worker/tasks.py`, `repositories/extraction_run.py` | Add `recalc_usage` and call on terminal transitions. Run-level observability matches trace-level reality. |
+Source: benchmark on 40 real Slack events. Plan files (`2026-04-14-pre-benchmark-handoff.md`, `2026-04-14-run5.3-pipeline-reliability-brief.md`, `2026-04-14-run5.3-pipeline-reliability.md`) are not present in the repository — pre-commit planning artifacts.
 
 ### Deferred (out of scope for Run 5.3, track here)
 
@@ -205,10 +137,7 @@ Source: `docs/vision/alaya-master-vision-session-summary-ru.md`, `alaya-operatio
 
 ## Run 5.4: Knowledge Graph Consolidation (2026-04-16)
 
-Merged 2026-04-16 via PRs #87–#94.
-Brief: `docs/superflow/specs/2026-04-15-run5.4-knowledge-graph-consolidation-brief.md`
-Plan: `docs/superflow/plans/2026-04-16-run5.4-knowledge-graph-consolidation.md`
-Post-merge audit (local, not tracked): `docs/superflow/audits/2026-04-17-run5.4-post-merge.md`
+Merged 2026-04-16 via PRs #87–#94. Plan files not in repo (planning artifacts). Audit folder: `docs/superflow/audits/2026-04-17-full-audit/`.
 
 ### P1 — must fix next
 
@@ -251,3 +180,55 @@ Ported verbatim from the brief's "Items deferred" table (RUN5.4.10–15).
 | Backlog ID | Title | Evidence |
 |-----------|-------|----------|
 | RUN3.01 | Entity dedup: soft-delete only, no claim/relation reassignment | Closed in code by DeduplicatorV2 (`packages/core/alayaos_core/extraction/integrator/dedup.py:589-640`) and the v1 fallback fix (`packages/core/alayaos_core/extraction/integrator/engine.py:807-860`). Raw-SQL reassignment of claims, relations, chunks now runs on every merge path. |
+
+---
+
+## Closed
+
+Items verified DONE as of 2026-04-17 audit. Commit hashes reference the fix landing in this repo.
+
+### Run 2
+
+| ID | Title | Status | Commit |
+|----|-------|--------|--------|
+| RUN2.01 | LLM cross-provider fallback | DONE | `16b0be6` feat: LLM cross-provider fallback with factory |
+| RUN2.02 | Consolidation agent stub (`job_enrich` no-op) | OBSOLETE | Replaced by Integrator (Run 3); no fix needed |
+
+### Run 3
+
+| ID | Title | Status | Commit |
+|----|-------|--------|--------|
+| RUN3.01 | Entity dedup: claim/relation reassignment on merge | DONE | `b3451b6` fix: reassign claims/relations/chunks on entity merge (also verified in Run 5.4 code review) |
+| RUN3.02 | Integration tests all skipped (18) | DONE | `02b3a53` fix: integration test infrastructure and markers |
+
+### Run 5.1
+
+| ID | Title | Status | Commit |
+|----|-------|--------|--------|
+| RUN5.01 | Write-stage correctness must not depend on Redis | DONE | `9fe627d` fix: move write serialization to db lock |
+| RUN5.02 | Manual integrator trigger returns an orphan run | DONE | `6ef8ba2` fix: reuse api-created integrator runs |
+| RUN5.03 | Worker creates a new SQLAlchemy engine per task | DONE | `d32eda2` refactor: reuse worker db engine per process |
+
+### Run 5.2 (Security Hardening — SBP-001..006)
+
+Security audit source: `docs/audits/2026-04-13-security-best-practices.md`
+
+| ID | SBP | Title | Status | Commit |
+|----|-----|-------|--------|--------|
+| RUN5.04 | SBP-001 | Memory-read scope enforcement | DONE | `a9d1fd4` fix: harden read auth and rate limit boundaries |
+| RUN5.05 | SBP-002 | Rate limiting fail-closed on Redis outage | DONE | `135bed2` fix: rate limiter unique members + fail-open on Redis error |
+| RUN5.06 | SBP-003 | Disable OpenAPI/docs in production | DONE | `6909204` fix: add production Caddyfile, migration error handling, docs |
+| RUN5.07 | SBP-004 | TrustedHost validation | DONE | `6909204` fix: add production Caddyfile, migration error handling, docs |
+| RUN5.08 | SBP-005 | Reduce anonymous readiness detail leakage | DONE | `34c9e3a` fix: reduce health and cli secret leakage (`HEALTH_READY_VERBOSE` flag) |
+| RUN5.09 | SBP-006 | Redact CLI secret output by default | DONE | `34c9e3a` fix: reduce health and cli secret leakage (`--show-secret` flag) |
+
+### Run 5.3 (in-scope items)
+
+| ID | Title | Status | Commit |
+|----|-------|--------|--------|
+| RUN5.3.01 | `EntityMatchResult.reasoning` max_length too short | DONE | `c806593` fix: raise EntityMatchResult.reasoning max_length |
+| RUN5.3.02 | Anthropic adapter: tolerate JSON-string for list fields | DONE | `5ee7d21` fix: handle PEP 604 list unions in adapter coercion |
+| RUN5.3.03 | Run status never transitions to `failed` on crash | DONE | `73cc753` fix: log mark_failed errors, cover job_cortex + persistence tests |
+| RUN5.3.04 | Integrator O(n²) dedup times out | DONE | `b7cf224` perf: batch integrator dedup via vector shortlist |
+| RUN5.3.05 | Cortex `is_crystal`: smalltalk-aware rule | DONE | `2c64e4e` feat: smalltalk-aware is_crystal rule |
+| RUN5.3.06 | `extraction_runs.cost_usd` / `tokens_in` aggregation | DONE | `032f2dd` feat: aggregate cost and tokens onto extraction_runs; `3e4f027` fix: recalc_usage for zero-crystal path |

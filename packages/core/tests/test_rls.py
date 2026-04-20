@@ -217,3 +217,163 @@ async def test_workspace_isolation(table_name, session_ws_a, session_ws_b):
         {"id": row_id},
     )
     assert result_b.scalar() == 0, f"RLS leak: workspace B can see {table_name} row from workspace A"
+
+
+# ---------------------------------------------------------------------------
+# RLS isolation tests for migration-007 join tables
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_claim_sources_rls_isolation(session_ws_a, session_ws_b):
+    """claim_sources inserted in ws A are invisible to ws B."""
+    ws_a_id = (await session_ws_a.execute(text("SELECT current_setting('app.workspace_id', true)"))).scalar()
+
+    # Create parent claim (and its FK chain) in ws A
+    type_id = uuid.uuid4()
+    entity_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
+    row_id = uuid.uuid4()
+
+    await session_ws_a.execute(
+        text(
+            "INSERT INTO entity_type_definitions (id, workspace_id, slug, display_name) VALUES (:id, :ws, :slug, 'T')"
+        ),
+        {"id": type_id, "ws": ws_a_id, "slug": f"et-{uuid.uuid4().hex[:8]}"},
+    )
+    await session_ws_a.execute(
+        text("INSERT INTO l1_entities (id, workspace_id, entity_type_id, name) VALUES (:id, :ws, :tid, 'E')"),
+        {"id": entity_id, "ws": ws_a_id, "tid": type_id},
+    )
+    await session_ws_a.execute(
+        text(
+            "INSERT INTO l0_events (id, workspace_id, source_type, source_id, content) "
+            "VALUES (:id, :ws, 'test', :src, '{}'::jsonb)"
+        ),
+        {"id": event_id, "ws": ws_a_id, "src": str(uuid.uuid4())},
+    )
+    await session_ws_a.execute(
+        text(
+            "INSERT INTO l2_claims (id, workspace_id, entity_id, predicate, value) "
+            "VALUES (:id, :ws, :eid, 'test', '\"v\"'::jsonb)"
+        ),
+        {"id": claim_id, "ws": ws_a_id, "eid": entity_id},
+    )
+    await session_ws_a.execute(
+        text(
+            "INSERT INTO claim_sources (id, workspace_id, claim_id, event_id) "
+            "VALUES (:id, :ws, :cid, :eid)"
+        ),
+        {"id": row_id, "ws": ws_a_id, "cid": claim_id, "eid": event_id},
+    )
+    await session_ws_a.flush()
+
+    result_a = await session_ws_a.execute(
+        text("SELECT count(*) FROM claim_sources WHERE id = :id"),
+        {"id": row_id},
+    )
+    assert result_a.scalar() == 1, "claim_source not found in workspace A"
+
+    result_b = await session_ws_b.execute(
+        text("SELECT count(*) FROM claim_sources WHERE id = :id"),
+        {"id": row_id},
+    )
+    assert result_b.scalar() == 0, "RLS leak: workspace B can see claim_sources row from workspace A"
+
+
+@pytest.mark.integration
+async def test_relation_sources_rls_isolation(session_ws_a, session_ws_b):
+    """relation_sources inserted in ws A are invisible to ws B."""
+    ws_a_id = (await session_ws_a.execute(text("SELECT current_setting('app.workspace_id', true)"))).scalar()
+
+    type_id = uuid.uuid4()
+    e1, e2 = uuid.uuid4(), uuid.uuid4()
+    event_id = uuid.uuid4()
+    relation_id = uuid.uuid4()
+    row_id = uuid.uuid4()
+
+    await session_ws_a.execute(
+        text(
+            "INSERT INTO entity_type_definitions (id, workspace_id, slug, display_name) VALUES (:id, :ws, :slug, 'T')"
+        ),
+        {"id": type_id, "ws": ws_a_id, "slug": f"et-{uuid.uuid4().hex[:8]}"},
+    )
+    for eid in (e1, e2):
+        await session_ws_a.execute(
+            text("INSERT INTO l1_entities (id, workspace_id, entity_type_id, name) VALUES (:id, :ws, :tid, 'E')"),
+            {"id": eid, "ws": ws_a_id, "tid": type_id},
+        )
+    await session_ws_a.execute(
+        text(
+            "INSERT INTO l0_events (id, workspace_id, source_type, source_id, content) "
+            "VALUES (:id, :ws, 'test', :src, '{}'::jsonb)"
+        ),
+        {"id": event_id, "ws": ws_a_id, "src": str(uuid.uuid4())},
+    )
+    await session_ws_a.execute(
+        text(
+            "INSERT INTO l1_relations (id, workspace_id, source_entity_id, target_entity_id, relation_type) "
+            "VALUES (:id, :ws, :e1, :e2, 'test')"
+        ),
+        {"id": relation_id, "ws": ws_a_id, "e1": e1, "e2": e2},
+    )
+    await session_ws_a.execute(
+        text(
+            "INSERT INTO relation_sources (id, workspace_id, relation_id, event_id) "
+            "VALUES (:id, :ws, :rid, :eid)"
+        ),
+        {"id": row_id, "ws": ws_a_id, "rid": relation_id, "eid": event_id},
+    )
+    await session_ws_a.flush()
+
+    result_a = await session_ws_a.execute(
+        text("SELECT count(*) FROM relation_sources WHERE id = :id"),
+        {"id": row_id},
+    )
+    assert result_a.scalar() == 1, "relation_source not found in workspace A"
+
+    result_b = await session_ws_b.execute(
+        text("SELECT count(*) FROM relation_sources WHERE id = :id"),
+        {"id": row_id},
+    )
+    assert result_b.scalar() == 0, "RLS leak: workspace B can see relation_sources row from workspace A"
+
+
+@pytest.mark.integration
+async def test_access_group_members_rls_isolation(session_ws_a, session_ws_b):
+    """access_group_members inserted in ws A are invisible to ws B."""
+    ws_a_id = (await session_ws_a.execute(text("SELECT current_setting('app.workspace_id', true)"))).scalar()
+
+    group_id = uuid.uuid4()
+    member_id = uuid.uuid4()
+    row_id = uuid.uuid4()
+
+    await session_ws_a.execute(
+        text("INSERT INTO access_groups (id, workspace_id, name) VALUES (:id, :ws, :name)"),
+        {"id": group_id, "ws": ws_a_id, "name": f"group-{uuid.uuid4().hex[:8]}"},
+    )
+    await session_ws_a.execute(
+        text("INSERT INTO workspace_members (id, workspace_id, user_id) VALUES (:id, :ws, :uid)"),
+        {"id": member_id, "ws": ws_a_id, "uid": str(uuid.uuid4())},
+    )
+    await session_ws_a.execute(
+        text(
+            "INSERT INTO access_group_members (id, workspace_id, group_id, member_id) "
+            "VALUES (:id, :ws, :gid, :mid)"
+        ),
+        {"id": row_id, "ws": ws_a_id, "gid": group_id, "mid": member_id},
+    )
+    await session_ws_a.flush()
+
+    result_a = await session_ws_a.execute(
+        text("SELECT count(*) FROM access_group_members WHERE id = :id"),
+        {"id": row_id},
+    )
+    assert result_a.scalar() == 1, "access_group_member not found in workspace A"
+
+    result_b = await session_ws_b.execute(
+        text("SELECT count(*) FROM access_group_members WHERE id = :id"),
+        {"id": row_id},
+    )
+    assert result_b.scalar() == 0, "RLS leak: workspace B can see access_group_members row from workspace A"

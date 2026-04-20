@@ -131,3 +131,62 @@ async def test_relation_cannot_reference_entities_from_different_workspace(sessi
             {"id": uuid.uuid4(), "ws": ws_a_id, "e1": e1, "e2": e2},
         )
         await session.flush()
+
+
+@pytest.mark.integration
+async def test_claim_source_composite_fk_rejects_cross_workspace(session):
+    """Inserting claim_source with (ws_B, claim_A.id) must fail via composite FK."""
+    ws_a_id = uuid.uuid4()
+    ws_b_id = uuid.uuid4()
+    type_id = uuid.uuid4()
+    entity_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
+
+    # Create two workspaces
+    await session.execute(
+        text("INSERT INTO workspaces (id, name, slug) VALUES (:id, 'WS-A', :slug)"),
+        {"id": ws_a_id, "slug": f"fk-cs-a-{uuid.uuid4().hex[:8]}"},
+    )
+    await session.execute(
+        text("INSERT INTO workspaces (id, name, slug) VALUES (:id, 'WS-B', :slug)"),
+        {"id": ws_b_id, "slug": f"fk-cs-b-{uuid.uuid4().hex[:8]}"},
+    )
+
+    # Build the FK chain in ws_a
+    await session.execute(
+        text(
+            "INSERT INTO entity_type_definitions (id, workspace_id, slug, display_name) VALUES (:id, :ws, :slug, 'T')"
+        ),
+        {"id": type_id, "ws": ws_a_id, "slug": f"et-{uuid.uuid4().hex[:8]}"},
+    )
+    await session.execute(
+        text("INSERT INTO l1_entities (id, workspace_id, entity_type_id, name) VALUES (:id, :ws, :tid, 'E')"),
+        {"id": entity_id, "ws": ws_a_id, "tid": type_id},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO l0_events (id, workspace_id, source_type, source_id, content) "
+            "VALUES (:id, :ws, 'test', :src, '{}'::jsonb)"
+        ),
+        {"id": event_id, "ws": ws_a_id, "src": str(uuid.uuid4())},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO l2_claims (id, workspace_id, entity_id, predicate, value) "
+            "VALUES (:id, :ws, :eid, 'test', '\"v\"'::jsonb)"
+        ),
+        {"id": claim_id, "ws": ws_a_id, "eid": entity_id},
+    )
+
+    # Try to insert claim_source with ws_b referencing claim from ws_a.
+    # Composite FK (workspace_id, claim_id) → l2_claims should reject this.
+    with pytest.raises(IntegrityError):
+        await session.execute(
+            text(
+                "INSERT INTO claim_sources (id, workspace_id, claim_id, event_id) "
+                "VALUES (:id, :ws_b, :cid, :eid)"
+            ),
+            {"id": uuid.uuid4(), "ws_b": ws_b_id, "cid": claim_id, "eid": event_id},
+        )
+        await session.flush()

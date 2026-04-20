@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 import uuid
 from typing import TYPE_CHECKING
 
@@ -145,8 +146,23 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4
 
 
+_ZERO_WIDTH_CHARS = dict.fromkeys(
+    ord(c) for c in "\u200b\u200c\u200d\u2060\ufeff\u180e"
+)
+
+
 def _sanitize_context(text: str) -> str:
-    """Strip instruction-like patterns from evidence content."""
+    """Strip instruction-like patterns from evidence content.
+
+    Normalizes via NFKC and strips zero-width characters before regex
+    matching — otherwise attacker-controlled evidence can slip past
+    pattern matchers (e.g. ``ign\u200bore previous instructions``).
+    """
+    # Unicode normalization + zero-width stripping defeats homoglyph
+    # and invisible-character bypass attempts on the regex layer.
+    text = unicodedata.normalize("NFKC", text)
+    text = text.translate(_ZERO_WIDTH_CHARS)
+
     patterns = [
         r"<system>.*?</system>",
         r"<assistant>.*?</assistant>",

@@ -23,10 +23,10 @@ Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `
 
 ### Packages
 
-- **`packages/core/`** — Domain logic: models (18), schemas (15), repositories (14), extraction pipeline (cortex/crystallizer/integrator sub-packages), LLM adapters, worker tasks. Zero framework dependencies.
-- **`packages/api/`** — FastAPI REST API + MCP server. Depends on core.
-- **`packages/cli/`** — CLI (Run 4, placeholder).
-- **`packages/connectors/`** — Source connectors (Run 5, placeholder).
+- **`packages/core/`** — Domain logic: models (18), schemas (17), repositories (16), extraction pipeline (cortex/crystallizer/integrator sub-packages), LLM adapters, worker tasks. Zero framework dependencies.
+- **`packages/api/`** — FastAPI REST API + MCP server. 18 routers. Depends on core.
+- **`packages/cli-go/`** — Go CLI (Cobra): search, ask, tree, entity, claim, ingest, key, workspace, setup agent.
+- **`packages/connectors/`** — Source connectors (placeholder).
 
 ### Security Layers
 
@@ -35,7 +35,7 @@ Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `
 3. **Pydantic validators** — All LLM output validated before persistence: script tag rejection, control char stripping, confidence bounds [0, 1], length limits.
 4. **Job arg safety** — TaskIQ tasks accept only string IDs (`event_id`, `extraction_run_id`, `workspace_id`).
 
-## API Endpoints (41 total)
+## API Endpoints (44 total)
 
 ```
 GET  /health/live
@@ -44,7 +44,7 @@ POST /workspaces          — bootstrap key required
 GET  /workspaces
 GET  /workspaces/{id}
 PATCH /workspaces/{id}
-POST /ingest              — trigger extraction pipeline
+POST /ingest/text         — trigger extraction pipeline
 POST /entities
 GET  /entities
 GET  /entities/{id}
@@ -74,6 +74,8 @@ GET  /events/{id}/trace   — pipeline execution trace
 GET  /integrator-runs
 GET  /integrator-runs/{id}
 POST /integrator-runs/trigger
+GET  /integrator-actions
+POST /integrator-actions/{id}/rollback
 POST /search              — hybrid 3-channel RRF search
 POST /ask                 — LLM Q&A with citation validation
 GET  /tree                — knowledge tree root
@@ -83,10 +85,10 @@ POST /tree/export         — export subtree as markdown
 
 ## Data Model
 
-22 tables across 3 layers:
+23 tables across 4 layers (Alembic migrations 001–006):
 
 - **L0 Events** — Raw ingested events with source metadata. `l0_chunks` stores chunked text segments per event.
-- **L1 Entities** — Resolved named entities (person, project, team, etc.). 10 seeded entity types, 20 seeded predicates per workspace.
+- **L1 Entities** — Resolved named entities (person, project, team, etc.). 13 seeded entity types, 21 seeded predicates per workspace.
 - **L2 Claims + Relations** — Structured facts with confidence scores and `extraction_run_id` provenance.
 - **Extraction Runs** — Tracks each pipeline execution: status (`pending` → `extracting` → `cortex_complete` → `completed` | `failed`), token usage, cost, timestamps. On task exception, `job_cortex`/`job_crystallize`/`job_write` call `ExtractionRunRepository.mark_failed` in a fresh transaction; idempotent for terminal states. At every terminal transition (completed or failed) `ExtractionRunRepository.recalc_usage` SUMs `tokens_in`/`cost_usd` from `pipeline_traces` into the run row; the update is skipped when no traces exist, preserving values written directly by the legacy non-Cortex path. `pipeline_traces` captures per-step execution details; `integrator_runs` tracks knowledge graph integration runs.
 
@@ -121,4 +123,4 @@ Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · 
 - [CLAUDE.md](./CLAUDE.md): Development guide, architecture rules, security policy
 - [CHANGELOG](./CHANGELOG.md)
 
-<!-- updated-by-superflow:2026-04-14 -->
+<!-- updated-by-superflow:2026-04-20 -->

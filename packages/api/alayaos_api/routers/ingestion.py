@@ -118,8 +118,13 @@ async def ingest_text(
         occurred_at=body.occurred_at,
     )
 
-    # Idempotency: only create extraction run for new events
+    # Idempotency: only create extraction run for new events.
+    # ``enqueued`` tracks whether this request actually produces new
+    # extraction work — used to gate both the rate-limiter and the
+    # task-queue enqueue so retries against a pending run cannot
+    # (a) skip the budget cap while (b) spamming duplicate LLM work.
     run_repo = ExtractionRunRepository(session, api_key.workspace_id)
+    enqueued = False
     if created:
         # New event → new extraction → rate-limited (LLM cost gate).
         await _check_ingest_rate_limit(settings, api_key)
@@ -128,12 +133,14 @@ async def ingest_text(
             event_id=event.id,
             status="pending",
         )
+        enqueued = True
     else:
         # Re-ingest: find existing pending run or create with parent_run_id
         existing_runs = await run_repo.list_by_event(event.id)
         pending = [r for r in existing_runs if r.status == "pending"]
         if pending:
-            # Fully idempotent path — no LLM cost, no slot consumed.
+            # Fully idempotent path — no LLM cost, no slot consumed,
+            # and no re-enqueue (existing worker will pick up the run).
             run = pending[0]
         else:
             # Re-extract of an existing event = fresh extraction → rate-limited.
@@ -146,14 +153,18 @@ async def ingest_text(
                 status="pending",
                 parent_run_id=parent_id,
             )
+            enqueued = True
 
-    # Enqueue extraction job (async, non-blocking)
-    try:
-        from alayaos_core.worker.tasks import job_extract
+    # Only enqueue when this request produced new extraction work.
+    # Idempotent retries hitting an already-pending run fall through
+    # untouched — no duplicate kiq(), no duplicate LLM spend.
+    if enqueued:
+        try:
+            from alayaos_core.worker.tasks import job_extract
 
-        await job_extract.kiq(str(event.id), str(run.id), str(api_key.workspace_id))
-    except Exception:
-        pass  # Worker may not be running; run stays pending for manual pickup
+            await job_extract.kiq(str(event.id), str(run.id), str(api_key.workspace_id))
+        except Exception:
+            pass  # Worker may not be running; run stays pending for manual pickup
 
     return data_response(
         IngestTextResponse(

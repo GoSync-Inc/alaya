@@ -122,3 +122,50 @@ def test_create_app_warns_when_production_has_no_trusted_hosts(monkeypatch) -> N
         "trusted_hosts_not_configured_for_production",
         message="Host validation is not configured for production. Set ALAYA_TRUSTED_HOSTS or enforce trusted hosts at ingress.",
     )
+
+
+# -----------------------------------------------------------------------------
+# P0-3: SECRET_KEY production guard
+# -----------------------------------------------------------------------------
+
+
+def test_validate_production_secrets_passes_for_dev() -> None:
+    """Default SECRET_KEY is acceptable outside production."""
+    from alayaos_core.config import Settings
+
+    from alayaos_api.main import _validate_production_secrets
+
+    settings = Settings()
+    assert settings.ENV == "dev"
+    # Should not raise — dev env tolerates the default sentinel.
+    _validate_production_secrets(settings)
+
+
+def test_validate_production_secrets_raises_on_default_in_prod(monkeypatch) -> None:
+    """Production refuses to start with the 'change-me-in-production' default."""
+    import pytest
+
+    from alayaos_core.config import Settings
+
+    from alayaos_api.main import _validate_production_secrets
+
+    monkeypatch.setenv("ALAYA_ENV", "production")
+    monkeypatch.delenv("ALAYA_SECRET_KEY", raising=False)
+
+    settings = Settings()
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        _validate_production_secrets(settings)
+
+
+def test_validate_production_secrets_passes_with_real_secret(monkeypatch) -> None:
+    """A non-default SECRET_KEY clears the production guard."""
+    from alayaos_core.config import Settings
+
+    from alayaos_api.main import _validate_production_secrets
+
+    monkeypatch.setenv("ALAYA_ENV", "production")
+    monkeypatch.setenv("ALAYA_SECRET_KEY", "a-very-real-32-byte-random-secret")
+
+    settings = Settings()
+    # Should not raise.
+    _validate_production_secrets(settings)

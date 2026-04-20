@@ -2,7 +2,8 @@
 
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -97,17 +98,42 @@ def make_run(event_id: uuid.UUID):
     return run
 
 
+def _mock_redis_client() -> MagicMock:
+    client = MagicMock()
+    client.aclose = AsyncMock()
+    return client
+
+
+def _patch_rate_limiter(allowed: bool = True, retry_after: int | None = None, backend_available: bool = True):
+    """Return a patcher for RateLimiterService that yields the given decision."""
+    redis_client = _mock_redis_client()
+
+    def _apply(stack):
+        stack.enter_context(patch("alayaos_api.routers.ingestion.aioredis.from_url", return_value=redis_client))
+        mock_limiter_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.RateLimiterService"))
+        mock_limiter_cls.return_value.check = AsyncMock(
+            return_value=SimpleNamespace(
+                allowed=allowed, retry_after=retry_after, backend_available=backend_available
+            )
+        )
+
+    return _apply
+
+
 class TestIngestionRouter:
     def test_ingest_text_returns_202(self) -> None:
+        from contextlib import ExitStack
+
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
         event = make_event()
         run = make_run(event.id)
 
-        with (
-            patch("alayaos_api.routers.ingestion.EventRepository") as mock_event_cls,
-            patch("alayaos_api.routers.ingestion.ExtractionRunRepository") as mock_run_cls,
-        ):
+        with ExitStack() as stack:
+            _patch_rate_limiter()(stack)
+            mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
+            mock_run_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
+
             event_repo = AsyncMock()
             event_repo.create_or_update = AsyncMock(return_value=(event, True))
             mock_event_cls.return_value = event_repo
@@ -147,15 +173,18 @@ class TestIngestionRouter:
 
     def test_ingest_text_auto_source_id(self) -> None:
         """When source_id is not provided, a UUID is auto-generated."""
+        from contextlib import ExitStack
+
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
         event = make_event()
         run = make_run(event.id)
 
-        with (
-            patch("alayaos_api.routers.ingestion.EventRepository") as mock_event_cls,
-            patch("alayaos_api.routers.ingestion.ExtractionRunRepository") as mock_run_cls,
-        ):
+        with ExitStack() as stack:
+            _patch_rate_limiter()(stack)
+            mock_event_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.EventRepository"))
+            mock_run_cls = stack.enter_context(patch("alayaos_api.routers.ingestion.ExtractionRunRepository"))
+
             event_repo = AsyncMock()
             event_repo.create_or_update = AsyncMock(return_value=(event, True))
             mock_event_cls.return_value = event_repo
@@ -172,11 +201,49 @@ class TestIngestionRouter:
             )
 
         assert response.status_code == 202
-        # Verify auto-generated source_id was used (event_repo.create_or_update was called)
         event_repo.create_or_update.assert_called_once()
         call_kwargs = event_repo.create_or_update.call_args
-        # source_id should be a valid UUID string
         source_id = call_kwargs.kwargs.get("source_id") or call_kwargs.args[2]
         assert source_id is not None
-        # Should be parseable as UUID
         uuid.UUID(str(source_id))
+
+    def test_ingest_text_returns_429_when_rate_limited(self) -> None:
+        """Rate limit exceeded → 429 with Retry-After header."""
+        from contextlib import ExitStack
+
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+
+        with ExitStack() as stack:
+            _patch_rate_limiter(allowed=False, retry_after=12, backend_available=True)(stack)
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/v1/ingest/text",
+                json={"text": "test"},
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 429
+        assert response.headers["Retry-After"] == "12"
+        assert response.json()["error"]["code"] == "rate_limit.exceeded"
+
+    def test_ingest_text_returns_503_when_rate_limiter_backend_unavailable(self) -> None:
+        """Redis outage → fail-closed with 503, not unthrottled passthrough."""
+        from contextlib import ExitStack
+
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+
+        with ExitStack() as stack:
+            _patch_rate_limiter(allowed=False, retry_after=None, backend_available=False)(stack)
+
+            client = TestClient(app)
+            response = client.post(
+                "/api/v1/ingest/text",
+                json={"text": "test"},
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "server.rate_limit_unavailable"

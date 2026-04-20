@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
 from taskiq.events import TaskiqEvents
 
 
@@ -20,7 +21,7 @@ def test_get_session_factory_reuses_engine_per_process(monkeypatch: pytest.Monke
     factory_marker = MagicMock(name="session_factory")
     engine = AsyncMock()
     settings = MagicMock(
-        DATABASE_URL="postgresql+asyncpg://test",
+        DATABASE_URL=SecretStr("postgresql+asyncpg://test"),
         DB_ECHO=False,
         DB_POOL_SIZE=7,
         DB_MAX_OVERFLOW=11,
@@ -42,7 +43,7 @@ def test_get_session_factory_reuses_engine_per_process(monkeypatch: pytest.Monke
     assert factory_a is factory_marker
     assert factory_b is factory_marker
     mock_create_engine.assert_called_once_with(
-        settings.DATABASE_URL,
+        settings.DATABASE_URL.get_secret_value(),
         echo=settings.DB_ECHO,
         pool_size=settings.DB_POOL_SIZE,
         max_overflow=settings.DB_MAX_OVERFLOW,
@@ -66,7 +67,10 @@ async def test_close_worker_resources_disposes_and_resets(monkeypatch: pytest.Mo
     monkeypatch.setattr(worker_tasks, "_session_factory_cached", None, raising=False)
 
     with (
-        patch("alayaos_core.worker.tasks.Settings", return_value=MagicMock(DATABASE_URL="postgresql+asyncpg://test")),
+        patch(
+            "alayaos_core.worker.tasks.Settings",
+            return_value=MagicMock(DATABASE_URL=SecretStr("postgresql+asyncpg://test")),
+        ),
         patch(
             "alayaos_core.worker.tasks.create_async_engine",
             side_effect=[first_engine, second_engine],
@@ -112,7 +116,7 @@ async def test_worker_startup_hook_initializes_resources_once(monkeypatch: pytes
     factory_marker = MagicMock(name="session_factory")
     engine = AsyncMock()
     settings = MagicMock(
-        DATABASE_URL="postgresql+asyncpg://test",
+        DATABASE_URL=SecretStr("postgresql+asyncpg://test"),
         DB_ECHO=False,
         DB_POOL_SIZE=7,
         DB_MAX_OVERFLOW=11,

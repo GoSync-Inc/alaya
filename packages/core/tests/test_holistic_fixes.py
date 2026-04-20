@@ -4,6 +4,7 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
 
 # ---------------------------------------------------------------------------
 # Fix 4: Zero-crystal events must be marked is_extracted=True
@@ -207,7 +208,7 @@ async def test_job_crystallize_creates_redis_for_entity_cache():
     mock_settings = MagicMock()
     mock_settings.ANTHROPIC_API_KEY = MagicMock()
     mock_settings.ANTHROPIC_API_KEY.get_secret_value = MagicMock(return_value="")
-    mock_settings.REDIS_URL = "redis://localhost:6379"
+    mock_settings.REDIS_URL = SecretStr("redis://localhost:6379")
     mock_settings.CRYSTALLIZER_MODEL = "claude-3-5-sonnet"
     mock_settings.CRYSTALLIZER_CONFIDENCE_HIGH = 0.8
     mock_settings.CRYSTALLIZER_CONFIDENCE_LOW = 0.5

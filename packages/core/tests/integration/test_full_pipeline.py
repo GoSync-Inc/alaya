@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
 
 
 def _make_event(
@@ -233,7 +234,7 @@ async def test_full_pipeline_no_crystal_chunks_completes_run():
     mock_settings.CORTEX_CRYSTAL_THRESHOLD = 0.9
     mock_settings.CORTEX_TRUNCATION_TOKENS = 800
     mock_settings.FEATURE_FLAG_USE_CORTEX = True
-    mock_settings.REDIS_URL = "redis://localhost:6379/0"
+    mock_settings.REDIS_URL = SecretStr("redis://localhost:6379/0")
 
     with (
         patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),

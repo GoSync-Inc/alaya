@@ -45,7 +45,7 @@ async def ask_endpoint(
     # Rate limiting: 10/min per key for /ask
     redis_client = None
     with contextlib.suppress(Exception):
-        redis_client = aioredis.from_url(settings.REDIS_URL)
+        redis_client = aioredis.from_url(settings.REDIS_URL.get_secret_value())
     try:
         limiter = RateLimiterService(redis=redis_client)
         decision = await limiter.check(f"{api_key.key_prefix}:ask", settings.ASK_RATE_LIMIT_PER_MINUTE, 60)

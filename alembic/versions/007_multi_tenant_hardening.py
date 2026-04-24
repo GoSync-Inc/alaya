@@ -18,10 +18,23 @@ down_revision: str | None = "006"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Parent tables that carry FORCE ROW LEVEL SECURITY and are referenced in the
+# backfill / preflight queries. We must temporarily remove FORCE so the
+# migration (running as TABLE OWNER) can read them without app.workspace_id
+# being set. Restored at step 8 after all join-table RLS has been applied.
+_FORCE_RLS_PARENTS: tuple[str, ...] = (
+    "l2_claims",
+    "l1_relations",
+    "l0_events",
+    "access_groups",
+    "workspace_members",
+)
+
 
 def upgrade() -> None:
     # --------------------------------------------------------------------------
     # Overview of steps:
+    #   0.   Temporarily remove FORCE RLS on parent tables (restored at step 8)
     #   1.   Add workspace_id column (nullable)
     #   1.5. Abort if any legacy join row has a cross-workspace reference
     #   2.   Backfill workspace_id from parent tables
@@ -29,8 +42,19 @@ def upgrade() -> None:
     #   4.   Drop old single-column FKs
     #   5.   Add composite FKs
     #   6.   Create indexes CONCURRENTLY
-    #   7.   Enable RLS + FORCE + workspace isolation policy
+    #   7.   Enable RLS + FORCE + workspace isolation policy on join tables
+    #   8.   Restore FORCE RLS on parent tables
     # --------------------------------------------------------------------------
+
+    # --------------------------------------------------------------------------
+    # 0. Temporarily remove FORCE RLS on parent tables so the backfill and the
+    # preflight cross-workspace check can read them. The migration is expected
+    # to run as TABLE OWNER; FORCE RLS applies to the owner too, which would
+    # hide the parent rows when app.workspace_id is not set. We restore FORCE
+    # at step 8.
+    # --------------------------------------------------------------------------
+    for _t in _FORCE_RLS_PARENTS:
+        op.execute(f"ALTER TABLE {_t} NO FORCE ROW LEVEL SECURITY")
 
     # --------------------------------------------------------------------------
     # 1. Add workspace_id column (nullable) to the three join tables
@@ -194,8 +218,22 @@ def upgrade() -> None:
             "WITH CHECK (workspace_id = current_setting('app.workspace_id', true)::uuid)"
         )
 
+    # --------------------------------------------------------------------------
+    # 8. Restore FORCE RLS on parent tables.
+    # --------------------------------------------------------------------------
+    for _t in _FORCE_RLS_PARENTS:
+        op.execute(f"ALTER TABLE {_t} FORCE ROW LEVEL SECURITY")
+
 
 def downgrade() -> None:
+    # --------------------------------------------------------------------------
+    # 0. Temporarily remove FORCE RLS on parent tables for the same reason as
+    # in upgrade(): the FK recreation in step 5 reads parent tables and would
+    # be blocked by FORCE when app.workspace_id is not set.
+    # --------------------------------------------------------------------------
+    for _t in _FORCE_RLS_PARENTS:
+        op.execute(f"ALTER TABLE {_t} NO FORCE ROW LEVEL SECURITY")
+
     # --------------------------------------------------------------------------
     # 1. Drop RLS policies + disable
     # --------------------------------------------------------------------------
@@ -273,3 +311,9 @@ def downgrade() -> None:
         ["member_id"],
         ["id"],
     )
+
+    # --------------------------------------------------------------------------
+    # 6. Restore FORCE RLS on parent tables.
+    # --------------------------------------------------------------------------
+    for _t in _FORCE_RLS_PARENTS:
+        op.execute(f"ALTER TABLE {_t} FORCE ROW LEVEL SECURITY")

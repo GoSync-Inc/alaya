@@ -90,6 +90,7 @@ Run before every commit:
 - `ASK_RATE_LIMIT_PER_MINUTE` (default `10`) / `ASK_RATE_LIMIT_PER_HOUR` (default `100`) — rate limits for `/ask` and `/search`; enforced fail-closed (503 when Redis is unavailable).
 - `ALAYA_PART_OF_STRICT` (default `strict`, values `strict|warn|off`) — controls `part_of` tier-rank validation only; non-default values emit `feature_flag_active` at API startup and in `job_feature_flag_digest`. Self-reference remains always rejected.
 - `SECRET_KEY` — must be set to a strong random value in production; defaults to `"change-me-in-production"` which is insecure.
+- pgvector `>= 0.8.0` is required. Migration 008, API lifespan startup, Docker init, and CI all fail fast if the installed extension is older.
 
 ## Architecture Rules
 
@@ -123,6 +124,7 @@ Core predicates: 21 seeded per workspace (deadline, status, owner, role, title, 
 Core entity types: 13 seeded per workspace (person, project, team, document, decision, meeting, task, goal, north_star, etc.)
 Claims and relations carry `extraction_run_id` for full provenance tracing.
 `integrator_actions.snapshot_schema_version` (int, default 1) — audit payload format version; v2 actions carry additive `inverse` fields enabling full FK + winner-metadata reversal on rollback.
+Access propagation: `l0_events.access_level` is authoritative; `vector_chunks.access_level` is denormalized for pgvector/HNSW filtering and restamped by migration 008 triggers. `claim_effective_access` is a non-materialized read-only view that computes most-restrictive claim visibility from `claim_sources`, with source-less claims defaulting to restricted.
 
 ## API Endpoints (45 total)
 

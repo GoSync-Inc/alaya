@@ -42,6 +42,7 @@ async def test_job_cortex_zero_crystal_marks_event_extracted():
     # Repos — module-level names used through local imports
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=mock_event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=mock_event)
 
     mock_run_repo = AsyncMock()
     mock_run_repo.get_by_id = AsyncMock(return_value=mock_run)
@@ -147,6 +148,7 @@ async def test_job_cortex_skips_when_cortex_complete():
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=mock_event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=mock_event)
 
     mock_run_repo = AsyncMock()
     mock_run_repo.get_by_id = AsyncMock(return_value=mock_run)
@@ -221,7 +223,8 @@ async def test_job_crystallize_creates_redis_for_entity_cache():
     mock_chunk.event_id = uuid.uuid4()
 
     mock_chunk_repo = AsyncMock()
-    mock_chunk_repo.get_by_id = AsyncMock(return_value=mock_chunk)
+    mock_chunk_repo.get_by_id = AsyncMock(return_value=None)
+    mock_chunk_repo.get_by_id_unfiltered = AsyncMock(return_value=mock_chunk)
     mock_chunk_repo.update_processing_stage = AsyncMock()
     mock_chunk_repo.list_by_event = AsyncMock(return_value=[])
 

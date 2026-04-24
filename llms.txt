@@ -109,6 +109,7 @@ Tenant isolation via PostgreSQL RLS (`SET LOCAL app.workspace_id`). Composite FK
 - **Q&A** (`POST /ask`): Search → token budget → XML prompt → LLM → citation validation. Prompt injection protection via context sanitization.
 - **Knowledge tree** (`GET /tree/{path}`): Materialized briefing layer with dirty-flag rebuild, LLM synthesis with 6s timeout + raw claims fallback.
 - **Embedding pipeline**: FastEmbed (multilingual-e5-large, 1024d halfvec), batch backfill via job_enrich.
+- **Access propagation**: `l0_events.access_level` is authoritative. `vector_chunks.access_level` is denormalized for HNSW filtering, migration 008 keeps it in sync on event ACL updates, and the non-materialized `claim_effective_access` view computes most-restrictive claim visibility from `claim_sources`. pgvector `>= 0.8.0` is required at migration, boot, Docker init, and CI.
 
 ## Go CLI
 

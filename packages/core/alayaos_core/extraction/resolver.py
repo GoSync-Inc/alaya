@@ -14,6 +14,23 @@ from alayaos_core.repositories.entity_type import EntityTypeRepository
 log = structlog.get_logger()
 
 
+async def _get_entity_internal(entity_repo: EntityRepository, entity_id: uuid.UUID):
+    if hasattr(type(entity_repo), "get_by_id_unfiltered"):
+        return await entity_repo.get_by_id_unfiltered(entity_id)
+    return await entity_repo.get_by_id(entity_id)
+
+
+async def _list_entities_internal(
+    entity_repo: EntityRepository,
+    *,
+    limit: int,
+    cursor: str | None,
+):
+    if hasattr(type(entity_repo), "list_unfiltered"):
+        return await entity_repo.list_unfiltered(limit=limit, cursor=cursor)
+    return await entity_repo.list(limit=limit, cursor=cursor)
+
+
 def normalize_name(name: str) -> str:
     """NFKC + lowercase + strip + zero-width removal."""
     name = unicodedata.normalize("NFKC", name)
@@ -136,7 +153,7 @@ async def resolve_entity(
 
     # Tier 3: LLM fallback for ambiguous band (0.85 <= score < 0.92)
     if best_score >= 0.85 and best_id is not None:
-        existing_entity = await entity_repo.get_by_id(best_id)
+        existing_entity = await _get_entity_internal(entity_repo, best_id)
         if existing_entity:
             is_same = await _llm_resolve_entity(llm, extracted, existing_entity)
             if is_same:
@@ -258,7 +275,7 @@ async def resolve_batch(
     # Load ALL existing entities for this workspace (paginate through all)
     cursor = None
     while True:
-        batch, next_cursor, has_more = await entity_repo.list(limit=200, cursor=cursor)
+        batch, next_cursor, has_more = await _list_entities_internal(entity_repo, limit=200, cursor=cursor)
         for entity in batch:
             entity_index[normalize_name(entity.name)] = entity.id
             for alias in entity.aliases or []:

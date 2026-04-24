@@ -11,6 +11,7 @@ from alayaos_core.schemas.tree import (
     TreeBriefing,
     TreeExportRequest,
     TreeNodeResponse,
+    TreeNodeView,
     TreePathRequest,
 )
 
@@ -314,7 +315,7 @@ class TestTreeService:
         # Patch _repo.get_by_path to return None
         svc._repo.get_by_path = AsyncMock(return_value=None)
 
-        node = await svc.get_node("person/nonexistent")
+        node = await svc.get_node("person/nonexistent", allowed_tiers={"restricted"})
         assert node is None
 
     @pytest.mark.asyncio
@@ -328,8 +329,10 @@ class TestTreeService:
         clean_node = make_tree_node(is_dirty=False)
         svc._repo.get_by_path = AsyncMock(return_value=clean_node)
 
-        node = await svc.get_node("person/alice")
-        assert node is clean_node
+        node = await svc.get_node("person/alice", allowed_tiers={"restricted"})
+        assert isinstance(node, TreeNodeView)
+        assert node.path == clean_node.path
+        assert node.summary == clean_node.summary
 
     @pytest.mark.asyncio
     async def test_get_node_dirty_without_llm_skips_rebuild(self):
@@ -343,8 +346,9 @@ class TestTreeService:
         dirty_node = make_tree_node(is_dirty=True)
         svc._repo.get_by_path = AsyncMock(return_value=dirty_node)
 
-        node = await svc.get_node("person/alice")
-        assert node is dirty_node
+        node = await svc.get_node("person/alice", allowed_tiers={"restricted"})
+        assert isinstance(node, TreeNodeView)
+        assert node.path == dirty_node.path
         assert node.is_dirty is True  # unchanged since no LLM
 
     @pytest.mark.asyncio
@@ -378,6 +382,25 @@ class TestTreeService:
         assert roots[0].path == "person"
 
     @pytest.mark.asyncio
+    async def test_get_node_hides_index_cached_markdown_for_non_admin(self):
+        from alayaos_core.services.tree import TreeService
+
+        session = make_session_mock()
+        ws_id = uuid.uuid4()
+        svc = TreeService(session, ws_id, llm=None)
+
+        index_node = make_tree_node(path="person", node_type="index", entity_id=None)
+        index_node.markdown_cache = "# People\n\nrestricted codename BLACKBIRD"
+        index_node.summary = {"title": "People", "summary": "restricted codename BLACKBIRD"}
+        svc._repo.get_by_path = AsyncMock(return_value=index_node)
+
+        node = await svc.get_node("person", allowed_tiers={"public", "channel"})
+
+        assert isinstance(node, TreeNodeView)
+        assert node.summary is None
+        assert node.markdown_cache is None
+
+    @pytest.mark.asyncio
     async def test_mark_dirty_delegates_to_repo(self):
         from alayaos_core.services.tree import TreeService
 
@@ -402,9 +425,27 @@ class TestTreeService:
         svc._repo.get_children = AsyncMock(return_value=[])
         svc._repo.get_by_path = AsyncMock(return_value=None)
 
-        result = await svc.export_subtree("person")
+        result = await svc.export_subtree("person", allowed_tiers={"restricted"})
         assert "person" in result
         assert "No content available" in result
+
+    @pytest.mark.asyncio
+    async def test_export_subtree_skips_index_cached_markdown_for_non_admin(self):
+        from alayaos_core.services.tree import TreeService
+
+        session = make_session_mock()
+        ws_id = uuid.uuid4()
+        svc = TreeService(session, ws_id, llm=None)
+
+        index_node = make_tree_node(path="person", node_type="index", entity_id=None)
+        index_node.markdown_cache = "# People\n\nrestricted codename BLACKBIRD"
+        svc._repo.get_by_path = AsyncMock(return_value=index_node)
+        svc._repo.get_children = AsyncMock(return_value=[])
+
+        result = await svc.export_subtree("person", allowed_tiers={"public", "channel"})
+
+        assert "BLACKBIRD" not in result
+        assert "restricted codename" not in result
 
     @pytest.mark.asyncio
     async def test_rebuild_briefing_index_node_clears_dirty(self):

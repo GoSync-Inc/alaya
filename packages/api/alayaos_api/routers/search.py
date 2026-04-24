@@ -29,7 +29,13 @@ def _rate_limit_error(code: str, message: str, hint: str | None = None) -> dict:
     }
 
 
-@router.post("/search", response_model=SearchResponse)
+def _response_payload(result: SearchResponse | dict) -> dict:
+    payload = dict(result) if isinstance(result, dict) else result.model_dump(mode="json")
+    payload.setdefault("meta", {"filtered_count": 0, "filter_reason": None})
+    return payload
+
+
+@router.post("/search")
 async def search(
     body: SearchRequest,
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
@@ -75,7 +81,7 @@ async def search(
             entity_types=body.entity_types,
         )
 
-        return result
+        return _response_payload(result)
     finally:
         if redis_client:
             await redis_client.aclose()

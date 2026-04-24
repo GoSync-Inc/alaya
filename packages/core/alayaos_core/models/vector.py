@@ -23,4 +23,5 @@ class VectorChunk(Base):
         TSVECTOR, Computed("to_tsvector('simple', content)", persisted=True), nullable=True
     )
     chunk_metadata: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False, server_default="{}")
+    access_level: Mapped[str] = mapped_column(Text, nullable=False, server_default="restricted")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

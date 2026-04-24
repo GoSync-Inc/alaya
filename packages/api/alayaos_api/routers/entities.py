@@ -94,7 +94,17 @@ async def list_entities(
 
     repo = EntityRepository(session, api_key.workspace_id)
     items, next_cursor, has_more = await repo.list(cursor=cursor, limit=limit, type_slug=type_slug)
-    return paginated_response(items, EntityRead, next_cursor, has_more)
+    filtered_count = getattr(repo, "last_filtered_count", 0)
+    if not isinstance(filtered_count, int):
+        filtered_count = 0
+    return paginated_response(
+        items,
+        EntityRead,
+        next_cursor,
+        has_more,
+        filtered_count=filtered_count,
+        filter_reason="acl_filtered",
+    )
 
 
 @router.get("/entities/{entity_id}")

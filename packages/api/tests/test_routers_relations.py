@@ -91,6 +91,23 @@ class TestRelationsRouter:
         assert "data" in body
         assert "pagination" in body
 
+    def test_list_relations_reports_acl_filtered_count(self) -> None:
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        rel = make_relation()
+
+        with patch("alayaos_api.routers.relations.RelationRepository") as mock_cls:
+            repo = AsyncMock()
+            repo.list = AsyncMock(return_value=([rel], None, False))
+            repo.last_filtered_count = 2
+            mock_cls.return_value = repo
+
+            client = TestClient(app)
+            response = client.get("/api/v1/relations", headers={"X-Api-Key": RAW_KEY})
+
+        assert response.status_code == 200
+        assert response.json()["meta"] == {"filtered_count": 2, "filter_reason": "acl_filtered"}
+
     def test_get_relation_returns_200(self) -> None:
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)

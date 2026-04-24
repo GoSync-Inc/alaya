@@ -48,6 +48,18 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return result
 
 
+async def _get_entity_internal(entity_repo, entity_id: uuid.UUID):
+    if hasattr(type(entity_repo), "get_by_id_unfiltered"):
+        return await entity_repo.get_by_id_unfiltered(entity_id)
+    return await entity_repo.get_by_id(entity_id)
+
+
+async def _update_entity_internal(entity_repo, entity_id: uuid.UUID, **kwargs):
+    if hasattr(type(entity_repo), "update_unfiltered"):
+        return await entity_repo.update_unfiltered(entity_id, **kwargs)
+    return await entity_repo.update(entity_id, **kwargs)
+
+
 def shortlist_candidates(
     entities: list[EntityWithContext],
     embeddings: dict[uuid.UUID, list[float]],
@@ -553,7 +565,7 @@ class DeduplicatorV2:
         """Apply a single MergeGroup: rewrite winner, soft-delete losers, reassign FK refs."""
         from sqlalchemy import text
 
-        winner = await entity_repo.get_by_id(winner_id)
+        winner = await _get_entity_internal(entity_repo, winner_id)
         if winner is None:
             return 0
 
@@ -568,7 +580,8 @@ class DeduplicatorV2:
         new_aliases = list(dict.fromkeys(list(winner.aliases or []) + list(merged_aliases)))
 
         # Rewrite winner
-        await entity_repo.update(
+        await _update_entity_internal(
+            entity_repo,
             winner_id,
             name=merged_name,
             description=merged_description,
@@ -577,14 +590,14 @@ class DeduplicatorV2:
 
         merged_count = 0
         for loser_id in loser_ids:
-            loser = await entity_repo.get_by_id(loser_id)
+            loser = await _get_entity_internal(entity_repo, loser_id)
             if loser is None:
                 continue
 
             # Add loser's original name as alias on winner
             if loser.name and loser.name not in new_aliases:
                 new_aliases = list(dict.fromkeys([*new_aliases, loser.name]))
-                await entity_repo.update(winner_id, aliases=new_aliases)
+                await _update_entity_internal(entity_repo, winner_id, aliases=new_aliases)
 
             # --- Collect IDs BEFORE mutation (mirrors WHERE clauses below) ---
 
@@ -734,7 +747,7 @@ class DeduplicatorV2:
             # Soft-delete loser with provenance
             loser_props = dict(loser.properties or {})
             loser_props["merged_into"] = str(winner_id)
-            await entity_repo.update(loser_id, is_deleted=True, properties=loser_props)
+            await _update_entity_internal(entity_repo, loser_id, is_deleted=True, properties=loser_props)
 
             # v2 inverse payload (additive on top of existing keys)
             v2_payload = {

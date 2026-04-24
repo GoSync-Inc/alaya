@@ -8,7 +8,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 import structlog
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from alayaos_core.config import Settings
 from alayaos_core.schemas.search import EvidenceUnit  # noqa: TC001
@@ -44,6 +44,7 @@ class AskResult(BaseModel):
     evidence: list[EvidenceUnit]
     tokens_used: int
     cost_usd: float
+    meta: dict[str, object] = Field(default_factory=lambda: {"filtered_count": 0, "filter_reason": None})
 
 
 async def ask(
@@ -66,6 +67,7 @@ async def ask(
     )
 
     evidence = search_response.results
+    meta = _search_meta(search_response)
 
     if not evidence:
         return AskResult(
@@ -75,6 +77,7 @@ async def ask(
             evidence=[],
             tokens_used=0,
             cost_usd=0.0,
+            meta=meta,
         )
 
     system_prompt = (
@@ -146,7 +149,18 @@ async def ask(
         evidence=included_evidence,
         tokens_used=usage.tokens_in + usage.tokens_out,
         cost_usd=usage.cost_usd,
+        meta=meta,
     )
+
+
+def _search_meta(search_response) -> dict[str, object]:
+    meta = getattr(search_response, "meta", None)
+    if isinstance(meta, dict):
+        return {
+            "filtered_count": int(meta.get("filtered_count") or 0),
+            "filter_reason": meta.get("filter_reason"),
+        }
+    return {"filtered_count": 0, "filter_reason": None}
 
 
 def _estimate_tokens(text: str) -> int:

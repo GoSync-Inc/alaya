@@ -62,7 +62,17 @@ async def list_relations(
 
     repo = RelationRepository(session, api_key.workspace_id)
     items, next_cursor, has_more = await repo.list(cursor=cursor, limit=limit, entity_id=entity_id)
-    return paginated_response(items, RelationRead, next_cursor, has_more)
+    filtered_count = getattr(repo, "last_filtered_count", 0)
+    if not isinstance(filtered_count, int):
+        filtered_count = 0
+    return paginated_response(
+        items,
+        RelationRead,
+        next_cursor,
+        has_more,
+        filtered_count=filtered_count,
+        filter_reason="acl_filtered",
+    )
 
 
 @router.get("/relations/{relation_id}")

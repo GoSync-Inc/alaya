@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import uuid
 from collections.abc import AsyncGenerator
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends, Header, HTTPException, Request
 from sqlalchemy import text
@@ -13,6 +13,23 @@ from structlog.contextvars import bind_contextvars
 
 from alayaos_core.models.api_key import APIKey
 from alayaos_core.repositories.api_key import APIKeyRepository
+
+Scope = Literal["read", "write", "admin"]
+
+_SCOPE_TO_LEVELS: dict[Scope, set[str]] = {
+    "read": {"public", "channel"},
+    "write": {"public", "channel", "private"},
+    "admin": {"public", "channel", "private", "restricted"},
+}
+
+
+def _compute_allowed_levels(scopes: list[str]) -> set[str]:
+    """Return allowed access levels for scopes, failing closed to public."""
+    levels: set[str] = set()
+    for scope in scopes:
+        if scope in _SCOPE_TO_LEVELS:
+            levels.update(_SCOPE_TO_LEVELS[scope])
+    return levels or {"public"}
 
 
 def _error_response(code: str, message: str, hint: str | None = None) -> dict:
@@ -87,12 +104,19 @@ async def get_workspace_session(
     session: Annotated[AsyncSession, Depends(get_session)],
     api_key: Annotated[APIKey, Depends(get_api_key)],
 ) -> AsyncGenerator[AsyncSession]:
-    """Set RLS workspace_id and yield the session."""
+    """Set request-scoped database context and yield the session."""
     # Re-parse to guarantee valid UUID (defense-in-depth against injection).
-    # Bound params not used: asyncpg extended protocol rejects params in SET.
     validated_wid = str(uuid.UUID(str(api_key.workspace_id)))
-    await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
-    bind_contextvars(workspace_id=validated_wid)
+    allowed_str = ",".join(sorted(_compute_allowed_levels(api_key.scopes)))
+    await session.execute(
+        text(
+            "SELECT set_config('app.workspace_id', :wid, true), "
+            "set_config('app.allowed_access_levels', :allowed, true), "
+            "set_config('hnsw.iterative_scan', 'strict_order', true)"
+        ),
+        {"wid": validated_wid, "allowed": allowed_str},
+    )
+    bind_contextvars(workspace_id=validated_wid, allowed_access_levels=allowed_str)
     yield session
 
 
@@ -118,7 +142,14 @@ def data_response(data) -> dict:
     return {"data": data}
 
 
-def paginated_response(items, schema_class, next_cursor: str | None, has_more: bool) -> dict:
+def paginated_response(
+    items,
+    schema_class,
+    next_cursor: str | None,
+    has_more: bool,
+    filtered_count: int = 0,
+    filter_reason: str | None = None,
+) -> dict:
     """List response with cursor pagination envelope."""
     return {
         "data": [schema_class.model_validate(item) for item in items],
@@ -126,5 +157,9 @@ def paginated_response(items, schema_class, next_cursor: str | None, has_more: b
             "next_cursor": next_cursor,
             "has_more": has_more,
             "count": len(items),
+        },
+        "meta": {
+            "filtered_count": filtered_count,
+            "filter_reason": filter_reason if filtered_count > 0 else None,
         },
     }

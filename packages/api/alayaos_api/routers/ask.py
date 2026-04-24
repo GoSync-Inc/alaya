@@ -34,7 +34,13 @@ def _rate_limit_error(code: str, message: str, hint: str | None = None) -> dict:
     }
 
 
-@router.post("/ask", response_model=AskResult)
+def _response_payload(result: AskResult | dict) -> dict:
+    payload = dict(result) if isinstance(result, dict) else result.model_dump(mode="json")
+    payload.setdefault("meta", {"filtered_count": 0, "filter_reason": None})
+    return payload
+
+
+@router.post("/ask")
 async def ask_endpoint(
     body: AskRequest,
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
@@ -80,7 +86,7 @@ async def ask_endpoint(
 
             embedding_service = FastEmbedService(settings.EMBEDDING_MODEL, settings.EMBEDDING_DIMENSIONS)
 
-        return await ask(
+        result = await ask(
             session=session,
             question=body.question,
             workspace_id=api_key.workspace_id,
@@ -88,6 +94,7 @@ async def ask_endpoint(
             embedding_service=embedding_service,
             max_results=body.max_results,
         )
+        return _response_payload(result)
     finally:
         if redis_client:
             await redis_client.aclose()

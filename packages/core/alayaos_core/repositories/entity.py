@@ -3,12 +3,22 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import and_, column, func, select, table, text
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 
+from alayaos_core.models.claim import L2Claim
 from alayaos_core.models.entity import EntityExternalId, L1Entity
 from alayaos_core.models.entity_type import EntityTypeDefinition
 from alayaos_core.repositories.base import BaseRepository
+
+_CLAIM_EFFECTIVE_ACCESS = table(
+    "claim_effective_access",
+    column("workspace_id"),
+    column("claim_id"),
+    column("max_tier_rank"),
+)
+_CALLER_MAX_TIER_RANK = text("(SELECT MAX(tier_rank(x)) FROM unnest(alaya_current_allowed_access()) x)")
 
 
 class EntityRepository(BaseRepository):
@@ -33,10 +43,41 @@ class EntityRepository(BaseRepository):
         )
         self.session.add(entity)
         await self.session.flush()
-        # Re-fetch with external_ids loaded to avoid MissingGreenlet in async
-        return await self.get_by_id(entity.id)  # type: ignore[return-value]
+        set_committed_value(entity, "external_ids", [])
+        return entity
 
     async def get_by_id(self, entity_id: uuid.UUID) -> L1Entity | None:
+        visible_claim_exists = (
+            select(1)
+            .select_from(L2Claim)
+            .join(
+                _CLAIM_EFFECTIVE_ACCESS,
+                and_(
+                    _CLAIM_EFFECTIVE_ACCESS.c.claim_id == L2Claim.id,
+                    _CLAIM_EFFECTIVE_ACCESS.c.workspace_id == L2Claim.workspace_id,
+                ),
+            )
+            .where(L2Claim.entity_id == L1Entity.id)
+            .where(L2Claim.workspace_id == L1Entity.workspace_id)
+            .where(L2Claim.status == "active")
+            .where(_CLAIM_EFFECTIVE_ACCESS.c.max_tier_rank <= _CALLER_MAX_TIER_RANK)
+            .exists()
+        )
+        stmt = (
+            select(L1Entity)
+            .where(L1Entity.id == entity_id)
+            .where(self._ws_filter(L1Entity))
+            .where(visible_claim_exists)
+            .options(selectinload(L1Entity.external_ids))
+        )
+        result = await self.session.execute(stmt)
+        entity = result.scalar_one_or_none()
+        if entity is not None and not await self._caller_is_admin():
+            self._mask_acl_safe_fields([entity])
+        return entity
+
+    async def get_by_id_unfiltered(self, entity_id: uuid.UUID) -> L1Entity | None:
+        """Internal lookup that bypasses claim visibility ACL while preserving workspace scope."""
         stmt = (
             select(L1Entity)
             .where(L1Entity.id == entity_id)
@@ -48,6 +89,21 @@ class EntityRepository(BaseRepository):
 
     async def update(self, entity_id: uuid.UUID, **kwargs) -> L1Entity | None:
         entity = await self.get_by_id(entity_id)
+        updated = await self._update_entity(entity, **kwargs)
+        if updated is None:
+            return None
+        # Re-fetch to get server-updated fields (updated_at) and eager-loaded relationships
+        return await self.get_by_id(entity_id)
+
+    async def update_unfiltered(self, entity_id: uuid.UUID, **kwargs) -> L1Entity | None:
+        entity = await self.get_by_id_unfiltered(entity_id)
+        updated = await self._update_entity(entity, **kwargs)
+        if updated is None:
+            return None
+        # Re-fetch to get server-updated fields (updated_at) and eager-loaded relationships
+        return await self.get_by_id_unfiltered(entity_id)
+
+    async def _update_entity(self, entity: L1Entity | None, **kwargs) -> L1Entity | None:
         if entity is None:
             return None
         allowed = {"name", "description", "properties", "aliases", "is_deleted"}
@@ -55,8 +111,7 @@ class EntityRepository(BaseRepository):
             if key in allowed:
                 setattr(entity, key, value)
         await self.session.flush()
-        # Re-fetch to get server-updated fields (updated_at) and eager-loaded relationships
-        return await self.get_by_id(entity_id)
+        return entity
 
     async def list(
         self,
@@ -64,6 +119,38 @@ class EntityRepository(BaseRepository):
         limit: int = 50,
         type_slug: str | None = None,
     ) -> tuple[list[L1Entity], str | None, bool]:
+        visible_claim_exists = self._visible_active_claim_exists()
+        base_stmt = (
+            select(L1Entity)
+            .where(L1Entity.is_deleted == False)  # noqa: E712
+            .where(self._ws_filter(L1Entity))
+        )
+        if type_slug is not None:
+            base_stmt = base_stmt.join(EntityTypeDefinition, L1Entity.entity_type_id == EntityTypeDefinition.id).where(
+                EntityTypeDefinition.slug == type_slug
+            )
+        visible_stmt = base_stmt.where(visible_claim_exists)
+        self.last_filtered_count = await self._filtered_count(base_stmt, visible_stmt)
+        stmt = visible_stmt.options(selectinload(L1Entity.external_ids))
+        stmt = self.apply_cursor_pagination(stmt, cursor, limit, L1Entity.created_at, L1Entity.id)
+        result = await self.session.execute(stmt)
+        items = list(result.scalars().all())
+        actual_limit = min(max(limit, 1), 200)
+        has_more = len(items) > actual_limit
+        if has_more:
+            items = items[:actual_limit]
+        next_cursor = self.encode_cursor(items[-1].created_at, items[-1].id) if has_more else None
+        if not await self._caller_is_admin():
+            self._mask_acl_safe_fields(items)
+        return items, next_cursor, has_more
+
+    async def list_unfiltered(
+        self,
+        cursor: str | None = None,
+        limit: int = 50,
+        type_slug: str | None = None,
+    ) -> tuple[list[L1Entity], str | None, bool]:
+        """Internal list that bypasses claim visibility ACL while preserving workspace scope."""
         stmt = (
             select(L1Entity)
             .where(L1Entity.is_deleted == False)  # noqa: E712
@@ -83,6 +170,39 @@ class EntityRepository(BaseRepository):
             items = items[:actual_limit]
         next_cursor = self.encode_cursor(items[-1].created_at, items[-1].id) if has_more else None
         return items, next_cursor, has_more
+
+    async def _caller_is_admin(self) -> bool:
+        result = await self.session.execute(text("SELECT 'restricted' = ANY(alaya_current_allowed_access())"))
+        return bool(result.scalar())
+
+    @staticmethod
+    def _mask_acl_safe_fields(entities: list[L1Entity]) -> None:
+        for entity in entities:
+            set_committed_value(entity, "description", None)
+            set_committed_value(entity, "properties", {})
+
+    def _visible_active_claim_exists(self):
+        return (
+            select(1)
+            .select_from(L2Claim)
+            .join(
+                _CLAIM_EFFECTIVE_ACCESS,
+                and_(
+                    _CLAIM_EFFECTIVE_ACCESS.c.claim_id == L2Claim.id,
+                    _CLAIM_EFFECTIVE_ACCESS.c.workspace_id == L2Claim.workspace_id,
+                ),
+            )
+            .where(L2Claim.entity_id == L1Entity.id)
+            .where(L2Claim.workspace_id == L1Entity.workspace_id)
+            .where(L2Claim.status == "active")
+            .where(_CLAIM_EFFECTIVE_ACCESS.c.max_tier_rank <= _CALLER_MAX_TIER_RANK)
+            .exists()
+        )
+
+    async def _filtered_count(self, base_stmt, visible_stmt) -> int:
+        total = await self.session.scalar(select(func.count()).select_from(base_stmt.subquery()))
+        visible = await self.session.scalar(select(func.count()).select_from(visible_stmt.subquery()))
+        return max(int(total or 0) - int(visible or 0), 0)
 
     async def create_external_id(
         self,

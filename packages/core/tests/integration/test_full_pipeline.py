@@ -102,6 +102,7 @@ async def test_full_pipeline_cortex_to_writer():
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
 
     mock_run_repo = AsyncMock()
     mock_run_repo.get_by_id = AsyncMock(return_value=run)
@@ -157,6 +158,7 @@ async def test_full_pipeline_job_cortex_creates_chunks():
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
 
     mock_run_repo = AsyncMock()
     mock_run_repo.get_by_id = AsyncMock(return_value=run)
@@ -208,6 +210,7 @@ async def test_full_pipeline_no_crystal_chunks_completes_run():
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
 
     mock_run_repo = AsyncMock()
     mock_run_repo.get_by_id = AsyncMock(return_value=run)
@@ -268,7 +271,8 @@ async def test_full_pipeline_job_write_triggered_after_crystallizer():
     chunk = _make_chunk(chunk_id=chunk_id, event_id=event_id, is_crystal=True, processing_stage="classified")
 
     mock_chunk_repo = AsyncMock()
-    mock_chunk_repo.get_by_id = AsyncMock(return_value=chunk)
+    mock_chunk_repo.get_by_id = AsyncMock(return_value=None)
+    mock_chunk_repo.get_by_id_unfiltered = AsyncMock(return_value=chunk)
     mock_chunk_repo.update_processing_stage = AsyncMock()
     # After update, all crystal chunks are 'extracted'
     extracted_chunk = _make_chunk(chunk_id=chunk_id, event_id=event_id, is_crystal=True, processing_stage="extracted")

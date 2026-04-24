@@ -100,6 +100,23 @@ class TestClaimsRouter:
         assert "data" in body
         assert "pagination" in body
 
+    def test_list_claims_reports_acl_filtered_count(self) -> None:
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        claim = make_claim()
+
+        with patch("alayaos_api.routers.claims.ClaimRepository") as mock_cls:
+            repo = AsyncMock()
+            repo.list = AsyncMock(return_value=([claim], None, False))
+            repo.last_filtered_count = 1
+            mock_cls.return_value = repo
+
+            client = TestClient(app)
+            response = client.get("/api/v1/claims", headers={"X-Api-Key": RAW_KEY})
+
+        assert response.status_code == 200
+        assert response.json()["meta"] == {"filtered_count": 1, "filter_reason": "acl_filtered"}
+
     def test_list_claims_with_filters(self) -> None:
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)

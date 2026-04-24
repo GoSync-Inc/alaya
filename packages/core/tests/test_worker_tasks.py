@@ -105,7 +105,8 @@ async def test_job_crystallize_marks_run_failed_on_llm_error():
     mock_mark_failed = AsyncMock()
 
     mock_chunk_repo = AsyncMock()
-    mock_chunk_repo.get_by_id = AsyncMock(return_value=mock_chunk)
+    mock_chunk_repo.get_by_id = AsyncMock(return_value=None)
+    mock_chunk_repo.get_by_id_unfiltered = AsyncMock(return_value=mock_chunk)
     mock_chunk_repo.update_processing_stage = AsyncMock()
 
     mock_extractor = AsyncMock()
@@ -146,6 +147,8 @@ async def test_job_crystallize_marks_run_failed_on_llm_error():
     error_detail = call_kwargs.kwargs["error_detail"]
     assert error_detail["stage"] == "crystallize"
     assert error_detail["type"] == "APIStatusError"
+    mock_chunk_repo.get_by_id.assert_not_awaited()
+    mock_chunk_repo.get_by_id_unfiltered.assert_awaited_once_with(chunk_id)
 
 
 @pytest.mark.asyncio
@@ -194,6 +197,55 @@ async def test_job_cortex_marks_run_failed_on_exception():
     error_detail = call_kwargs.kwargs["error_detail"]
     assert error_detail["stage"] == "cortex"
     assert error_detail["type"] == "RuntimeError"
+
+
+@pytest.mark.asyncio
+async def test_job_cortex_uses_unfiltered_event_lookup_for_internal_processing():
+    """job_cortex must not depend on retrieval ACL-filtered event lookup."""
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+
+    main_session = _make_mock_session()
+    mock_factory = MagicMock(return_value=main_session)
+
+    mock_event = MagicMock()
+    mock_event.id = event_id
+
+    mock_run = MagicMock()
+    mock_run.status = "cortex_complete"
+    mock_run.id = run_id
+
+    mock_event_repo = AsyncMock()
+    mock_event_repo.get_by_id = AsyncMock(return_value=None)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=mock_event)
+
+    mock_run_repo = AsyncMock()
+    mock_run_repo.get_by_id = AsyncMock(return_value=mock_run)
+
+    mock_settings = MagicMock()
+    mock_settings.ANTHROPIC_API_KEY.get_secret_value.return_value = ""
+    mock_settings.CORTEX_MAX_CHUNK_TOKENS = 256
+    mock_settings.CORTEX_CRYSTAL_THRESHOLD = 0.75
+    mock_settings.CORTEX_TRUNCATION_TOKENS = 256
+
+    with (
+        patch("alayaos_core.worker.tasks.Settings", return_value=mock_settings),
+        patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
+        patch("alayaos_core.worker.tasks._set_workspace_context", new=AsyncMock()),
+        patch("alayaos_core.worker.tasks._mark_extraction_run_failed", AsyncMock()),
+        patch("alayaos_core.repositories.event.EventRepository", return_value=mock_event_repo),
+        patch("alayaos_core.worker.tasks.ExtractionRunRepository", return_value=mock_run_repo),
+        patch("alayaos_core.extraction.cortex.chunker.CortexChunker", return_value=MagicMock()),
+        patch("alayaos_core.extraction.cortex.classifier.CortexClassifier", return_value=MagicMock()),
+    ):
+        from alayaos_core.worker.tasks import job_cortex
+
+        result = await job_cortex.original_func(str(event_id), str(run_id), str(ws_id))
+
+    assert result == {"status": "skipped", "reason": "already processed"}
+    mock_event_repo.get_by_id.assert_not_awaited()
+    mock_event_repo.get_by_id_unfiltered.assert_awaited_once_with(event_id)
 
 
 @pytest.mark.asyncio

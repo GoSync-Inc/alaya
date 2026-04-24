@@ -76,7 +76,17 @@ async def list_claims(
         predicate=predicate,
         status=status,
     )
-    return paginated_response(items, ClaimRead, next_cursor, has_more)
+    filtered_count = getattr(repo, "last_filtered_count", 0)
+    if not isinstance(filtered_count, int):
+        filtered_count = 0
+    return paginated_response(
+        items,
+        ClaimRead,
+        next_cursor,
+        has_more,
+        filtered_count=filtered_count,
+        filter_reason="acl_filtered",
+    )
 
 
 @router.get("/claims/{claim_id}")

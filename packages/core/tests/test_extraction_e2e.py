@@ -81,6 +81,7 @@ async def test_run_extraction_stores_raw_extraction() -> None:
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
 
     mock_run_repo = AsyncMock()
     mock_run_repo.get_by_id = AsyncMock(return_value=run)
@@ -169,6 +170,7 @@ async def test_run_write_creates_entities_claims_relations() -> None:
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
 
     # Mock repos used inside atomic_write
     alice_id = uuid.uuid4()
@@ -276,6 +278,7 @@ async def test_run_write_marks_event_as_extracted() -> None:
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
 
     mock_entity_repo = AsyncMock()
     mock_entity_repo.list = AsyncMock(return_value=([], None, False))
@@ -341,6 +344,7 @@ async def test_run_write_updates_run_counters() -> None:
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
 
     entity_id = uuid.uuid4()
     entity_type_id = uuid.uuid4()

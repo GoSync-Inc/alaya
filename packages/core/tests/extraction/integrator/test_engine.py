@@ -51,6 +51,67 @@ def _make_session_mock(rows: list | None = None) -> AsyncMock:
 
 
 @pytest.mark.asyncio
+async def test_engine_entity_context_uses_unfiltered_claim_list_for_internal_context():
+    """Internal integrator context includes claims hidden from public ACL-filtered list."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+
+    workspace_id = uuid.uuid4()
+    entity_id = uuid.uuid4()
+
+    entity = MagicMock()
+    entity.id = entity_id
+    entity.name = "Alice"
+    entity.is_deleted = False
+    entity.aliases = []
+    entity.properties = {}
+    entity.entity_type = MagicMock()
+    entity.entity_type.slug = "person"
+
+    private_claim = MagicMock()
+    private_claim.predicate = "status"
+    private_claim.value = {"v": "private"}
+    private_claim.status = "active"
+
+    restricted_claim = MagicMock()
+    restricted_claim.predicate = "role"
+    restricted_claim.value = {"v": "restricted"}
+    restricted_claim.status = "active"
+
+    class EntityRepo:
+        async def get_by_id_unfiltered(self, requested_entity_id):
+            assert requested_entity_id == entity_id
+            return entity
+
+    class ClaimRepo:
+        async def list(self, **_kwargs):
+            raise AssertionError("filtered claim list used for internal integrator context")
+
+        async def list_unfiltered(self, **kwargs):
+            assert kwargs == {"entity_id": entity_id, "limit": 50}
+            return [private_claim, restricted_claim], None, False
+
+    relation_repo = AsyncMock()
+    relation_repo.list = AsyncMock(return_value=([], None, False))
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=EntityRepo(),
+        claim_repo=ClaimRepo(),
+        relation_repo=relation_repo,
+        entity_cache=AsyncMock(),
+        redis=AsyncMock(),
+        settings=_make_settings(),
+    )
+
+    [context] = await engine._load_entities_with_context(workspace_id, {entity_id})
+
+    assert context.claims == [
+        {"predicate": "status", "value": {"v": "private"}, "status": "active"},
+        {"predicate": "role", "value": {"v": "restricted"}, "status": "active"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_engine_returns_skipped_when_locked():
     """Engine returns status=skipped when lock cannot be acquired."""
     from alayaos_core.extraction.integrator.engine import IntegratorEngine
@@ -1016,3 +1077,120 @@ async def test_apply_action_normalize_date_logs_failure_reason():
         and log_entry["raw"] == "3000-01-01"
         for log_entry in logs
     )
+
+
+@pytest.mark.asyncio
+async def test_apply_action_add_claim_populates_claim_sources():
+    """Synthesized enrichment claims preserve every contributing event source."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import EnrichmentAction
+    from alayaos_core.models.claim import ClaimSource
+
+    ws_id = uuid.uuid4()
+    entity_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
+    first_event_id = uuid.uuid4()
+    second_event_id = uuid.uuid4()
+
+    created_claim = MagicMock()
+    created_claim.id = claim_id
+
+    claim_repo = AsyncMock()
+    claim_repo.create = AsyncMock(return_value=created_claim)
+
+    session = AsyncMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=AsyncMock(),
+        claim_repo=claim_repo,
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    action = EnrichmentAction(
+        action="add_claim",
+        entity_id=entity_id,
+        details={
+            "predicate": "status",
+            "value": {"text": "active"},
+            "value_type": "text",
+            "confidence": 0.8,
+            "source_event_ids": [str(first_event_id), str(second_event_id), str(first_event_id)],
+        },
+    )
+
+    counters = await engine._apply_action(action, ws_id, session)
+
+    assert counters.get("claims_created") == 1
+    claim_repo.create.assert_awaited_once_with(
+        workspace_id=ws_id,
+        entity_id=entity_id,
+        predicate="status",
+        value={"text": "active"},
+        value_type="text",
+        confidence=0.8,
+        source_event_id=first_event_id,
+    )
+    added_sources = [call.args[0] for call in session.add.call_args_list]
+    assert all(isinstance(source, ClaimSource) for source in added_sources)
+    assert {(source.claim_id, source.event_id) for source in added_sources} == {
+        (claim_id, first_event_id),
+        (claim_id, second_event_id),
+    }
+
+
+@pytest.mark.asyncio
+async def test_apply_action_add_claim_without_sources_leaves_claim_sources_empty():
+    """Source-less synthesized claims rely on claim_effective_access fallback."""
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import EnrichmentAction
+
+    ws_id = uuid.uuid4()
+    entity_id = uuid.uuid4()
+    created_claim = MagicMock()
+    created_claim.id = uuid.uuid4()
+
+    claim_repo = AsyncMock()
+    claim_repo.create = AsyncMock(return_value=created_claim)
+
+    session = AsyncMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=AsyncMock(),
+        claim_repo=claim_repo,
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    action = EnrichmentAction(
+        action="add_claim",
+        entity_id=entity_id,
+        details={
+            "predicate": "status",
+            "value": {"text": "active"},
+        },
+    )
+
+    counters = await engine._apply_action(action, ws_id, session)
+
+    assert counters.get("claims_created") == 1
+    claim_repo.create.assert_awaited_once_with(
+        workspace_id=ws_id,
+        entity_id=entity_id,
+        predicate="status",
+        value={"text": "active"},
+        value_type="text",
+        confidence=1.0,
+        source_event_id=None,
+    )
+    session.add.assert_not_called()

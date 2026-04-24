@@ -104,6 +104,21 @@ class IntegratorEngine:
         # Embedding service injected in tests; created lazily in production
         self._embedding_service = None
 
+    async def _get_entity_internal(self, entity_id: uuid.UUID):
+        if hasattr(type(self.entity_repo), "get_by_id_unfiltered"):
+            return await self.entity_repo.get_by_id_unfiltered(entity_id)
+        return await self.entity_repo.get_by_id(entity_id)
+
+    async def _update_entity_internal(self, entity_id: uuid.UUID, **kwargs):
+        if hasattr(type(self.entity_repo), "update_unfiltered"):
+            return await self.entity_repo.update_unfiltered(entity_id, **kwargs)
+        return await self.entity_repo.update(entity_id, **kwargs)
+
+    async def _list_claims_internal(self, **kwargs):
+        if hasattr(type(self.claim_repo), "list_unfiltered"):
+            return await self.claim_repo.list_unfiltered(**kwargs)
+        return await self.claim_repo.list(**kwargs)
+
     async def run(
         self,
         workspace_id: uuid.UUID,
@@ -390,15 +405,15 @@ class IntegratorEngine:
         if action.action == "remove_noise":
             # Soft-delete the entity
             if entity_id is not None:
-                entity = await self.entity_repo.get_by_id(entity_id)
+                entity = await self._get_entity_internal(entity_id)
                 if entity is not None:
                     inverse = {"name": entity.name, "is_deleted": False}
-                await self.entity_repo.update(entity_id, is_deleted=True)
+                await self._update_entity_internal(entity_id, is_deleted=True)
 
         elif action.action == "reclassify":
             # Update entity_type to to_type
             if entity_id is not None:
-                entity = await self.entity_repo.get_by_id(entity_id)
+                entity = await self._get_entity_internal(entity_id)
                 if entity is not None:
                     from alayaos_core.repositories.entity_type import EntityTypeRepository
 
@@ -418,7 +433,7 @@ class IntegratorEngine:
         elif action.action == "rewrite":
             # Update name and description
             if entity_id is not None:
-                entity = await self.entity_repo.get_by_id(entity_id)
+                entity = await self._get_entity_internal(entity_id)
                 if entity is not None:
                     inverse = {
                         "name": entity.name,
@@ -432,7 +447,7 @@ class IntegratorEngine:
                     if new_desc:
                         update_kwargs["description"] = new_desc
                     if update_kwargs:
-                        await self.entity_repo.update(entity_id, **update_kwargs)
+                        await self._update_entity_internal(entity_id, **update_kwargs)
 
         elif action.action == "create_from_cluster":
             # Create a parent entity and link children via part_of relations
@@ -567,11 +582,11 @@ class IntegratorEngine:
         """
         entities_with_context: list[EntityWithContext] = []
         for entity_id in entity_ids:
-            entity = await self.entity_repo.get_by_id(entity_id)
+            entity = await self._get_entity_internal(entity_id)
             if entity is None or getattr(entity, "is_deleted", False):
                 continue
 
-            claims, _, _ = await self.claim_repo.list(entity_id=entity_id, limit=50)
+            claims, _, _ = await self._list_claims_internal(entity_id=entity_id, limit=50)
             claims_dicts = [{"predicate": c.predicate, "value": c.value, "status": c.status} for c in claims]
 
             relations, _, _ = await self.relation_repo.list(entity_id=entity_id, limit=50)
@@ -837,8 +852,8 @@ class IntegratorEngine:
         """
         merged = 0
         for pair in pairs:
-            entity_b = await self.entity_repo.get_by_id(pair.entity_b_id)
-            entity_a = await self.entity_repo.get_by_id(pair.entity_a_id)
+            entity_b = await self._get_entity_internal(pair.entity_b_id)
+            entity_a = await self._get_entity_internal(pair.entity_a_id)
             if not entity_a or not entity_b:
                 continue
 
@@ -917,7 +932,7 @@ class IntegratorEngine:
 
             # Step 1: Merge aliases — union of both alias lists + entity_b's name as an alias
             new_aliases = list(set(list(entity_a.aliases or []) + list(entity_b.aliases or []) + [entity_b.name]))
-            await self.entity_repo.update(entity_a.id, aliases=new_aliases)
+            await self._update_entity_internal(entity_a.id, aliases=new_aliases)
             # Step 2: Reassign claims from entity_b to entity_a
             await session.execute(
                 text("UPDATE l2_claims SET entity_id = :a_id WHERE entity_id = :b_id AND workspace_id = :ws_id"),
@@ -988,7 +1003,7 @@ class IntegratorEngine:
             # Step 7: Record provenance and soft-delete entity_b
             props = dict(entity_b.properties or {})
             props["merged_into"] = str(entity_a.id)
-            await self.entity_repo.update(entity_b.id, is_deleted=True, properties=props)
+            await self._update_entity_internal(entity_b.id, is_deleted=True, properties=props)
             # Step 8: Write audit record (best-effort — failure doesn't abort the merge)
             if action_repo is not None and run_id is not None:
                 try:
@@ -1060,7 +1075,7 @@ class IntegratorEngine:
                         return {}
 
             elif action.action == "remove_noise" and action.entity_id:
-                await self.entity_repo.update(action.entity_id, is_deleted=True)
+                await self._update_entity_internal(action.entity_id, is_deleted=True)
                 counters["noise_removed"] = 1
 
             elif action.action == "update_type" and action.entity_id:
@@ -1072,26 +1087,62 @@ class IntegratorEngine:
                     et_repo = EntityTypeRepository(session, workspace_id)
                     entity_type = await et_repo.get_by_slug(workspace_id, new_type_slug)
                     if entity_type:
-                        entity = await self.entity_repo.get_by_id(action.entity_id)
+                        entity = await self._get_entity_internal(action.entity_id)
                         if entity:
                             entity.entity_type_id = entity_type.id
                             await session.flush()
                     counters["claims_updated"] = 1
 
+            elif action.action == "add_claim" and action.entity_id:
+                predicate = action.details.get("predicate")
+                value = action.details.get("value")
+                if predicate and isinstance(value, dict):
+                    source_event_ids: list[uuid.UUID] = []
+                    seen_event_ids: set[uuid.UUID] = set()
+                    for raw_event_id in action.details.get("source_event_ids", []):
+                        with contextlib.suppress(ValueError, TypeError, AttributeError):
+                            event_id = uuid.UUID(str(raw_event_id))
+                            if event_id not in seen_event_ids:
+                                source_event_ids.append(event_id)
+                                seen_event_ids.add(event_id)
+
+                    claim = await self.claim_repo.create(
+                        workspace_id=workspace_id,
+                        entity_id=action.entity_id,
+                        predicate=predicate,
+                        value=value,
+                        value_type=action.details.get("value_type", "text"),
+                        confidence=action.details.get("confidence", 1.0),
+                        source_event_id=source_event_ids[0] if source_event_ids else None,
+                    )
+                    if source_event_ids:
+                        from alayaos_core.models.claim import ClaimSource
+
+                        for event_id in source_event_ids:
+                            session.add(
+                                ClaimSource(
+                                    workspace_id=workspace_id,
+                                    claim_id=claim.id,
+                                    event_id=event_id,
+                                )
+                            )
+                        await session.flush()
+                    counters["claims_created"] = 1
+
             elif action.action in ("update_status", "add_assignee") and action.entity_id:
                 # Merge action details into existing entity properties (not wholesale replace)
-                entity = await self.entity_repo.get_by_id(action.entity_id)
+                entity = await self._get_entity_internal(action.entity_id)
                 if entity:
                     merged_props = dict(entity.properties or {})
                     merged_props.update(action.details)
-                    await self.entity_repo.update(action.entity_id, properties=merged_props)
+                    await self._update_entity_internal(action.entity_id, properties=merged_props)
                 counters["claims_updated"] = 1
 
             elif action.action == "normalize_date" and action.entity_id:
                 from alayaos_core.extraction.date_normalizer import DateNormalizer
 
                 normalizer = DateNormalizer()
-                entity = await self.entity_repo.get_by_id(action.entity_id)
+                entity = await self._get_entity_internal(action.entity_id)
                 if entity:
                     merged_props = dict(entity.properties or {})
                     raw_date = action.details.get("date_value", "")
@@ -1102,7 +1153,7 @@ class IntegratorEngine:
                         log.info("date_normalization_failed", reason=result.reason, raw=result.raw)
                     # Merge remaining action details regardless of normalization outcome
                     merged_props.update(action.details)
-                    await self.entity_repo.update(action.entity_id, properties=merged_props)
+                    await self._update_entity_internal(action.entity_id, properties=merged_props)
                 counters["claims_updated"] = 1
 
         except Exception:

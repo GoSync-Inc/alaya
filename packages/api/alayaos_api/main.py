@@ -4,7 +4,8 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from alayaos_core.config import Settings, get_non_default_feature_flags, get_settings
 from alayaos_core.logging import setup_logging
@@ -13,6 +14,36 @@ log = structlog.get_logger()
 
 
 _DEFAULT_SECRET_KEY = "change-me-in-production"
+_MIN_PGVECTOR_VERSION = (0, 8, 0)
+
+
+def _parse_pgvector_version(version: str) -> tuple[int, int, int]:
+    parts: list[int] = []
+    for raw_part in version.split("."):
+        digits = ""
+        for char in raw_part:
+            if not char.isdigit():
+                break
+            digits += char
+        parts.append(int(digits or "0"))
+    normalized = [*parts, 0, 0, 0][:3]
+    return normalized[0], normalized[1], normalized[2]
+
+
+def _assert_pgvector_min_version(extversion: str | None) -> None:
+    if not extversion:
+        raise RuntimeError("pgvector extension is not installed. Install pgvector >= 0.8.0 and run migrations again.")
+    if _parse_pgvector_version(extversion) < _MIN_PGVECTOR_VERSION:
+        raise RuntimeError(
+            f"pgvector >= 0.8.0 is required for Run 6.2 ACL filtering; found {extversion}. "
+            "Upgrade the Postgres pgvector extension before starting the API."
+        )
+
+
+async def _validate_pgvector_extension(engine: AsyncEngine) -> None:
+    async with engine.connect() as conn:
+        result = await conn.execute(text("SELECT extversion FROM pg_extension WHERE extname = 'vector'"))
+        _assert_pgvector_min_version(result.scalar_one_or_none())
 
 
 def _validate_production_secrets(settings: Settings) -> None:
@@ -63,6 +94,11 @@ async def lifespan(app: FastAPI):
         pool_timeout=settings.DB_POOL_TIMEOUT,
         pool_pre_ping=True,
     )
+    try:
+        await _validate_pgvector_extension(engine)
+    except Exception:
+        await engine.dispose()
+        raise
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
     yield
     await engine.dispose()

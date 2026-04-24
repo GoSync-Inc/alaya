@@ -37,6 +37,7 @@ from alayaos_core.extraction.integrator.schemas import (
     IntegratorRunResult,
 )
 from alayaos_core.extraction.writer import acquire_workspace_lock, release_workspace_lock
+from alayaos_core.repositories.errors import HierarchyViolationError
 
 log = structlog.get_logger()
 
@@ -459,7 +460,7 @@ class IntegratorEngine:
                             cid = uuid.UUID(str(cid_raw))
                         except (ValueError, AttributeError):
                             continue
-                        with contextlib.suppress(Exception):
+                        try:
                             rel = await self.relation_repo.create(
                                 workspace_id=workspace_id,
                                 source_entity_id=cid,
@@ -468,6 +469,14 @@ class IntegratorEngine:
                                 confidence=action.confidence,
                             )
                             targets.append(str(rel.id))
+                        except HierarchyViolationError as e:
+                            log.warning(
+                                "panoramic_part_of_rejected",
+                                action="create_from_cluster",
+                                source_id=str(cid),
+                                target_id=str(entity_id),
+                                error=str(e),
+                            )
 
         elif action.action == "link_cross_type":
             # Create a relation between two existing entities
@@ -482,7 +491,7 @@ class IntegratorEngine:
                     source_id = None
                     target_id = None
                 if source_id and target_id:
-                    with contextlib.suppress(Exception):
+                    try:
                         rel = await self.relation_repo.create(
                             workspace_id=workspace_id,
                             source_entity_id=source_id,
@@ -492,6 +501,14 @@ class IntegratorEngine:
                         )
                         targets.append(str(rel.id))
                         params["relation_id"] = str(rel.id)
+                    except HierarchyViolationError as e:
+                        log.warning(
+                            "panoramic_part_of_rejected",
+                            action="link_cross_type",
+                            source_id=str(source_id),
+                            target_id=str(target_id),
+                            error=str(e),
+                        )
 
         # Persist audit record (best-effort — failure doesn't abort the action)
         if action_repo is not None:
@@ -908,14 +925,23 @@ class IntegratorEngine:
                 target_id_str = action.details.get("target_entity_id")
                 relation_type = action.details.get("relation_type", "related_to")
                 if source_id and target_id_str:
-                    await self.relation_repo.create(
-                        workspace_id=workspace_id,
-                        source_entity_id=source_id,
-                        target_entity_id=uuid.UUID(str(target_id_str)),
-                        relation_type=relation_type,
-                        confidence=0.9,
-                    )
-                    counters["relations_created"] = 1
+                    try:
+                        await self.relation_repo.create(
+                            workspace_id=workspace_id,
+                            source_entity_id=source_id,
+                            target_entity_id=uuid.UUID(str(target_id_str)),
+                            relation_type=relation_type,
+                            confidence=0.9,
+                        )
+                        counters["relations_created"] = 1
+                    except HierarchyViolationError as e:
+                        log.warning(
+                            "enrichment_part_of_rejected",
+                            source_id=str(source_id),
+                            target_id=str(target_id_str),
+                            error=str(e),
+                        )
+                        return {}
 
             elif action.action == "remove_noise" and action.entity_id:
                 await self.entity_repo.update(action.entity_id, is_deleted=True)

@@ -775,10 +775,11 @@ class DeduplicatorV2:
                         ),
                     )
                 except Exception:
-                    log.warning(
+                    log.error(
                         "dedup_v2_action_record_failed",
                         winner_id=str(winner_id),
                         loser_id=str(loser_id),
+                        exc_info=True,
                     )
 
             merged_count += 1

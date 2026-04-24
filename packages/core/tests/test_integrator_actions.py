@@ -939,12 +939,26 @@ class TestRollbackMergeV2:
         claim_row = MagicMock()
         claim_row.__getitem__ = lambda self, k: winner_id if k == 0 else None
 
+        winner = L1Entity(
+            id=winner_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Alice Merged",
+            description="",
+            aliases=[],
+            properties={},
+            is_deleted=False,
+        )
+        winner.external_ids = []
+
         session = make_session()
-        # Call sequence: get action, claim SELECT, loser SELECT
+        # Call sequence: get action, claim SELECT, UPDATE claims (reverse),
+        #                winner SELECT (winner_before restore), loser SELECT
         session.execute.side_effect = [
             make_result(action),
             MagicMock(fetchone=MagicMock(return_value=(winner_id,))),  # claim check
             MagicMock(),  # UPDATE claims (reverse)
+            make_result(winner),  # winner lookup for metadata restore
             make_result(loser),  # loser lookup in _restore_loser
         ]
 
@@ -1056,13 +1070,27 @@ class TestRollbackMergeV2:
         )
         loser.external_ids = []
 
+        winner = L1Entity(
+            id=winner_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Alice Merged",
+            description="",
+            aliases=[],
+            properties={},
+            is_deleted=False,
+        )
+        winner.external_ids = []
+
         session = make_session()
-        # Sequence: get action, claim SELECT (conflict: other_entity_id), loser restore.
+        # Sequence: get action, claim SELECT (conflict: other_entity_id),
+        # winner SELECT (winner_before restore), loser restore.
         # Note: since the conflict claim does NOT go into reverse_plan (it's a genuine conflict,
         # not held by winner_id), _reverse_merge_fks has nothing to do (empty plan → no execute).
         session.execute.side_effect = [
             make_result(action),
             MagicMock(fetchone=MagicMock(return_value=(other_entity_id,))),  # conflict claim
+            make_result(winner),  # winner lookup for metadata restore
             make_result(loser),  # loser lookup in _restore_loser
         ]
 
@@ -1074,3 +1102,267 @@ class TestRollbackMergeV2:
         assert result.conflicts == []
         assert loser.is_deleted is False
         assert action.status == "rolled_back"
+
+    @pytest.mark.asyncio
+    async def test_rollback_merge_v2_restores_winner_metadata(self) -> None:
+        """v2 rollback: winner name/description/aliases restored from inverse winner_before."""
+        import structlog.testing
+
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        winner_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = winner_id
+        action.status = "applied"
+        action.snapshot_schema_version = 2
+        action.inverse = {
+            "action": "unmerge",
+            "loser_id": str(loser_id),
+            "moved_claim_ids": [],
+            "moved_relation_source_ids": [],
+            "moved_relation_target_ids": [],
+            "moved_chunk_ids": [],
+            "deleted_self_ref_relation_ids": [],
+            "deduplicated_relation_ids": [],
+            "winner_before": {
+                "name": "Alice Original",
+                "description": "Original description",
+                "aliases": ["Ali", "A. Smith"],
+            },
+        }
+        action.targets = [str(loser_id)]
+
+        winner = L1Entity(
+            id=winner_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Alice Merged",  # post-merge name
+            description="Merged description",
+            aliases=["Ali", "A. Smith", "Bob"],  # extra alias from loser
+            properties={},
+            is_deleted=False,
+        )
+        winner.external_ids = []
+
+        loser = L1Entity(
+            id=loser_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Loser",
+            properties={},
+            is_deleted=True,
+        )
+        loser.external_ids = []
+
+        session = make_session()
+        # Sequence: get action, winner SELECT (winner_before restore), loser SELECT (_restore_loser)
+        session.execute.side_effect = [
+            make_result(action),
+            make_result(winner),  # winner lookup for metadata restore
+            make_result(loser),  # loser lookup in _restore_loser
+        ]
+
+        repo = IntegratorActionRepository(session, ws_id)
+
+        with structlog.testing.capture_logs() as logs:
+            result = await repo.apply_rollback(ws_id, action.id)
+
+        assert result is not None
+        assert result.conflicts == []
+        assert action.status == "rolled_back"
+        # Winner metadata must be restored
+        assert winner.name == "Alice Original"
+        assert winner.description == "Original description"
+        assert winner.aliases == ["Ali", "A. Smith"]
+        # Loser must be restored
+        assert loser.is_deleted is False
+        # rollback_merge_winner_restored must be logged
+        log_events = [lg["event"] for lg in logs]
+        assert "rollback_merge_winner_restored" in log_events
+
+    @pytest.mark.asyncio
+    async def test_rollback_merge_v2_winner_not_found_logs_warning(self) -> None:
+        """v2 rollback: logs rollback_merge_winner_not_found when winner entity is missing."""
+        import structlog.testing
+
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        winner_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = winner_id
+        action.status = "applied"
+        action.snapshot_schema_version = 2
+        action.inverse = {
+            "action": "unmerge",
+            "loser_id": str(loser_id),
+            "moved_claim_ids": [],
+            "moved_relation_source_ids": [],
+            "moved_relation_target_ids": [],
+            "moved_chunk_ids": [],
+            "deleted_self_ref_relation_ids": [],
+            "deduplicated_relation_ids": [],
+            "winner_before": {"name": "Alice", "description": None, "aliases": []},
+        }
+        action.targets = [str(loser_id)]
+
+        loser = L1Entity(
+            id=loser_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Loser",
+            properties={},
+            is_deleted=True,
+        )
+        loser.external_ids = []
+
+        session = make_session()
+        # Winner not found (None), loser is found
+        session.execute.side_effect = [
+            make_result(action),
+            make_result(None),  # winner not found
+            make_result(loser),  # loser lookup in _restore_loser
+        ]
+
+        repo = IntegratorActionRepository(session, ws_id)
+
+        with structlog.testing.capture_logs() as logs:
+            result = await repo.apply_rollback(ws_id, action.id)
+
+        assert result is not None
+        assert result.conflicts == []
+        assert loser.is_deleted is False
+        log_events = [lg["event"] for lg in logs]
+        assert "rollback_merge_winner_not_found" in log_events
+
+    @pytest.mark.asyncio
+    async def test_rollback_merge_v2_no_winner_id_logs_warning(self) -> None:
+        """v2 rollback: logs rollback_merge_no_winner_id when entity_id is None."""
+        import structlog.testing
+
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = None  # no winner_id
+        action.status = "applied"
+        action.snapshot_schema_version = 2
+        action.inverse = {
+            "action": "unmerge",
+            "loser_id": str(loser_id),
+            "moved_claim_ids": [],
+            "moved_relation_source_ids": [],
+            "moved_relation_target_ids": [],
+            "moved_chunk_ids": [],
+        }
+        action.targets = [str(loser_id)]
+
+        loser = L1Entity(
+            id=loser_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Loser",
+            properties={},
+            is_deleted=True,
+        )
+        loser.external_ids = []
+
+        session = make_session()
+        session.execute.side_effect = [
+            make_result(action),
+            make_result(loser),  # loser lookup in _restore_loser
+        ]
+
+        repo = IntegratorActionRepository(session, ws_id)
+
+        with structlog.testing.capture_logs() as logs:
+            result = await repo.apply_rollback(ws_id, action.id)
+
+        assert result is not None
+        assert result.conflicts == []
+        assert loser.is_deleted is False
+        log_events = [lg["event"] for lg in logs]
+        assert "rollback_merge_no_winner_id" in log_events
+        no_winner_log = next(lg for lg in logs if lg["event"] == "rollback_merge_no_winner_id")
+        assert "entity_id missing" in no_winner_log.get("reason", "")
+
+    @pytest.mark.asyncio
+    async def test_rollback_merge_v2_skipped_deleted_relations_logged_as_warning(self) -> None:
+        """v2 rollback: rollback_merge_skipped_deleted_relations is logged at warning level."""
+        import structlog.testing
+
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        winner_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+        self_ref_rel_id = str(uuid.uuid4())
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = winner_id
+        action.status = "applied"
+        action.snapshot_schema_version = 2
+        action.inverse = {
+            "action": "unmerge",
+            "loser_id": str(loser_id),
+            "moved_claim_ids": [],
+            "moved_relation_source_ids": [],
+            "moved_relation_target_ids": [],
+            "moved_chunk_ids": [],
+            "deleted_self_ref_relation_ids": [self_ref_rel_id],
+            "deduplicated_relation_ids": [],
+            "winner_before": {"name": "Alice", "description": None, "aliases": []},
+        }
+        action.targets = [str(loser_id)]
+
+        winner = L1Entity(
+            id=winner_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Alice Merged",
+            description=None,
+            aliases=[],
+            properties={},
+            is_deleted=False,
+        )
+        winner.external_ids = []
+
+        loser = L1Entity(
+            id=loser_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Loser",
+            properties={},
+            is_deleted=True,
+        )
+        loser.external_ids = []
+
+        session = make_session()
+        session.execute.side_effect = [
+            make_result(action),
+            make_result(winner),  # winner lookup for metadata restore
+            make_result(loser),  # loser lookup in _restore_loser
+        ]
+
+        repo = IntegratorActionRepository(session, ws_id)
+
+        with structlog.testing.capture_logs() as logs:
+            result = await repo.apply_rollback(ws_id, action.id)
+
+        assert result is not None
+        assert result.conflicts == []
+        # Verify the log event was emitted at warning level
+        skipped_logs = [lg for lg in logs if lg["event"] == "rollback_merge_skipped_deleted_relations"]
+        assert len(skipped_logs) == 1
+        assert skipped_logs[0].get("log_level") == "warning"

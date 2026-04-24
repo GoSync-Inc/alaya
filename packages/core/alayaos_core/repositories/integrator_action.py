@@ -469,6 +469,12 @@ async def _rollback_merge(
     # v2 path — determine winner_id from entity_id (the merge target)
     winner_id = action.entity_id
     if winner_id is None:
+        log.warning(
+            "rollback_merge_no_winner_id",
+            action_id=str(action.id),
+            loser_id=str(loser_id),
+            reason="entity_id missing on v2 action — rolling back loser only",
+        )
         # Fall back to legacy partial if no winner_id
         await _restore_loser(repo, action, loser_id)
         return []
@@ -481,6 +487,32 @@ async def _rollback_merge(
     # Execute FK reversal
     await _reverse_merge_fks(repo, action, loser_id, reverse_plan)
 
+    # Restore winner metadata from inverse snapshot (v2 only)
+    winner_before = action.inverse.get("winner_before")
+    if winner_before and winner_id is not None:
+        from alayaos_core.models.entity import L1Entity
+
+        stmt = select(L1Entity).where(L1Entity.id == winner_id).where(L1Entity.workspace_id == action.workspace_id)
+        result = await repo.session.execute(stmt)
+        winner = result.scalar_one_or_none()
+        if winner is not None:
+            if "name" in winner_before:
+                winner.name = winner_before["name"]
+            if "description" in winner_before:
+                winner.description = winner_before["description"]
+            if "aliases" in winner_before:
+                winner.aliases = winner_before["aliases"]
+            log.info(
+                "rollback_merge_winner_restored",
+                loser_id=str(loser_id),
+                winner_id=str(winner_id),
+            )
+        else:
+            log.warning(
+                "rollback_merge_winner_not_found",
+                winner_id=str(winner_id),
+            )
+
     # Restore the loser entity
     await _restore_loser(repo, action, loser_id)
 
@@ -488,7 +520,7 @@ async def _rollback_merge(
     deleted_self_ref = action.inverse.get("deleted_self_ref_relation_ids") or []
     deduplicated = action.inverse.get("deduplicated_relation_ids") or []
     if deleted_self_ref or deduplicated:
-        log.info(
+        log.warning(
             "rollback_merge_skipped_deleted_relations",
             action_id=str(action.id),
             deleted_self_ref_relation_ids=deleted_self_ref,

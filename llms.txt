@@ -83,6 +83,7 @@ POST /ask                 — LLM Q&A with citation validation
 GET  /tree                — knowledge tree root
 GET  /tree/{path}         — tree node (auto-rebuild if dirty)
 POST /tree/export         — export subtree as markdown
+GET  /admin/flags
 POST /admin/backfill-embeddings
 ```
 

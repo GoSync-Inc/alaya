@@ -1,5 +1,6 @@
 """Run 6.2 operator and CI rollout checks."""
 
+import re
 from pathlib import Path
 
 
@@ -45,11 +46,14 @@ def test_run62_docs_state_fall_closed_vector_access_defaults() -> None:
         assert "restricted" in doc
 
 
-def test_run62_changelog_mentions_admin_flags_added_by_s3() -> None:
+def test_run62_docs_mention_admin_flags_added_by_s3() -> None:
     """Run 6.2 docs must not claim /admin/flags is absent."""
     changelog = Path("docs/CHANGELOG-run6.2.md").read_text()
+    claude = Path("CLAUDE.md").read_text()
+    llms = Path("llms.txt").read_text()
 
-    assert "GET /admin/flags" in changelog
+    for doc in (changelog, claude, llms):
+        assert re.search(r"\bGET\s+/admin/flags\b", doc)
     assert "S3" in changelog
     assert "does not add a runtime `/admin/flags` endpoint" not in changelog
 

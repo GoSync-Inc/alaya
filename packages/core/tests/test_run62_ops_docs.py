@@ -32,3 +32,33 @@ def test_run62_changelog_has_required_operator_bullets() -> None:
     ]
     for phrase in required:
         assert phrase in changelog
+
+
+def test_run62_docs_state_fall_closed_vector_access_defaults() -> None:
+    """Operator docs must say vector access falls closed when provenance is missing."""
+    changelog = Path("docs/CHANGELOG-run6.2.md").read_text().lower()
+    llms = Path("llms.txt").read_text().lower()
+
+    for doc in (changelog, llms):
+        assert "fall-closed" in doc
+        assert "vector_chunks.access_level" in doc
+        assert "restricted" in doc
+
+
+def test_run62_changelog_mentions_admin_flags_added_by_s3() -> None:
+    """Run 6.2 docs must not claim /admin/flags is absent."""
+    changelog = Path("docs/CHANGELOG-run6.2.md").read_text()
+
+    assert "GET /admin/flags" in changelog
+    assert "S3" in changelog
+    assert "does not add a runtime `/admin/flags` endpoint" not in changelog
+
+
+def test_deployment_docs_require_migration_008_before_workers() -> None:
+    """Runbook must protect workers that depend on migration 008 helper functions."""
+    deployment = Path("docs/deployment.md").read_text()
+
+    assert "migration 008" in deployment.lower()
+    assert "API workers" in deployment
+    assert "tier_rank" in deployment
+    assert "rank_to_level" in deployment

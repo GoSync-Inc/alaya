@@ -187,6 +187,33 @@ class TestBackfillEmbeddings:
         # Two execute calls: SET LOCAL + SELECT
         assert session_mock.execute.call_count == 2
 
+    def test_backfill_binds_workspace_context_with_set_config(self) -> None:
+        """Workspace RLS context is set with bound parameters, not f-string SQL."""
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+
+        fetch_result = MagicMock()
+        fetch_result.all.return_value = []
+
+        session_mock = AsyncMock()
+        session_mock.execute = AsyncMock(side_effect=[MagicMock(), fetch_result])
+
+        async def override_session():
+            yield session_mock
+
+        from alayaos_api.deps import get_session
+
+        app.dependency_overrides[get_session] = override_session
+
+        client = TestClient(app)
+        response = client.post("/admin/backfill-embeddings", json={"workspace_id": str(WS_ID)})
+
+        assert response.status_code == 200
+        set_context_call = session_mock.execute.call_args_list[0]
+        sql_clause = set_context_call.args[0]
+        assert "set_config('app.workspace_id', :wid, true)" in sql_clause.text
+        assert set_context_call.args[1] == {"wid": str(WS_ID)}
+
     def test_backfill_batch_size_upper_bound(self) -> None:
         """batch_size > 200 is rejected with 422."""
         api_key = make_api_key()

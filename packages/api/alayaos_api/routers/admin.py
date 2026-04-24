@@ -123,7 +123,7 @@ async def backfill_embeddings(
     # Apply RLS workspace filter when workspace_id is provided.
     if request.workspace_id is not None:
         validated_wid = str(uuid.UUID(str(request.workspace_id)))
-        await session.execute(text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
+        await session.execute(text("SELECT set_config('app.workspace_id', :wid, true)"), {"wid": validated_wid})
 
     # Build query for chunks with no embedding
     if request.workspace_id is not None:

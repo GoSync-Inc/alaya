@@ -13,9 +13,12 @@ On deploy:
 1. Pull new image from GHCR
 2. Start standby container with new image
 3. Run Alembic migrations
-4. Health check `/health/ready`
-5. Swap Caddy upstream to standby
-6. Stop old active container
+4. Start API workers and TaskIQ workers after migrations complete
+5. Health check `/health/ready`
+6. Swap Caddy upstream to standby
+7. Stop old active container
+
+Run 6.2 migration 008 must complete before API workers or TaskIQ workers start. Event upsert and ACL-filtered retrieval depend on the `tier_rank`, `rank_to_level`, and `alaya_current_allowed_access` database helpers created by that migration.
 
 ## Prerequisites
 

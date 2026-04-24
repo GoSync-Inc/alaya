@@ -477,6 +477,14 @@ class IntegratorEngine:
                                 target_id=str(entity_id),
                                 error=str(e),
                             )
+                        except Exception:
+                            log.error(
+                                "panoramic_relation_create_failed",
+                                action="create_from_cluster",
+                                source_id=str(cid),
+                                target_id=str(entity_id),
+                                exc_info=True,
+                            )
 
         elif action.action == "link_cross_type":
             # Create a relation between two existing entities
@@ -509,10 +517,18 @@ class IntegratorEngine:
                             target_id=str(target_id),
                             error=str(e),
                         )
+                    except Exception:
+                        log.error(
+                            "panoramic_relation_create_failed",
+                            action="link_cross_type",
+                            source_id=str(source_id),
+                            target_id=str(target_id),
+                            exc_info=True,
+                        )
 
         # Persist audit record (best-effort — failure doesn't abort the action)
         if action_repo is not None:
-            with contextlib.suppress(Exception):
+            try:
                 await action_repo.create(
                     workspace_id=workspace_id,
                     data=IntegratorActionCreate(
@@ -526,6 +542,13 @@ class IntegratorEngine:
                         confidence=action.confidence,
                         rationale=action.rationale,
                     ),
+                )
+            except Exception:
+                log.error(
+                    "panoramic_audit_write_failed",
+                    action=action.action,
+                    entity_id=str(entity_id),
+                    exc_info=True,
                 )
 
     # ---------------------------------------------------------------------------

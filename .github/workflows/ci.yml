@@ -140,18 +140,6 @@ jobs:
   integration-test:
     runs-on: ubuntu-latest
     services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_DB: alaya_test
-          POSTGRES_USER: alaya
-          POSTGRES_PASSWORD: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-retries 5
       redis:
         image: redis:7-alpine
         ports:
@@ -163,12 +151,6 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --locked --all-packages
-      - name: Run Alembic migrations
-        run: uv run alembic upgrade head
-        env:
-          ALAYA_DATABASE_URL: postgresql+asyncpg://alaya:test@localhost:5432/alaya_test
-          ALAYA_REDIS_URL: redis://localhost:6379/0
-          ALAYA_ENV: dev
       # NOTE: alembic check is disabled — composite FKs are defined differently
       # in SQLAlchemy metadata vs. raw SQL migrations, causing a false positive drift.
       # - name: Check for migration drift
@@ -176,7 +158,6 @@ jobs:
       - name: Run integration tests
         run: uv run pytest -m integration --tb=short
         env:
-          ALAYA_DATABASE_URL: postgresql+asyncpg://alaya:test@localhost:5432/alaya_test
           ALAYA_REDIS_URL: redis://localhost:6379/0
           ALAYA_ENV: dev
 

@@ -25,18 +25,23 @@ def _make_counters() -> dict[str, int]:
     }
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
-async def test_run_write_serializes_concurrent_writes_with_workspace_lock(engine) -> None:
+async def test_run_write_serializes_concurrent_writes_with_workspace_lock(engine, engine_superuser) -> None:
     """A second write waits behind the workspace row lock instead of racing atomic_write."""
     workspace_id = uuid.uuid4()
     event_id = uuid.uuid4()
     first_run_id = uuid.uuid4()
     second_run_id = uuid.uuid4()
 
+    # Use superuser engine for seeding — bypasses RLS so inserts don't need SET LOCAL
+    # on workspace-scoped tables (l0_events, extraction_runs). The run_write calls
+    # use the app-role engine (subject to RLS) which is what we actually want to test.
+    su_factory = async_sessionmaker(engine_superuser, expire_on_commit=False)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-    async with session_factory() as seed_session, seed_session.begin():
-        await seed_session.execute(text(f"SET LOCAL app.workspace_id = '{workspace_id}'"))
+    async with su_factory() as seed_session, seed_session.begin():
+        # Insert Workspace first and flush explicitly to satisfy FK constraints
         seed_session.add(
             Workspace(
                 id=workspace_id,
@@ -44,6 +49,7 @@ async def test_run_write_serializes_concurrent_writes_with_workspace_lock(engine
                 slug=f"ws-lock-{workspace_id.hex[:8]}",
             )
         )
+        await seed_session.flush()
         seed_session.add(
             L0Event(
                 id=event_id,
@@ -56,6 +62,7 @@ async def test_run_write_serializes_concurrent_writes_with_workspace_lock(engine
                 occurred_at=datetime(2024, 1, 1, tzinfo=UTC),
             )
         )
+        await seed_session.flush()
         seed_session.add(
             ExtractionRun(
                 id=first_run_id,

@@ -30,7 +30,7 @@ typecheck:
 test:
     uv run pytest -m "not integration" --tb=short
 
-# Run integration tests (requires PostgreSQL)
+# Run integration tests (requires Docker (testcontainers spawns ephemeral postgres))
 test-integration:
     uv run pytest -m integration --tb=short
 

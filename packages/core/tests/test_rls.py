@@ -4,6 +4,7 @@ import uuid
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 # List ALL models that have workspace_id (14 tables from the RLS matrix)
 # We test by inserting a row via session_ws_a and querying via session_ws_b
@@ -368,3 +369,134 @@ async def test_access_group_members_rls_isolation(session_ws_a, session_ws_b):
         {"id": row_id},
     )
     assert result_b.scalar() == 0, "RLS leak: workspace B can see access_group_members row from workspace A"
+
+
+# ---------------------------------------------------------------------------
+# Task 3: RLS negative tests using engine_superuser to seed evidence rows
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_rls_no_context(engine, engine_superuser) -> None:
+    """App-role session with NO workspace context must see 0 rows in RLS-protected tables.
+
+    The superuser inserts a workspace + entity_type_definition row.
+    The app-role session connects without SET LOCAL app.workspace_id.
+    RLS must prevent the app-role from reading ANY row.
+    """
+    ws_id = uuid.uuid4()
+    row_id = uuid.uuid4()
+    slug = f"et-no-ctx-{uuid.uuid4().hex[:8]}"
+
+    # Seed via superuser (bypasses RLS so we can insert without workspace context)
+    su_factory = async_sessionmaker(engine_superuser, expire_on_commit=False)
+    async with su_factory() as su_sess, su_sess.begin():
+        await su_sess.execute(
+            text("INSERT INTO workspaces (id, name, slug) VALUES (:id, :name, :slug)"),
+            {"id": ws_id, "name": "NoCtx Workspace", "slug": f"ws-noctx-{ws_id.hex[:8]}"},
+        )
+        await su_sess.execute(
+            text(
+                "INSERT INTO entity_type_definitions (id, workspace_id, slug, display_name) "
+                "VALUES (:id, :ws, :slug, 'Test')"
+            ),
+            {"id": row_id, "ws": ws_id, "slug": slug},
+        )
+
+    # App-role session — no SET LOCAL → RLS must hide every row
+    app_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with app_factory() as app_sess, app_sess.begin():
+        result = await app_sess.execute(
+            text("SELECT count(*) FROM entity_type_definitions WHERE id = :id"),
+            {"id": row_id},
+        )
+        count = result.scalar()
+
+    assert count == 0, f"RLS leak: app-role saw {count} row(s) in entity_type_definitions without workspace context"
+
+
+@pytest.mark.integration
+async def test_rls_wrong_workspace(engine, engine_superuser) -> None:
+    """App-role session with a DIFFERENT workspace UUID must see 0 rows.
+
+    The superuser inserts into workspace A. The app-role session SET LOCAL to
+    workspace B. The row must be invisible.
+    """
+    ws_a_id = uuid.uuid4()
+    ws_b_id = uuid.uuid4()
+    row_id = uuid.uuid4()
+
+    # Seed workspace A + a row via superuser
+    su_factory = async_sessionmaker(engine_superuser, expire_on_commit=False)
+    async with su_factory() as su_sess, su_sess.begin():
+        await su_sess.execute(
+            text("INSERT INTO workspaces (id, name, slug) VALUES (:id, :name, :slug)"),
+            {"id": ws_a_id, "name": "WA", "slug": f"ws-wrong-a-{ws_a_id.hex[:8]}"},
+        )
+        await su_sess.execute(
+            text("INSERT INTO workspaces (id, name, slug) VALUES (:id, :name, :slug)"),
+            {"id": ws_b_id, "name": "WB", "slug": f"ws-wrong-b-{ws_b_id.hex[:8]}"},
+        )
+        await su_sess.execute(
+            text(
+                "INSERT INTO entity_type_definitions (id, workspace_id, slug, display_name) "
+                "VALUES (:id, :ws, :slug, 'Test')"
+            ),
+            {"id": row_id, "ws": ws_a_id, "slug": f"et-wrong-{uuid.uuid4().hex[:8]}"},
+        )
+
+    # App-role session — SET LOCAL to workspace B → must NOT see workspace A's row
+    app_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with app_factory() as app_sess, app_sess.begin():
+        await app_sess.execute(text(f"SET LOCAL app.workspace_id = '{ws_b_id}'"))
+        result = await app_sess.execute(
+            text("SELECT count(*) FROM entity_type_definitions WHERE id = :id"),
+            {"id": row_id},
+        )
+        count = result.scalar()
+
+    assert count == 0, (
+        f"RLS leak: app-role with workspace B ({ws_b_id}) saw {count} row(s) from workspace A ({ws_a_id})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Savepoint rollback must not clear the outer workspace context
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_savepoint_rollback_preserves_outer_workspace_context(engine) -> None:
+    """Rolling back a savepoint must preserve the outer transaction's workspace context.
+
+    SET LOCAL is scoped to the current (sub)transaction. When the savepoint rolls
+    back, the SET LOCAL done inside that savepoint is undone, but the one done in
+    the outer transaction must survive.
+    """
+    ws_id = uuid.uuid4()
+    ws_id_str = str(ws_id)
+
+    app_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with app_factory() as sess, sess.begin():
+        # Insert workspace (no RLS on workspaces table — superuser not needed)
+        await sess.execute(
+            text("INSERT INTO workspaces (id, name, slug) VALUES (:id, :name, :slug)"),
+            {"id": ws_id, "name": "SPTest", "slug": f"ws-sp-{ws_id.hex[:8]}"},
+        )
+        # SET LOCAL in the outer transaction
+        await sess.execute(text(f"SET LOCAL app.workspace_id = '{ws_id_str}'"))
+
+        # Nested savepoint — SET LOCAL to something different, then rollback
+        other_ws_id = str(uuid.uuid4())
+        try:
+            async with sess.begin_nested():
+                await sess.execute(text(f"SET LOCAL app.workspace_id = '{other_ws_id}'"))
+                raise RuntimeError("deliberate savepoint rollback")
+        except RuntimeError:
+            pass
+
+        # After the savepoint is rolled back, the outer context must be restored
+        result = await sess.execute(text("SELECT current_setting('app.workspace_id', true)"))
+        current = result.scalar()
+
+    assert current == ws_id_str, f"SET LOCAL leaked across savepoint rollback: expected {ws_id_str!r}, got {current!r}"

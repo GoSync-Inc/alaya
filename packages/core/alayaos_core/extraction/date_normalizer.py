@@ -58,6 +58,7 @@ class DateNormalizer:
 
         if anchor.tzinfo is not None:
             parsed = parsed.replace(tzinfo=anchor.tzinfo)
+        parsed = parsed.replace(hour=0, minute=0, second=0, microsecond=0)
 
         if not _within_sanity_window(parsed, anchor):
             return NormalizedDate(raw=text, iso=None, anchor=anchor, normalized=False, reason="out_of_sanity_window")

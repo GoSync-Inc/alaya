@@ -68,6 +68,55 @@ async def test_write_claim_normalizes_relative_date_with_event_anchor() -> None:
 
 
 @pytest.mark.asyncio
+async def test_write_claim_normalizes_relative_date_with_created_at_fallback() -> None:
+    claim_repo = AsyncMock()
+    created_claim = MagicMock()
+    created_claim.id = uuid.uuid4()
+    claim_repo.create = AsyncMock(return_value=created_claim)
+    claim_repo.get_active_for_entity_predicate = AsyncMock(return_value=[created_claim])
+
+    predicate_repo = AsyncMock()
+    predicate_repo.get_by_slug = AsyncMock(return_value=_make_predicate_def())
+
+    event = MagicMock()
+    event.id = uuid.uuid4()
+    event.workspace_id = uuid.uuid4()
+    event.occurred_at = None
+    event.created_at = datetime(2026, 4, 25, 15, 30, tzinfo=UTC)
+
+    run = MagicMock()
+    run.id = uuid.uuid4()
+
+    extracted_claim = ExtractedClaim(
+        entity="Launch",
+        predicate="deadline",
+        value="завтра",
+        value_type="date",
+        confidence=0.9,
+    )
+
+    result, superseded = await write_claim(
+        claim=extracted_claim,
+        entity_id=uuid.uuid4(),
+        event=event,
+        run=run,
+        claim_repo=claim_repo,
+        predicate_repo=predicate_repo,
+        entity_name_to_id={},
+    )
+
+    assert result is created_claim
+    assert superseded == 0
+    assert claim_repo.create.call_args.kwargs["value"] == {
+        "date": "завтра",
+        "iso": "2026-04-26T00:00:00+00:00",
+        "normalized": True,
+        "anchor": event.created_at.isoformat(),
+        "reason": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_write_claim_logs_date_normalization_failure_after_create() -> None:
     claim_repo = AsyncMock()
     created_claim = MagicMock()

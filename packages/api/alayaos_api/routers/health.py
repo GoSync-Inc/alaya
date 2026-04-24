@@ -1,8 +1,10 @@
 """Health check endpoints."""
 
+from contextlib import suppress
 from functools import lru_cache
 from typing import Annotated
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +18,23 @@ router = APIRouter(tags=["health"])
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+async def _check_redis(redis_url) -> str:
+    url = redis_url.get_secret_value() if hasattr(redis_url, "get_secret_value") else str(redis_url or "")
+    if not url:
+        return "degraded"
+
+    client = None
+    try:
+        client = aioredis.from_url(url)
+        return "ok" if await client.ping() else "degraded"
+    except Exception:
+        return "down"
+    finally:
+        if client is not None:
+            with suppress(Exception):
+                await client.aclose()
 
 
 @router.get("/health/live")
@@ -52,7 +71,7 @@ async def health_ready(session: Annotated[AsyncSession, Depends(get_session)]):
         checks["seeds"] = "unavailable"
 
     # Redis (non-blocking)
-    checks["redis"] = "unavailable"  # TODO: add redis check when redis is integrated
+    checks["redis"] = await _check_redis(settings.REDIS_URL)
 
     # First run check
     try:

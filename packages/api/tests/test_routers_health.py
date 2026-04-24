@@ -38,6 +38,14 @@ def make_test_app():
     return app, session_mock
 
 
+def mock_redis_ping(monkeypatch, *, result=True, side_effect=None):
+    redis_client = MagicMock()
+    redis_client.ping = AsyncMock(return_value=result, side_effect=side_effect)
+    redis_client.aclose = AsyncMock()
+    monkeypatch.setattr(health.aioredis, "from_url", MagicMock(return_value=redis_client))
+    return redis_client
+
+
 def test_health_live_returns_ok() -> None:
     app, _ = make_test_app()
     client = TestClient(app)
@@ -57,6 +65,7 @@ def test_health_live_no_auth_required() -> None:
 def test_health_ready_redacts_details_by_default(monkeypatch) -> None:
     monkeypatch.delenv("ALAYA_HEALTH_READY_VERBOSE", raising=False)
     health.get_settings.cache_clear()
+    mock_redis_ping(monkeypatch)
     app, session_mock = make_test_app()
     session_mock.execute.side_effect = [
         MagicMock(),
@@ -75,6 +84,7 @@ def test_health_ready_redacts_details_by_default(monkeypatch) -> None:
 def test_health_ready_includes_checks_when_verbose(monkeypatch) -> None:
     monkeypatch.setenv("ALAYA_HEALTH_READY_VERBOSE", "true")
     health.get_settings.cache_clear()
+    mock_redis_ping(monkeypatch)
     app, session_mock = make_test_app()
     session_mock.execute.side_effect = [
         MagicMock(),
@@ -92,12 +102,37 @@ def test_health_ready_includes_checks_when_verbose(monkeypatch) -> None:
     assert body["checks"]["database"] == "ok"
     assert body["checks"]["migrations"] == "ok"
     assert body["checks"]["seeds"] == "ok"
+    assert body["checks"]["redis"] == "ok"
     assert body["first_run"] is True
 
 
+def test_health_ready_reports_redis_down_when_ping_fails(monkeypatch) -> None:
+    monkeypatch.setenv("ALAYA_HEALTH_READY_VERBOSE", "true")
+    health.get_settings.cache_clear()
+    mock_redis_ping(monkeypatch, side_effect=ConnectionError("redis down"))
+    app, session_mock = make_test_app()
+    session_mock.execute.side_effect = [
+        MagicMock(),
+        make_scalar_result("0004"),
+        make_scalar_result(1),
+        make_scalar_result(0),
+    ]
+
+    client = TestClient(app)
+    response = client.get("/health/ready")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert body["checks"]["redis"] == "down"
+
+
 def test_health_ready_uses_cached_settings(monkeypatch) -> None:
-    settings_factory = MagicMock(return_value=SimpleNamespace(HEALTH_READY_VERBOSE=False))
+    settings_factory = MagicMock(
+        return_value=SimpleNamespace(HEALTH_READY_VERBOSE=False, REDIS_URL="redis://localhost:6379/0")
+    )
     monkeypatch.setattr(health, "Settings", settings_factory)
+    mock_redis_ping(monkeypatch)
     health.get_settings.cache_clear()
 
     app, session_mock = make_test_app()

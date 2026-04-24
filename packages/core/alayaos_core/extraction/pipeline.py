@@ -25,7 +25,23 @@ log = structlog.get_logger()
 
 async def should_extract(event, run, run_repo, session) -> bool:
     """Access-level observability; retrieval gates visibility after extraction."""
-    if event.access_level in ("restricted", "private"):
+    # Run 6.2 merge-order note: access_level="channel" is tier 1 at retrieval,
+    # but extracts identically to public here.
+    # Restricted also extracts and retrieval ACL gates visibility; private
+    # remains workspace opt-in gated.
+    if event.access_level == "restricted":
+        log.info(
+            "extraction.sensitive_event_extracting",
+            event_id=str(event.id),
+            access_level=event.access_level,
+        )
+    if event.access_level == "private":
+        ws_repo = WorkspaceRepository(session)
+        workspace = await ws_repo.get_by_id(event.workspace_id)
+        if not workspace or not workspace.settings.get("extract_private", False):
+            log.info("skipping_private_no_optin", event_id=str(event.id))
+            await run_repo.update_status(run.id, "skipped", error_message="private without opt-in")
+            return False
         log.info(
             "extraction.sensitive_event_extracting",
             event_id=str(event.id),

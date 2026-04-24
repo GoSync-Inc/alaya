@@ -192,6 +192,82 @@ async def test_event_upsert_tightens_existing_public_access_level_and_restamps_v
     assert vector.access_level == incoming_access_level
 
 
+async def test_claim_source_trigger_recomputes_multi_provenance_claim_vector(
+    db_session: AsyncSession,
+    workspace,
+) -> None:
+    entity = await _create_entity(db_session, workspace.id)
+    public_event = L0Event(
+        workspace_id=workspace.id,
+        source_type="slack",
+        source_id=f"public-source-{uuid.uuid4()}",
+        content={"text": "public source"},
+        event_metadata={},
+        access_level="public",
+    )
+    private_event = L0Event(
+        workspace_id=workspace.id,
+        source_type="slack",
+        source_id=f"private-source-{uuid.uuid4()}",
+        content={"text": "private source"},
+        event_metadata={},
+        access_level="private",
+    )
+    claim = L2Claim(
+        workspace_id=workspace.id,
+        entity_id=entity.id,
+        predicate="status",
+        value={"v": "multi provenance"},
+        confidence=0.9,
+        status="active",
+        value_type="text",
+    )
+    db_session.add_all([public_event, private_event, claim])
+    await db_session.flush()
+
+    claim_vector = VectorChunk(
+        workspace_id=workspace.id,
+        source_type="claim",
+        source_id=claim.id,
+        chunk_index=0,
+        content="claim vector",
+        access_level="restricted",
+    )
+    entity_vector = VectorChunk(
+        workspace_id=workspace.id,
+        source_type="entity",
+        source_id=entity.id,
+        chunk_index=1,
+        content="entity vector",
+        access_level="restricted",
+    )
+    db_session.add_all([claim_vector, entity_vector])
+    await db_session.flush()
+
+    public_source = ClaimSource(workspace_id=workspace.id, claim_id=claim.id, event_id=public_event.id)
+    db_session.add(public_source)
+    await db_session.flush()
+    await db_session.refresh(claim_vector)
+    await db_session.refresh(entity_vector)
+    assert claim_vector.access_level == "public"
+    assert entity_vector.access_level == "public"
+
+    private_source = ClaimSource(workspace_id=workspace.id, claim_id=claim.id, event_id=private_event.id)
+    db_session.add(private_source)
+    await db_session.flush()
+    await db_session.refresh(claim_vector)
+    await db_session.refresh(entity_vector)
+    assert claim_vector.access_level == "private"
+    assert entity_vector.access_level == "private"
+
+    await db_session.delete(private_source)
+    await db_session.flush()
+    await db_session.refresh(claim_vector)
+    await db_session.refresh(entity_vector)
+    assert claim_vector.access_level == "public"
+    assert entity_vector.access_level == "public"
+
+
 async def test_claim_get_by_id_treats_source_less_claims_as_admin_only(
     db_session: AsyncSession,
     workspace,

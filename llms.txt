@@ -58,9 +58,9 @@ GET  /predicates/{id}
 POST /events              — idempotent upsert
 GET  /events
 GET  /events/{id}
-GET  /claims
+GET  /claims               — list; supports entity filter
 GET  /claims/{id}
-GET  /claims (by entity)
+PATCH /claims/{id}
 GET  /relations
 GET  /relations/{id}
 GET  /extraction-runs
@@ -69,6 +69,7 @@ POST /api-keys            — raw key shown once
 GET  /api-keys            — prefix only
 DELETE /api-keys/{prefix} — revoke
 GET  /admin/flags         — bootstrap-admin feature flag state
+POST /admin/backfill-embeddings — embedding maintenance
 GET  /chunks              — filter by event_id, processing_stage, is_crystal
 GET  /chunks/{id}
 GET  /events/{id}/trace   — pipeline execution trace

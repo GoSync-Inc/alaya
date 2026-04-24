@@ -132,11 +132,11 @@ Entity Types: GET, POST, GET/{id}
 Predicates: GET, GET/{id} — read-only in Run 1
 Events: POST (idempotent upsert), GET, GET/{id}
 API Keys: POST (raw key once), GET (prefix only), DELETE/{prefix} (revoke)
-Claims: GET, GET/{id}, GET (by entity)
+Claims: GET (supports entity filter), GET/{id}, PATCH/{id}
 Relations: GET, GET/{id}
 Extraction Runs: GET, GET/{id}
 Ingestion: POST `/ingest/text` — trigger extraction pipeline
-Admin: GET /admin/flags — bootstrap-admin feature flag state
+Admin: GET /admin/flags, POST /admin/backfill-embeddings — bootstrap-admin feature flag state and embedding maintenance
 Chunks: GET (event_id, processing_stage, is_crystal filters), GET/{id}
 Pipeline Traces: GET /events/{id}/trace
 Integrator Runs: GET, GET/{id}, POST /trigger

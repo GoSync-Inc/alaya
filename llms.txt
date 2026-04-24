@@ -23,7 +23,7 @@ Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `
 
 ### Packages
 
-- **`packages/core/`** — Domain logic: models (18), schemas (17), repositories (17), extraction pipeline (cortex/crystallizer/integrator sub-packages), LLM adapters, worker tasks. Zero framework dependencies.
+- **`packages/core/`** — Domain logic: models (19), schemas (17), repositories (17), extraction pipeline (cortex/crystallizer/integrator sub-packages), LLM adapters, worker tasks. Zero framework dependencies.
 - **`packages/api/`** — FastAPI REST API + MCP server. 18 routers. Depends on core.
 - **`packages/cli-go/`** — Go CLI (Cobra): search, ask, tree, entity, claim, ingest, key, workspace, setup agent.
 - **`packages/connectors/`** — Source connectors (placeholder).
@@ -87,7 +87,7 @@ POST /tree/export         — export subtree as markdown
 
 ## Data Model
 
-23 tables across 4 layers (Alembic migrations 001-007, including split 005a/005b):
+23 tables across 4 layers (Alembic migrations 001-008):
 
 - **L0 Events** — Raw ingested events with source metadata. `l0_chunks` stores chunked text segments per event.
 - **L1 Entities** — Resolved named entities (person, project, team, etc.). 13 seeded entity types, 21 seeded predicates per workspace.

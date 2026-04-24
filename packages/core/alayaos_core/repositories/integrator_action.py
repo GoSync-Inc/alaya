@@ -5,11 +5,26 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from alayaos_core.models.integrator_action import IntegratorAction
 from alayaos_core.repositories.base import BaseRepository
 from alayaos_core.schemas.integrator_action import IntegratorActionCreate, IntegratorActionRollbackResponse
+
+
+def _uuid_from_json(value: object) -> uuid.UUID | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        return None
+
+
+def _uuid_list_from_json(value: object) -> list[uuid.UUID]:
+    if not isinstance(value, list):
+        return []
+    return [parsed for item in value if (parsed := _uuid_from_json(item)) is not None]
 
 
 class IntegratorActionRepository(BaseRepository):
@@ -231,7 +246,7 @@ async def _rollback_merge(
     *,
     force: bool = False,
 ) -> list[str]:
-    """Restore loser entity (is_deleted → False)."""
+    """Restore merge loser and reverse row movement for new merge audit payloads."""
     loser_id_str = action.inverse.get("loser_id")
     if not loser_id_str and action.targets:
         loser_id_str = action.targets[0] if isinstance(action.targets[0], str) else str(action.targets[0])
@@ -244,13 +259,152 @@ async def _rollback_merge(
     except ValueError:
         return []
 
+    from alayaos_core.models.claim import L2Claim
     from alayaos_core.models.entity import L1Entity
+    from alayaos_core.models.relation import L1Relation
+    from alayaos_core.models.vector import VectorChunk
 
     stmt = select(L1Entity).where(L1Entity.id == loser_id).where(L1Entity.workspace_id == action.workspace_id)
     result = await repo.session.execute(stmt)
     loser = result.scalar_one_or_none()
+
+    winner = None
+    winner_id = action.entity_id
+    if winner_id is not None:
+        winner_stmt = select(L1Entity).where(L1Entity.id == winner_id).where(L1Entity.workspace_id == action.workspace_id)
+        winner_result = await repo.session.execute(winner_stmt)
+        winner = winner_result.scalar_one_or_none()
+
+    winner_snapshot = action.inverse.get("winner_snapshot")
+    if not isinstance(winner_snapshot, dict):
+        winner_snapshot = action.inverse
+    if winner is not None:
+        conflicts: list[str] = []
+        expected_name = action.params.get("name")
+        expected_desc = action.params.get("description")
+        expected_aliases = action.params.get("aliases")
+        if expected_name is not None and winner.name != expected_name:
+            conflicts.append(f"name changed since action: expected '{expected_name}', found '{winner.name}'")
+        if expected_desc is not None and winner.description != expected_desc:
+            conflicts.append(f"description changed since action: expected '{expected_desc}', found '{winner.description}'")
+        if isinstance(expected_aliases, list) and list(winner.aliases or []) != expected_aliases:
+            conflicts.append("aliases changed since action")
+        if conflicts and not force:
+            return conflicts
+        if "name" in winner_snapshot:
+            winner.name = winner_snapshot["name"]
+        if "description" in winner_snapshot:
+            winner.description = winner_snapshot["description"]
+        aliases = winner_snapshot.get("aliases")
+        if isinstance(aliases, list):
+            winner.aliases = aliases
+
     if loser is not None:
         loser.is_deleted = False
+        loser_properties = action.inverse.get("loser_properties")
+        if isinstance(loser_properties, dict):
+            loser.properties = loser_properties
+        else:
+            restored_props = dict(loser.properties or {})
+            restored_props.pop("merged_into", None)
+            loser.properties = restored_props
+
+    moved = action.inverse.get("moved")
+    if not isinstance(moved, dict) or winner_id is None:
+        return []
+
+    claim_ids = _uuid_list_from_json(moved.get("claim_ids"))
+    if claim_ids:
+        await repo.session.execute(
+            update(L2Claim)
+            .where(L2Claim.workspace_id == action.workspace_id)
+            .where(L2Claim.id.in_(claim_ids))
+            .where(L2Claim.entity_id == winner_id)
+            .values(entity_id=loser_id)
+        )
+
+    source_relation_ids = _uuid_list_from_json(moved.get("relation_source_ids"))
+    if source_relation_ids:
+        await repo.session.execute(
+            update(L1Relation)
+            .where(L1Relation.workspace_id == action.workspace_id)
+            .where(L1Relation.id.in_(source_relation_ids))
+            .where(L1Relation.source_entity_id == winner_id)
+            .values(source_entity_id=loser_id)
+        )
+
+    target_relation_ids = _uuid_list_from_json(moved.get("relation_target_ids"))
+    if target_relation_ids:
+        await repo.session.execute(
+            update(L1Relation)
+            .where(L1Relation.workspace_id == action.workspace_id)
+            .where(L1Relation.id.in_(target_relation_ids))
+            .where(L1Relation.target_entity_id == winner_id)
+            .values(target_entity_id=loser_id)
+        )
+
+    vector_chunk_ids = _uuid_list_from_json(moved.get("vector_chunk_ids"))
+    if vector_chunk_ids:
+        await repo.session.execute(
+            update(VectorChunk)
+            .where(VectorChunk.workspace_id == action.workspace_id)
+            .where(VectorChunk.id.in_(vector_chunk_ids))
+            .where(VectorChunk.source_type == "entity")
+            .where(VectorChunk.source_id == winner_id)
+            .values(source_id=loser_id)
+        )
+
+    deleted_relation_ids = set(_uuid_list_from_json(action.inverse.get("deleted_relation_ids")))
+    relation_snapshots_raw = action.inverse.get("relation_snapshots")
+    relation_snapshots: dict[uuid.UUID, dict] = {}
+    if isinstance(relation_snapshots_raw, list):
+        for snapshot in relation_snapshots_raw:
+            if not isinstance(snapshot, dict):
+                continue
+            relation_id = _uuid_from_json(snapshot.get("id"))
+            if relation_id is None:
+                continue
+            relation_snapshots[relation_id] = snapshot
+
+    for relation_id in deleted_relation_ids:
+        snapshot = relation_snapshots.get(relation_id)
+        if snapshot is None:
+            continue
+
+        relation_stmt = (
+            select(L1Relation)
+            .where(L1Relation.id == relation_id)
+            .where(L1Relation.workspace_id == action.workspace_id)
+        )
+        relation_result = await repo.session.execute(relation_stmt)
+        existing_relation = relation_result.scalar_one_or_none()
+        if existing_relation is not None:
+            continue
+
+        source_entity_id = _uuid_from_json(snapshot.get("source_entity_id"))
+        target_entity_id = _uuid_from_json(snapshot.get("target_entity_id"))
+        if source_entity_id is None or target_entity_id is None:
+            continue
+
+        created_at_raw = snapshot.get("created_at")
+        updated_at_raw = snapshot.get("updated_at")
+        created_at = datetime.fromisoformat(created_at_raw) if isinstance(created_at_raw, str) else datetime.now(UTC)
+        updated_at = datetime.fromisoformat(updated_at_raw) if isinstance(updated_at_raw, str) else created_at
+
+        repo.session.add(
+            L1Relation(
+                id=relation_id,
+                workspace_id=action.workspace_id,
+                source_entity_id=source_entity_id,
+                target_entity_id=target_entity_id,
+                relation_type=snapshot.get("relation_type", ""),
+                confidence=snapshot.get("confidence") or 1.0,
+                relation_metadata=snapshot.get("metadata") or {},
+                extraction_run_id=_uuid_from_json(snapshot.get("extraction_run_id")),
+                created_at=created_at,
+                updated_at=updated_at,
+            )
+        )
     return []
 
 

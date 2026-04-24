@@ -35,6 +35,12 @@ def make_scalar_result(items: list) -> MagicMock:
     return result
 
 
+def make_rows_result(rows: list[tuple]) -> MagicMock:
+    result = MagicMock()
+    result.all.return_value = rows
+    return result
+
+
 # ─── WorkspaceRepository ──────────────────────────────────────────────────────
 
 
@@ -889,6 +895,171 @@ class TestRelationRepository:
         session.add.assert_called_once()
         session.flush.assert_called_once()
         assert result.relation_type == "member_of"
+
+    @pytest.mark.asyncio
+    async def test_create_part_of_accepts_child_to_parent_tiers(self) -> None:
+        from alayaos_core.repositories.relation import RelationRepository
+
+        ws_id = uuid.uuid4()
+        source_id = uuid.uuid4()
+        target_id = uuid.uuid4()
+        session = make_session()
+        relation = self._make_relation(ws_id)
+        relation.relation_type = "part_of"
+        relation.source_entity_id = source_id
+        relation.target_entity_id = target_id
+        session.execute.side_effect = [
+            make_rows_result([(source_id, "task"), (target_id, "project")]),
+            make_result(relation),
+        ]
+        repo = RelationRepository(session, ws_id)
+
+        result = await repo.create(
+            workspace_id=ws_id,
+            source_entity_id=source_id,
+            target_entity_id=target_id,
+            relation_type="part_of",
+            confidence=0.95,
+        )
+
+        assert result.relation_type == "part_of"
+        session.add.assert_called_once()
+        session.flush.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_part_of_rejects_reversed_tiers(self) -> None:
+        from alayaos_core.repositories.relation import RelationRepository
+
+        ws_id = uuid.uuid4()
+        source_id = uuid.uuid4()
+        target_id = uuid.uuid4()
+        session = make_session()
+        session.execute.return_value = make_rows_result([(source_id, "project"), (target_id, "task")])
+        repo = RelationRepository(session, ws_id)
+
+        with pytest.raises(ValueError, match="lower-tier child"):
+            await repo.create(
+                workspace_id=ws_id,
+                source_entity_id=source_id,
+                target_entity_id=target_id,
+                relation_type="part_of",
+                confidence=0.95,
+            )
+
+        session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_part_of_allows_non_tier_entities(self) -> None:
+        from alayaos_core.repositories.relation import RelationRepository
+
+        ws_id = uuid.uuid4()
+        source_id = uuid.uuid4()
+        target_id = uuid.uuid4()
+        session = make_session()
+        relation = self._make_relation(ws_id)
+        relation.relation_type = "part_of"
+        relation.source_entity_id = source_id
+        relation.target_entity_id = target_id
+        session.execute.side_effect = [
+            make_rows_result([(source_id, "document"), (target_id, "project")]),
+            make_result(relation),
+        ]
+        repo = RelationRepository(session, ws_id)
+
+        result = await repo.create(
+            workspace_id=ws_id,
+            source_entity_id=source_id,
+            target_entity_id=target_id,
+            relation_type="part_of",
+            confidence=0.95,
+        )
+
+        assert result.relation_type == "part_of"
+
+    @pytest.mark.asyncio
+    async def test_create_part_of_rejects_self_reference(self) -> None:
+        from alayaos_core.repositories.relation import RelationRepository
+
+        ws_id = uuid.uuid4()
+        entity_id = uuid.uuid4()
+        session = make_session()
+        repo = RelationRepository(session, ws_id)
+
+        with pytest.raises(ValueError, match="same entity"):
+            await repo.create(
+                workspace_id=ws_id,
+                source_entity_id=entity_id,
+                target_entity_id=entity_id,
+                relation_type="part_of",
+                confidence=0.95,
+            )
+
+        session.execute.assert_not_awaited()
+        session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_batch_validates_part_of_hierarchy(self) -> None:
+        from alayaos_core.repositories.relation import RelationRepository
+
+        ws_id = uuid.uuid4()
+        source_id = uuid.uuid4()
+        target_id = uuid.uuid4()
+        session = make_session()
+        session.execute.return_value = make_rows_result([(source_id, "project"), (target_id, "task")])
+        repo = RelationRepository(session, ws_id)
+
+        with pytest.raises(ValueError, match="lower-tier child"):
+            await repo.create_batch(
+                ws_id,
+                [
+                    {
+                        "source_entity_id": source_id,
+                        "target_entity_id": target_id,
+                        "relation_type": "part_of",
+                        "confidence": 1.0,
+                    }
+                ],
+            )
+
+        session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_batch_is_atomic_when_later_relation_is_invalid(self) -> None:
+        from alayaos_core.repositories.relation import RelationRepository
+
+        ws_id = uuid.uuid4()
+        valid_child = uuid.uuid4()
+        valid_parent = uuid.uuid4()
+        invalid_child = uuid.uuid4()
+        invalid_parent = uuid.uuid4()
+        session = make_session()
+        session.execute.side_effect = [
+            make_rows_result([(valid_child, "task"), (valid_parent, "project")]),
+            make_rows_result([(invalid_child, "project"), (invalid_parent, "task")]),
+        ]
+        repo = RelationRepository(session, ws_id)
+
+        with pytest.raises(ValueError, match="lower-tier child"):
+            await repo.create_batch(
+                ws_id,
+                [
+                    {
+                        "source_entity_id": valid_child,
+                        "target_entity_id": valid_parent,
+                        "relation_type": "part_of",
+                        "confidence": 1.0,
+                    },
+                    {
+                        "source_entity_id": invalid_child,
+                        "target_entity_id": invalid_parent,
+                        "relation_type": "part_of",
+                        "confidence": 1.0,
+                    },
+                ],
+            )
+
+        session.add.assert_not_called()
+        session.flush.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_list_with_entity_filter(self) -> None:

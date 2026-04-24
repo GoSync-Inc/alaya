@@ -30,6 +30,18 @@ def make_scalar_result(items: list) -> MagicMock:
     return result
 
 
+def make_execute_side_effect(responses: list[MagicMock]):
+    iterator = iter(responses)
+
+    async def _execute(*_args, **_kwargs):
+        try:
+            return next(iterator)
+        except StopIteration:
+            return make_result(None)
+
+    return _execute
+
+
 def _make_action(
     ws_id: uuid.UUID | None = None,
     action_type: str = "remove_noise",
@@ -456,13 +468,240 @@ class TestIntegratorActionRollback:
         loser.external_ids = []
 
         session = make_session()
-        session.execute.side_effect = [make_result(action), make_result(loser)]
+        session.execute.side_effect = [make_result(action), make_result(loser), make_result(None)]
 
         repo = IntegratorActionRepository(session, ws_id)
         result = await repo.apply_rollback(ws_id, action.id)
         assert result.conflicts == []
         assert loser.is_deleted is False
         assert action.status == "rolled_back"
+
+    @pytest.mark.asyncio
+    async def test_rollback_merge_restores_winner_snapshot_and_moved_rows(self) -> None:
+        """New-style merge rollback restores winner, loser, moved rows, and deleted relations."""
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.models.relation import L1Relation
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        winner_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+        claim_id = uuid.uuid4()
+        source_relation_id = uuid.uuid4()
+        target_relation_id = uuid.uuid4()
+        chunk_id = uuid.uuid4()
+        restored_relation_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = winner_id
+        action.status = "applied"
+        action.params = {"winner_id": str(winner_id), "loser_id": str(loser_id)}
+        action.inverse = {
+            "loser_id": str(loser_id),
+            "winner_snapshot": {
+                "name": "Winner Old",
+                "description": "Winner old desc",
+                "aliases": ["legacy"],
+            },
+            "loser_properties": {"source": "crm"},
+            "moved": {
+                "claim_ids": [str(claim_id)],
+                "relation_source_ids": [str(source_relation_id)],
+                "relation_target_ids": [str(target_relation_id)],
+                "vector_chunk_ids": [str(chunk_id)],
+            },
+            "deleted_relation_ids": [str(restored_relation_id)],
+            "relation_snapshots": [
+                {
+                    "id": str(restored_relation_id),
+                    "source_entity_id": str(loser_id),
+                    "target_entity_id": str(uuid.uuid4()),
+                    "relation_type": "member_of",
+                    "confidence": 0.8,
+                    "metadata": {"origin": "merge"},
+                    "extraction_run_id": None,
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            ],
+        }
+        action.targets = [str(loser_id)]
+
+        loser = L1Entity(
+            id=loser_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Loser",
+            properties={"merged_into": str(winner_id)},
+            is_deleted=True,
+        )
+        loser.external_ids = []
+
+        winner = L1Entity(
+            id=winner_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Winner New",
+            description="Winner new desc",
+            properties={},
+            is_deleted=False,
+            aliases=["new"],
+        )
+        winner.external_ids = []
+
+        session = make_session()
+        session.execute.side_effect = make_execute_side_effect(
+            [
+                make_result(action),
+                make_result(loser),
+                make_result(winner),
+                make_result(None),  # relation lookup for restored relation
+            ]
+        )
+
+        repo = IntegratorActionRepository(session, ws_id)
+        result = await repo.apply_rollback(ws_id, action.id)
+
+        assert result.conflicts == []
+        assert loser.is_deleted is False
+        assert loser.properties == {"source": "crm"}
+        assert winner.name == "Winner Old"
+        assert winner.description == "Winner old desc"
+        assert winner.aliases == ["legacy"]
+        assert action.status == "rolled_back"
+
+        executed_sql = [str(call.args[0]) for call in session.execute.call_args_list if call.args]
+        assert any("UPDATE l2_claims" in sql for sql in executed_sql)
+        assert any("UPDATE l1_relations SET source_entity_id" in sql for sql in executed_sql)
+        assert any("UPDATE l1_relations SET target_entity_id" in sql for sql in executed_sql)
+        assert any("UPDATE vector_chunks" in sql for sql in executed_sql)
+
+        session.add.assert_called_once()
+        restored_relation = session.add.call_args.args[0]
+        assert isinstance(restored_relation, L1Relation)
+        assert restored_relation.id == restored_relation_id
+        assert restored_relation.source_entity_id == loser_id
+        assert restored_relation.relation_type == "member_of"
+
+    @pytest.mark.asyncio
+    async def test_rollback_merge_legacy_payload_is_safe_partial_restore(self) -> None:
+        """Legacy merge actions without moved metadata still undelete loser and do not crash."""
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        winner_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = winner_id
+        action.status = "applied"
+        action.inverse = {"loser_id": str(loser_id)}
+        action.targets = [str(loser_id)]
+
+        loser = L1Entity(
+            id=loser_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Loser",
+            properties={"merged_into": str(winner_id)},
+            is_deleted=True,
+        )
+        loser.external_ids = []
+
+        winner = L1Entity(
+            id=winner_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Winner",
+            properties={},
+            is_deleted=False,
+        )
+        winner.external_ids = []
+
+        session = make_session()
+        session.execute.side_effect = make_execute_side_effect(
+            [
+                make_result(action),
+                make_result(loser),
+                make_result(winner),
+            ]
+        )
+
+        repo = IntegratorActionRepository(session, ws_id)
+        result = await repo.apply_rollback(ws_id, action.id)
+
+        assert result.conflicts == []
+        assert loser.is_deleted is False
+        assert "merged_into" not in loser.properties
+        assert action.status == "rolled_back"
+        session.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rollback_merge_conflict_detects_winner_drift(self) -> None:
+        """Rollback of merge refuses to proceed if winner state changed since the action."""
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        winner_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = winner_id
+        action.status = "applied"
+        action.params = {
+            "winner_id": str(winner_id),
+            "loser_id": str(loser_id),
+            "name": "Winner After Merge",
+            "description": "Merged desc",
+            "aliases": ["a", "b"],
+        }
+        action.inverse = {
+            "loser_id": str(loser_id),
+            "winner_snapshot": {"name": "Winner Before", "description": "", "aliases": ["a"]},
+        }
+        action.targets = [str(loser_id)]
+
+        loser = L1Entity(
+            id=loser_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Loser",
+            properties={"merged_into": str(winner_id)},
+            is_deleted=True,
+        )
+        loser.external_ids = []
+
+        winner = L1Entity(
+            id=winner_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Winner After Merge",
+            description="Merged desc",
+            properties={},
+            is_deleted=False,
+            aliases=["a", "b", "c"],
+        )
+        winner.external_ids = []
+
+        session = make_session()
+        session.execute.side_effect = make_execute_side_effect(
+            [
+                make_result(action),
+                make_result(loser),
+                make_result(winner),
+            ]
+        )
+
+        repo = IntegratorActionRepository(session, ws_id)
+        result = await repo.apply_rollback(ws_id, action.id)
+
+        assert result is not None
+        assert result.conflicts == ["aliases changed since action"]
+        assert winner.name == "Winner After Merge"
+        assert loser.is_deleted is True
+        assert action.status == "applied"
 
     @pytest.mark.asyncio
     async def test_rollback_create_from_cluster_deletes_synthetic_entity(self) -> None:

@@ -36,6 +36,100 @@ def _make_embeddings(entities: list[EntityWithContext], dim: int = 4) -> dict[uu
     return result
 
 
+def _make_scalars_result(items: list) -> MagicMock:
+    result = MagicMock()
+    scalars = MagicMock()
+    scalars.all.return_value = items
+    result.scalars.return_value = scalars
+    return result
+
+
+def _make_rows_result(rows: list[tuple]) -> MagicMock:
+    result = MagicMock()
+    result.all.return_value = rows
+    return result
+
+
+def _make_mappings_result(rows: list[dict]) -> MagicMock:
+    result = MagicMock()
+    mappings = MagicMock()
+    mappings.all.return_value = rows
+    result.mappings.return_value = mappings
+    return result
+
+
+def _make_relation_snapshot(
+    source_entity_id: uuid.UUID,
+    target_entity_id: uuid.UUID,
+    relation_type: str = "related_to",
+) -> MagicMock:
+    relation = MagicMock()
+    relation.id = uuid.uuid4()
+    relation.source_entity_id = source_entity_id
+    relation.target_entity_id = target_entity_id
+    relation.relation_type = relation_type
+    relation.confidence = 0.9
+    relation.relation_metadata = {}
+    relation.extraction_run_id = None
+    relation.created_at = None
+    relation.updated_at = None
+    return relation
+
+
+def _make_merge_session(
+    *,
+    claim_ids: list[uuid.UUID] | None = None,
+    source_relations: list | None = None,
+    target_relations: list | None = None,
+    deleted_relations: list | None = None,
+    vector_chunk_ids: list[uuid.UUID] | None = None,
+    dedup_deleted_relations: list | None = None,
+) -> AsyncMock:
+    session = AsyncMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+
+    async def _execute(stmt, *_args, **_kwargs):
+        sql = str(stmt)
+        if "SELECT l2_claims.id" in sql:
+            return _make_scalars_result(claim_ids or [])
+        if (
+            "FROM l1_relations" in sql
+            and "source_entity_id" in sql
+            and "target_entity_id" in sql
+            and "!=" not in sql
+            and "ROW_NUMBER" not in sql
+        ):
+            return _make_scalars_result(deleted_relations or [])
+        if "FROM l1_relations" in sql and "source_entity_id" in sql and "target_entity_id !=" in sql:
+            return _make_scalars_result(source_relations or [])
+        if "FROM l1_relations" in sql and "target_entity_id" in sql and "source_entity_id !=" in sql:
+            return _make_scalars_result(target_relations or [])
+        if "SELECT vector_chunks.id" in sql:
+            return _make_scalars_result(vector_chunk_ids or [])
+        if "WITH deleted AS" in sql:
+            relation_rows = []
+            for relation in dedup_deleted_relations or []:
+                relation_rows.append(
+                    {
+                        "id": relation.id,
+                        "source_entity_id": relation.source_entity_id,
+                        "target_entity_id": relation.target_entity_id,
+                        "relation_type": relation.relation_type,
+                        "confidence": relation.confidence,
+                        "metadata": relation.relation_metadata,
+                        "extraction_run_id": relation.extraction_run_id,
+                        "created_at": relation.created_at,
+                        "updated_at": relation.updated_at,
+                    }
+                )
+            return _make_mappings_result(relation_rows)
+        return _make_scalars_result([])
+
+    session.execute.side_effect = _execute
+    return session
+
+
 # ---------------------------------------------------------------------------
 # Test: shortlist_candidates
 # ---------------------------------------------------------------------------
@@ -218,7 +312,7 @@ async def test_dedup_still_merges_obvious_duplicates():
         settings=settings,
     )
 
-    session = AsyncMock()
+    session = _make_merge_session()
     result = await engine.run(ws_id, session)
 
     assert isinstance(result, IntegratorRunResult)
@@ -442,7 +536,7 @@ async def test_dedup_shortlist_path_is_exercised():
     # Inject the fake embedding service (path a)
     engine._embedding_service = fake_embed
 
-    session = AsyncMock()
+    session = _make_merge_session()
     result = await engine.run(ws_id, session)
 
     assert isinstance(result, IntegratorRunResult)
@@ -782,7 +876,7 @@ async def test_merge_with_rewrite_output():
     )
     fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
 
-    session = AsyncMock()
+    session = _make_merge_session()
 
     deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
 
@@ -869,7 +963,7 @@ async def test_loser_soft_deleted():
     fake_llm = AsyncMock()
     fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
 
-    session = AsyncMock()
+    session = _make_merge_session()
     deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
 
     winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person")
@@ -944,7 +1038,7 @@ async def test_claims_relations_reassigned():
     fake_llm = AsyncMock()
     fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
 
-    session = AsyncMock()
+    session = _make_merge_session()
     deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
 
     winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person")
@@ -962,6 +1056,113 @@ async def test_claims_relations_reassigned():
 
     # session.execute must have been called (for SQL reassignment)
     assert session.execute.called, "session.execute was not called — claims/relations not reassigned"
+
+
+@pytest.mark.asyncio
+async def test_merge_audit_payload_includes_moved_rows_and_relation_snapshots():
+    """Merge audit payload for new actions must include deterministic rollback metadata."""
+    from alayaos_core.extraction.integrator.dedup import DeduplicatorV2
+    from alayaos_core.extraction.integrator.schemas import DedupResult, EntityWithContext, MergeGroup
+
+    winner_id = uuid.uuid4()
+    loser_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    claim_ids = [uuid.uuid4(), uuid.uuid4()]
+    chunk_ids = [uuid.uuid4()]
+
+    winner_entity = MagicMock()
+    winner_entity.id = winner_id
+    winner_entity.name = "Alice Johnson"
+    winner_entity.aliases = ["AJ"]
+    winner_entity.description = "engineer"
+    winner_entity.properties = {}
+
+    loser_entity = MagicMock()
+    loser_entity.id = loser_id
+    loser_entity.name = "Alice Jonson"
+    loser_entity.aliases = ["Alice J"]
+    loser_entity.description = "senior engineer"
+    loser_entity.properties = {"merged_into": "stale"}
+
+    moved_source_relation = _make_relation_snapshot(loser_id, uuid.uuid4(), relation_type="member_of")
+    moved_target_relation = _make_relation_snapshot(uuid.uuid4(), loser_id, relation_type="owner_of")
+    deleted_self_ref_relation = _make_relation_snapshot(loser_id, winner_id, relation_type="related_to")
+    dedup_deleted_winner_side_relation = _make_relation_snapshot(winner_id, moved_source_relation.target_entity_id, "member_of")
+    dedup_deleted_winner_side_relation.id = moved_source_relation.id
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(
+        side_effect=lambda eid: {winner_id: winner_entity, loser_id: loser_entity}.get(eid)
+    )
+    entity_repo.update = AsyncMock()
+
+    dedup_result = DedupResult(
+        groups=[
+            MergeGroup(
+                winner_id=winner_id,
+                loser_ids=[loser_id],
+                merged_name="Alice Johnson",
+                merged_description="Senior engineer",
+                merged_aliases=["AJ", "Alice J"],
+                confidence=0.95,
+                rationale="Same person",
+            )
+        ]
+    )
+    fake_llm = AsyncMock()
+    fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
+
+    session = _make_merge_session(
+        claim_ids=claim_ids,
+        source_relations=[moved_source_relation],
+        target_relations=[moved_target_relation],
+        deleted_relations=[deleted_self_ref_relation],
+        vector_chunk_ids=chunk_ids,
+        dedup_deleted_relations=[dedup_deleted_winner_side_relation],
+    )
+    action_repo = MagicMock()
+    action_repo.create = AsyncMock()
+
+    deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
+    winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person", aliases=["AJ"])
+    loser_ewc = EntityWithContext(id=loser_id, name="Alice Jonson", entity_type="person", aliases=["Alice J"])
+
+    merged, _sigs = await deduplicator.execute_batches(
+        batches=[[winner_ewc, loser_ewc]],
+        entity_type="person",
+        workspace_id=ws_id,
+        run_id=run_id,
+        entity_repo=entity_repo,
+        session=session,
+        action_repo=action_repo,
+    )
+
+    assert merged == 1
+    action_repo.create.assert_awaited_once()
+    create_call = action_repo.create.await_args
+    data = create_call.kwargs["data"]
+
+    assert data.action_type == "merge"
+    assert data.entity_id == winner_id
+    assert data.inverse["loser_id"] == str(loser_id)
+    assert data.inverse["loser_properties"] == {"merged_into": "stale"}
+    assert data.inverse["winner_snapshot"]["name"] == "Alice Johnson"
+    assert data.inverse["moved"]["claim_ids"] == [str(claim_id) for claim_id in claim_ids]
+    assert data.inverse["moved"]["relation_source_ids"] == [str(moved_source_relation.id)]
+    assert data.inverse["moved"]["relation_target_ids"] == [str(moved_target_relation.id)]
+    assert data.inverse["moved"]["vector_chunk_ids"] == [str(chunk_id) for chunk_id in chunk_ids]
+    assert set(data.inverse["deleted_relation_ids"]) == {
+        str(moved_source_relation.id),
+        str(deleted_self_ref_relation.id),
+    }
+    relation_snapshots = {snapshot["id"]: snapshot for snapshot in data.inverse["relation_snapshots"]}
+    assert str(moved_source_relation.id) in relation_snapshots
+    assert str(moved_target_relation.id) in relation_snapshots
+    assert str(deleted_self_ref_relation.id) in relation_snapshots
+    # For a moved row later deleted by final dedup cleanup, we must retain the pre-move snapshot
+    # so rollback restores the relation on the loser side, not the winner side.
+    assert relation_snapshots[str(moved_source_relation.id)]["source_entity_id"] == str(loser_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1106,7 +1307,7 @@ async def test_relation_dedup_after_merge_removes_duplicates():
     fake_llm = AsyncMock()
     fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
 
-    session = AsyncMock()
+    session = _make_merge_session()
     deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
 
     winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person")

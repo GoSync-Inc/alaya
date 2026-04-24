@@ -44,6 +44,7 @@ def _make_settings():
     settings.INTEGRATOR_DEDUP_SHORTLIST_K = 5
     settings.INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD = 0.85
     settings.INTEGRATOR_DEDUP_BATCH_SIZE = 9
+    settings.CONSOLIDATOR_PANORAMIC_MAX_ENTITIES = 500
     return settings
 
 
@@ -123,6 +124,69 @@ async def test_stable_graph_single_pass():
     assert result.status == "completed"
     assert result.pass_count == 1
     assert result.convergence_reason == "no_actions"
+
+
+@pytest.mark.asyncio
+async def test_panoramic_pass_receives_configured_max_entities():
+    """Engine must pass Settings.CONSOLIDATOR_PANORAMIC_MAX_ENTITIES into PanoramicPass."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicResult
+    from alayaos_core.extraction.integrator.schemas import EnrichmentResult
+
+    settings = _make_settings()
+    settings.CONSOLIDATOR_PANORAMIC_MAX_ENTITIES = 123
+    engine = _make_engine(settings=settings)
+    engine._enricher = AsyncMock()
+    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+
+    run_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    session = AsyncMock()
+    session.commit = AsyncMock()
+
+    with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_panoramic_pass:
+        pano_instance = AsyncMock()
+        pano_instance.run = AsyncMock(return_value=PanoramicResult(actions=[]))
+        mock_panoramic_pass.return_value = pano_instance
+
+        engine._dedup_v2 = AsyncMock(return_value=(0, []))
+
+        result = await engine._run_locked(ws_id, run_id, session)
+
+    assert result.status == "completed"
+    assert result.convergence_reason == "no_actions"
+    assert mock_panoramic_pass.call_args is not None
+    assert mock_panoramic_pass.call_args.kwargs["max_entities"] == 123
+
+
+@pytest.mark.asyncio
+async def test_panoramic_pass_falls_back_to_default_when_setting_is_not_int():
+    """Engine must not pass through MagicMock or other invalid values as the panoramic cap."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicResult
+    from alayaos_core.extraction.integrator.schemas import EnrichmentResult
+
+    settings = _make_settings()
+    settings.CONSOLIDATOR_PANORAMIC_MAX_ENTITIES = MagicMock()
+    engine = _make_engine(settings=settings)
+    engine._enricher = AsyncMock()
+    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+
+    run_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    session = AsyncMock()
+    session.commit = AsyncMock()
+
+    with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_panoramic_pass:
+        pano_instance = AsyncMock()
+        pano_instance.run = AsyncMock(return_value=PanoramicResult(actions=[]))
+        mock_panoramic_pass.return_value = pano_instance
+
+        engine._dedup_v2 = AsyncMock(return_value=(0, []))
+
+        result = await engine._run_locked(ws_id, run_id, session)
+
+    assert result.status == "completed"
+    assert mock_panoramic_pass.call_args is not None
+    assert mock_panoramic_pass.call_args.kwargs["max_entities"] == 500
 
 
 # ---------------------------------------------------------------------------
@@ -825,13 +889,13 @@ async def test_noise_removed_counts_only_remove_noise_actions():
 
 
 # ---------------------------------------------------------------------------
-# Test: _merge_duplicates writes IntegratorAction audit records (Fix — holistic review)
+# Test: _merge_duplicates delegates to DeduplicatorV2 merge path
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_merge_duplicates_writes_audit_records():
-    """_merge_duplicates must create IntegratorAction audit records when action_repo is provided."""
+async def test_merge_duplicates_delegates_to_dedup_v2_merge_path():
+    """Fallback pairwise dedup must reuse DeduplicatorV2 merge application."""
     from alayaos_core.extraction.integrator.schemas import DuplicatePair
 
     entity_a_id = uuid.uuid4()
@@ -840,6 +904,7 @@ async def test_merge_duplicates_writes_audit_records():
     entity_a = MagicMock()
     entity_a.id = entity_a_id
     entity_a.name = "Alice"
+    entity_a.description = ""
     entity_a.aliases = []
     entity_a.properties = {}
 
@@ -855,9 +920,9 @@ async def test_merge_duplicates_writes_audit_records():
     entity_repo.list_recent = AsyncMock(return_value=[])
 
     engine = _make_engine(entity_repo=entity_repo)
+    engine._deduplicator_v2._apply_merge_group = AsyncMock(return_value=1)
 
     session = AsyncMock()
-    session.execute = AsyncMock()
 
     action_repo = AsyncMock()
     action_repo.create = AsyncMock(return_value=MagicMock())
@@ -877,14 +942,68 @@ async def test_merge_duplicates_writes_audit_records():
     merged = await engine._merge_duplicates([pair], ws_id, session, run_id=run_id, action_repo=action_repo)
 
     assert merged == 1
-    # action_repo.create must have been called once for the merge audit record
-    action_repo.create.assert_called_once()
-    call_kwargs = action_repo.create.call_args
-    # Verify the audit record has action_type="merge" and correct entity references
-    action_data = call_kwargs.kwargs.get("data") or call_kwargs.args[1]
-    assert action_data.action_type == "merge"
-    assert action_data.entity_id == entity_a_id
-    assert str(entity_b_id) in str(action_data.params)
+    engine._deduplicator_v2._apply_merge_group.assert_awaited_once_with(
+        winner_id=entity_a_id,
+        loser_ids=[entity_b_id],
+        merged_name="Alice",
+        merged_description="",
+        merged_aliases=["Ali"],
+        confidence=0.95,
+        rationale="fallback merge via vector_shortlist",
+        workspace_id=ws_id,
+        run_id=run_id,
+        entity_repo=entity_repo,
+        session=session,
+        action_repo=action_repo,
+    )
+
+
+@pytest.mark.asyncio
+async def test_merge_duplicates_skips_audit_when_run_id_missing():
+    """Fallback pairwise dedup must not write audit records without a real run_id."""
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_a = MagicMock()
+    entity_a.id = entity_a_id
+    entity_a.name = "Alice"
+    entity_a.aliases = ["A"]
+    entity_a.description = "Winner"
+    entity_a.properties = {}
+
+    entity_b = MagicMock()
+    entity_b.id = entity_b_id
+    entity_b.name = "Alicia"
+    entity_b.aliases = ["Ali"]
+    entity_b.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(side_effect=lambda eid: entity_a if eid == entity_a_id else entity_b)
+    entity_repo.list_recent = AsyncMock(return_value=[])
+
+    engine = _make_engine(entity_repo=entity_repo)
+    engine._deduplicator_v2._apply_merge_group = AsyncMock(return_value=1)
+
+    session = AsyncMock()
+    action_repo = AsyncMock()
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="Alice",
+        entity_b_name="Alicia",
+        score=0.95,
+        method="vector_shortlist",
+    )
+
+    merged = await engine._merge_duplicates([pair], uuid.uuid4(), session, run_id=None, action_repo=action_repo)
+
+    assert merged == 1
+    call_kwargs = engine._deduplicator_v2._apply_merge_group.await_args.kwargs
+    assert call_kwargs["run_id"] == uuid.UUID(int=0)
+    assert call_kwargs["action_repo"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -18,9 +18,9 @@ from __future__ import annotations
 import contextlib
 import time
 import uuid
+from typing import Any
 
 import structlog
-from sqlalchemy import text
 
 from alayaos_core.extraction.integrator.dedup import (
     DeduplicatorV2,
@@ -42,6 +42,7 @@ log = structlog.get_logger()
 
 # Maximum number of panoramic→dedup passes before forcing convergence.
 _MAX_PASSES = 3
+_DEFAULT_PANORAMIC_MAX_ENTITIES = 500
 
 
 class IntegratorEngine:
@@ -99,9 +100,21 @@ class IntegratorEngine:
         # Dedup v2 (Sprint 5): batch-oriented deduplicator with composite signal ordering
         self._dedup_batch_size: int = getattr(settings, "INTEGRATOR_DEDUP_BATCH_SIZE", 9)
         self._deduplicator_v2 = DeduplicatorV2(llm=llm, batch_size=self._dedup_batch_size)
+        self._panoramic_max_entities = self._coerce_positive_int(
+            getattr(settings, "CONSOLIDATOR_PANORAMIC_MAX_ENTITIES", _DEFAULT_PANORAMIC_MAX_ENTITIES),
+            default=_DEFAULT_PANORAMIC_MAX_ENTITIES,
+        )
 
         # Embedding service injected in tests; created lazily in production
         self._embedding_service = None
+
+    @staticmethod
+    def _coerce_positive_int(value: Any, *, default: int) -> int:
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, int) and value > 0:
+            return value
+        return default
 
     async def run(
         self,
@@ -215,7 +228,11 @@ class IntegratorEngine:
             )
 
             # ── Panoramic pass ──
-            panoramic_pass = PanoramicPass(llm_service=self.llm, session=session)
+            panoramic_pass = PanoramicPass(
+                llm_service=self.llm,
+                session=session,
+                max_entities=self._panoramic_max_entities,
+            )
             panoramic_result = await panoramic_pass.run(
                 workspace_id=workspace_id,
                 entities=entities_with_context,
@@ -801,98 +818,23 @@ class IntegratorEngine:
             entity_a = await self.entity_repo.get_by_id(pair.entity_a_id)
             if not entity_a or not entity_b:
                 continue
-            # Step 1: Merge aliases — union of both alias lists + entity_b's name as an alias
-            new_aliases = list(set(list(entity_a.aliases or []) + list(entity_b.aliases or []) + [entity_b.name]))
-            await self.entity_repo.update(entity_a.id, aliases=new_aliases)
-            # Step 2: Reassign claims from entity_b to entity_a
-            await session.execute(
-                text("UPDATE l2_claims SET entity_id = :a_id WHERE entity_id = :b_id AND workspace_id = :ws_id"),
-                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            # Fallback pairwise dedup must share the same merge/audit path as DeduplicatorV2
+            # so rollback metadata stays complete even when embeddings fail.
+            effective_action_repo = action_repo if run_id is not None else None
+            merged += await self._deduplicator_v2._apply_merge_group(
+                winner_id=entity_a.id,
+                loser_ids=[entity_b.id],
+                merged_name=entity_a.name,
+                merged_description=getattr(entity_a, "description", "") or "",
+                merged_aliases=list(dict.fromkeys([*(entity_a.aliases or []), *(entity_b.aliases or [])])),
+                confidence=pair.score,
+                rationale=f"fallback merge via {pair.method}",
+                workspace_id=workspace_id,
+                run_id=run_id or uuid.UUID(int=0),
+                entity_repo=self.entity_repo,
+                session=session,
+                action_repo=effective_action_repo,
             )
-            # Step 3: Reassign relations where entity_b is the source (skip would-be self-refs)
-            await session.execute(
-                text(
-                    "UPDATE l1_relations SET source_entity_id = :a_id"
-                    " WHERE source_entity_id = :b_id AND target_entity_id != :a_id"
-                    " AND workspace_id = :ws_id"
-                ),
-                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
-            )
-            # Delete b→a relations that would become self-referential
-            await session.execute(
-                text(
-                    "DELETE FROM l1_relations"
-                    " WHERE source_entity_id = :b_id AND target_entity_id = :a_id"
-                    " AND workspace_id = :ws_id"
-                ),
-                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
-            )
-            # Step 4: Reassign relations where entity_b is the target (skip would-be self-refs)
-            await session.execute(
-                text(
-                    "UPDATE l1_relations SET target_entity_id = :a_id"
-                    " WHERE target_entity_id = :b_id AND source_entity_id != :a_id"
-                    " AND workspace_id = :ws_id"
-                ),
-                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
-            )
-            # Delete a→b relations that would become self-referential
-            await session.execute(
-                text(
-                    "DELETE FROM l1_relations"
-                    " WHERE source_entity_id = :a_id AND target_entity_id = :b_id"
-                    " AND workspace_id = :ws_id"
-                ),
-                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
-            )
-            # Step 5: Deduplicate relations on entity_a (same source, target, relation_type)
-            await session.execute(
-                text(
-                    "DELETE FROM l1_relations WHERE id IN ("
-                    "  SELECT id FROM ("
-                    "    SELECT id, ROW_NUMBER() OVER ("
-                    "      PARTITION BY workspace_id, source_entity_id, target_entity_id, relation_type"
-                    "      ORDER BY created_at"
-                    "    ) AS rn FROM l1_relations"
-                    "    WHERE (source_entity_id = :a_id OR target_entity_id = :a_id)"
-                    "    AND workspace_id = :ws_id"
-                    "  ) ranked WHERE rn > 1"
-                    ")"
-                ),
-                {"a_id": entity_a.id, "ws_id": workspace_id},
-            )
-            # Step 6: Reassign entity vector_chunks from entity_b to entity_a
-            await session.execute(
-                text(
-                    "UPDATE vector_chunks SET source_id = :a_id"
-                    " WHERE source_id = :b_id AND source_type = 'entity' AND workspace_id = :ws_id"
-                ),
-                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
-            )
-            # Step 7: Record provenance and soft-delete entity_b
-            props = dict(entity_b.properties or {})
-            props["merged_into"] = str(entity_a.id)
-            await self.entity_repo.update(entity_b.id, is_deleted=True, properties=props)
-            # Step 8: Write audit record (best-effort — failure doesn't abort the merge)
-            if action_repo is not None and run_id is not None:
-                with contextlib.suppress(Exception):
-                    from alayaos_core.schemas.integrator_action import IntegratorActionCreate
-
-                    await action_repo.create(
-                        workspace_id=workspace_id,
-                        data=IntegratorActionCreate(
-                            run_id=run_id,
-                            action_type="merge",
-                            entity_id=entity_a.id,
-                            params={"loser_id": str(entity_b.id), "merged_name": entity_a.name},
-                            targets=[
-                                {"id": str(entity_a.id), "name": entity_a.name},
-                                {"id": str(entity_b.id), "name": entity_b.name},
-                            ],
-                            inverse={"action": "unmerge", "loser_id": str(entity_b.id)},
-                        ),
-                    )
-            merged += 1
         return merged
 
     # ---------------------------------------------------------------------------

@@ -148,13 +148,16 @@ Plan: `docs/superflow/plans/2026-04-14-run5.3-pipeline-reliability.md`
 
 ---
 
-## Run 4+: Future (from Master Plan)
+## Run 4+: Future (from Master Plan, partially superseded by current roadmap)
 
 | Run | Scope | Status |
 |-----|-------|--------|
-| Run 4 | CLI (Typer + Rich) | Not started |
+| Run 4 | CLI (Typer + Rich) | Superseded in practice — Go CLI exists, old status is stale |
+| Run 5.5 | Extraction Quality RC | Planned |
+| Run 5.6 | Memory Layer Completion | Planned |
+| Run 5.7 | Action Loop Core | Planned |
 | Run 5a-d | Connectors (Slack, GitHub, Linear, Webhook) | Not started |
-| Run 6 | MCP Server | Not started |
+| Run 6 | MCP Server | Deferred until after 5.7 |
 | Run 7 | Web UI | Not started |
 | Run 8a-q | Workflows, Agents, Analytics | Not started |
 
@@ -166,28 +169,34 @@ Plan: `docs/superflow/plans/2026-04-14-run5.3-pipeline-reliability.md`
 
 Source: `docs/vision/alaya-master-vision-session-summary-ru.md`, `alaya-operational-memory-whitepaper-ru.md`, `alaya-implementation-note-ru.md`.
 
+Execution order for ближайшие большие блоки теперь такой:
+
+1. `Run 5.5 — Extraction Quality RC`
+2. `Run 5.6 — Memory Layer Completion`
+3. `Run 5.7 — Action Loop Core`
+
 ### P1 — критичные для vision-позиционирования
 
 | ID | P | Title | Where | Details |
 |----|---|-------|-------|---------|
-| VGAP.01 | P1 | Action Loop MVP — reminders, stale surfacing, state-triggered workflows | новый `core/workflow/`, TaskIQ jobs, `api/routers/workflows.py` | Execution сейчас — внутренний слой pipeline. Vision: execution — **часть identity системы**. MVP: `job_remind`, `job_stale_scan`, `job_followup_check` + 3 endpoint'а. Без этого Alaya = просто память, а не operational engine. |
-| VGAP.02 | P1 | Declared vs Inferred на claim | `models/claim.py`, `crystallizer/schemas.py`, extraction prompt | Vision: «один из важнейших принципов». Сейчас есть только `confidence` — это не то же самое. Добавить `kind: Literal["declared","inferred"]`. Crystallizer должен различать на выходе. Inferred не маскируется под declared. |
-| VGAP.03 | P1 | Commitment как отдельный entity/claim kind | `entity_types` seed + crystallizer prompt + eval | Обязательства («Иван сделает X к Y») — это топливо для Action Loop (VGAP.01). Без отдельного извлечения reminders не из чего строить. Пересекается с VGAP.02 (commitment = declared по определению). |
+| VGAP.01 | P1 | Action Loop MVP — reminders, stale surfacing, state-triggered workflows | новый `core/workflow/`, TaskIQ jobs, `api/routers/workflows.py` | Execution сейчас — внутренний слой pipeline. Vision: execution — **часть identity системы**. MVP: `job_remind`, `job_stale_scan`, `job_followup_check` + 3 endpoint'а. Без этого Alaya = просто память, а не operational engine. **Planned for Run 5.7 after memory layer completion.** |
+| VGAP.02 | P1 | Declared vs Inferred на claim | `models/claim.py`, `crystallizer/schemas.py`, extraction prompt | Vision: «один из важнейших принципов». Сейчас есть только `confidence` — это не то же самое. Добавить `kind: Literal["declared","inferred"]`. Crystallizer должен различать на выходе. Inferred не маскируется под declared. **Planned for Run 5.6 as part of Memory Layer Completion.** |
+| VGAP.03 | P1 | Commitment как отдельный entity/claim kind | `entity_types` seed + crystallizer prompt + eval | Обязательства («Иван сделает X к Y») — это топливо для Action Loop (VGAP.01). Но до workflow commitments должны жить как first-class memory objects. Пересекается с VGAP.02 (commitment = declared по определению). **Planned for Run 5.6.** |
 
 ### P2 — важные гигиенические
 
 | ID | P | Title | Where | Details |
 |----|---|-------|-------|---------|
 | VGAP.04 | P2 | Stale-state detection + surfacing | `integrator/` + новый endpoint `/state/stale` | Формула: `max(valid_from, last_touched) + decay > threshold` → сущность/claim в review. Питает VGAP.01. |
-| VGAP.05 | P2 | ACL propagation: event → chunks → claims → retrieval | `writer.py`, все workspace-scoped repos | Сейчас `access_level` проверяется только в `should_extract()`. Claim неявно наследует от event — но это не фильтруется при retrieval по API-key/person scope. Явно пропагировать и фильтровать. |
-| VGAP.06 | P2 | Correction loop | `PATCH /claims/{id}` + integrator hook | Ручная коррекция claim → старый в `superseded`, downstream tree dirty, conflicts-recheck. Сейчас PATCH не триггерит ничего. |
+| VGAP.05 | P2 | ACL propagation: event → chunks → claims → retrieval | `writer.py`, все workspace-scoped repos | Сейчас `access_level` проверяется только в `should_extract()`. Claim неявно наследует от event — но это не фильтруется при retrieval по API-key/person scope. Явно пропагировать и фильтровать. **Planned for Run 5.6.** |
+| VGAP.06 | P2 | Correction loop | `PATCH /claims/{id}` + integrator hook | Ручная коррекция claim → старый в `superseded`, downstream tree dirty, conflicts-recheck. Сейчас PATCH не триггерит ничего. **Planned for Run 5.6.** |
 
 ### P3 — практики и дисциплина
 
 | ID | P | Title | Where | Details |
 |----|---|-------|-------|---------|
 | VGAP.07 | P3 | Core Extraction Journal как практика | `docs/core-journal/` + CLAUDE.md addendum | Vision: для каждой крупной фичи запись — core/domain/reusable, зависимости, цена выделения. Это discipline, не feature. Нужна, чтобы избежать premature carve-out. |
-| VGAP.08 | P3 | Evals-first как политика | CLAUDE.md architecture rules | Vision: «любой сложный слой требует evals или justified skip». Расширить `eval_extraction.py` → `--real` flag + LongMemEval-style harness. Связано с RUN3.10. |
+| VGAP.08 | P3 | Evals-first как политика | CLAUDE.md architecture rules | Vision: «любой сложный слой требует evals или justified skip». Расширить `eval_extraction.py` → `--real` flag + LongMemEval-style harness. Связано с RUN3.10. **Starts in Run 5.5, continues in Run 5.6.** |
 
 ---
 
@@ -251,3 +260,65 @@ Ported verbatim from the brief's "Items deferred" table (RUN5.4.10–15).
 | Backlog ID | Title | Evidence |
 |-----------|-------|----------|
 | RUN3.01 | Entity dedup: soft-delete only, no claim/relation reassignment | Closed in code by DeduplicatorV2 (`packages/core/alayaos_core/extraction/integrator/dedup.py:589-640`) and the v1 fallback fix (`packages/core/alayaos_core/extraction/integrator/engine.py:807-860`). Raw-SQL reassignment of claims, relations, chunks now runs on every merge path. |
+
+---
+
+## Run 5.5: Extraction Quality RC (planned 2026-04-17)
+
+Brief:
+`docs/superflow/specs/2026-04-17-run5.5-extraction-quality-rc-brief.md`
+
+Цель run'а: не расширять scope, а доказать качество extraction + consolidation как законченного OSS-substrate перед тем, как объявлять memory layer finished.
+
+### Carry-over items to close in this run
+
+| Existing ID | P | Title | Why it belongs in Run 5.5 |
+|------------|---|-------|----------------------------|
+| RUN5.4.FU.01 | P1 | Enforce `ENTITY_TYPE_TIER_RANK` on `part_of` writes | Иначе benchmark graph quality невалиден: hierarchy можно сломать любым non-panoramic write path. |
+| RUN5.4.FU.02 | P1 | `_rollback_merge` does not reverse FK reassignment | Audit / rollback correctness должна быть закончена до внешнего показа consolidation слоя. |
+| RUN5.4.FU.03 | P1 | Complete RUN5.4.09 integrator cost observability | Без этого cost/usage claims по integrator нельзя честно показывать в benchmark report. |
+| RUN5.4.FU.04 | P1 | Run post-merge Step D benchmark on 40-event fixture | Главный release gate для extraction + consolidation после Run 5.4. |
+| RUN5.4.FU.06 | P2 | Wire `CONSOLIDATOR_PANORAMIC_MAX_ENTITIES` through `Settings` | Нужен рабочий tuning knob до benchmark / reproduction story. |
+| RUN5.4.FU.07 | P2 | Synthetic dedup-gold fixture | Нужен deterministic regression pack поверх real 40-event fixture. |
+| RUN3.10 | P3 | Eval script needs `--real` flag | Existing eval story still fragmented; real-mode path нужен для repeatable OSS-quality checks. |
+| RUN5.3.07 | P2 | Drop Cortex `verify` pass by default | Входит в run только если свежий benchmark подтвердит выигрыш без quality regression. |
+| RUN5.3.09 | P2 | Extractor: current date in system prompt | Входит в run только если quality regression по temporal extraction подтвердится в benchmark. |
+| RUN5.3.10 | P3 | Extractor: prefer specific predicates over `description` | Входит в run только если description-overuse снова подтвердится на свежем fixture. |
+
+### New run-scoped items
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.5.01 | P1 | Public benchmark adapter / runbook for `LongMemEval` or `LoCoMo` | `scripts/`, `docs/evals/` or `docs/superflow/` | Для OSS handoff нужен хотя бы один узнаваемый внешний benchmark path, а не только private 40-event fixture. |
+| RUN5.5.02 | P1 | Extraction-quality release report | `docs/audits/` or `docs/superflow/audits/` | Зафиксировать команды, fixture assumptions, metric table, post-Run-5.4 deltas, known limits. Это артефакт для external demo / handoff. |
+| RUN5.5.03 | P2 | README and product docs: verified extraction/consolidation wording only | `README.md`, `docs/concept/`, `docs/vision/` as needed | После benchmark обновить public wording так, чтобы claims были подтверждены, а не aspirational. |
+| RUN5.5.04 | P2 | Benchmark relevance note: internal fixture primary, external suites secondary | `docs/evals/`, run brief, release report | Зафиксировать, что task-management / company-memory domain остаётся основным truth source для продукта. Public suites (`LongMemEval`, `LoCoMo`) нужны как compatibility signal и OSS positioning, но не заменяют domain-fit benchmark. |
+
+---
+
+## Run 5.6: Memory Layer Completion (planned 2026-04-17)
+
+Brief:
+`docs/superflow/specs/2026-04-17-run5.6-memory-layer-completion-brief.md`
+
+Цель run'а: довести memory layer над extraction до состояния finished product. Это включает не только `/search`, `/ask`, `/tree`, но и честные memory semantics, без которых эта поверхность остаётся недоделанной.
+
+### New run-scoped items
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN5.6.01 | P1 | Memory-layer eval harness for `/search`, `/ask`, `/tree` | `scripts/`, `tests/`, `packages/core/alayaos_core/services/` | Память должна мериться не только extraction metrics. Нужны acceptance checks для retrieval, citation validity, tree usefulness, fallback behavior. |
+| RUN5.6.02 | P1 | Declared vs Inferred on claim | `packages/core/alayaos_core/models/claim.py`, `extraction/crystallizer/`, schemas, tests | Cross-link: `VGAP.02`. Это часть memory semantics, а не отдельная future nice-to-have. |
+| RUN5.6.03 | P1 | Commitment as first-class memory object | seeds, crystallizer prompt, retrieval weighting, eval | Cross-link: `VGAP.03`. Commitments нужны не только для будущего workflow, но и для честной памяти о "кто что обещал". |
+| RUN5.6.04 | P1 | Correction loop with downstream memory invalidation | `PATCH /claims/{id}`, integrator/tree hooks, tests | Cross-link: `VGAP.06`. Manual correction должна менять memory state, а не только status поля. |
+| RUN5.6.05 | P1 | ACL propagation from event to chunks/claims/retrieval | `writer.py`, retrieval repos/services, tests | Cross-link: `VGAP.05`. Memory layer нельзя считать finished, пока ACL живёт только на ingest gate. |
+| RUN5.6.06 | P2 | L3 tree briefing quality and deterministic fallback review | `packages/core/alayaos_core/services/tree.py`, router/tests/docs | Tree уже есть, но его нужно довести как настоящий memory briefing layer: synthesis usefulness, timeout fallback, export usefulness, dirty correctness. |
+| RUN5.6.07 | P2 | Memory-surface product pass: unify `/search`, `/ask`, `/tree` expectations | `docs/`, tests, services | Явно задокументировать и проверить, что эти три surface работают как одна memory system, а не как набор разрозненных endpoints. |
+| RUN5.6.08 | P1 | End-to-end public benchmark pass through memory surface | `scripts/`, `tests/`, `docs/evals/` | После finishing memory layer прогнать хотя бы один внешний benchmark не только через extraction internals, а через реальную memory surface (`/search`, `/ask`, `/tree` or equivalent harness). |
+
+### Items intentionally left for Run 5.7
+
+| Existing ID | P | Title | Why not in Run 5.6 |
+|------------|---|-------|---------------------|
+| VGAP.01 | P1 | Action Loop MVP — reminders, stale surfacing, state-triggered workflows | Execution intentionally moved after extraction quality and memory layer completion. |
+| VGAP.04 | P2 | Stale-state detection + surfacing | Часть Action Loop / operational layer, не prerequisite для finishing memory surface. |

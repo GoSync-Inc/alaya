@@ -19,6 +19,7 @@ import math
 import uuid
 
 import structlog
+from sqlalchemy import select
 
 from alayaos_core.extraction.integrator.schemas import DuplicatePair, EntityMatchResult, EntityWithContext
 from alayaos_core.extraction.resolver import transliterate_name
@@ -27,6 +28,24 @@ log = structlog.get_logger()
 
 # Minimum name length for fuzzy matching (short names are too unreliable)
 _MIN_NAME_LENGTH = 4
+
+
+def _uuid_list_as_strings(values: list[uuid.UUID]) -> list[str]:
+    return [str(value) for value in values]
+
+
+def _serialize_relation_snapshot(relation) -> dict[str, object]:
+    return {
+        "id": str(relation.id),
+        "source_entity_id": str(relation.source_entity_id),
+        "target_entity_id": str(relation.target_entity_id),
+        "relation_type": relation.relation_type,
+        "confidence": relation.confidence,
+        "metadata": dict(relation.relation_metadata or {}),
+        "extraction_run_id": str(relation.extraction_run_id) if relation.extraction_run_id else None,
+        "created_at": relation.created_at.isoformat() if relation.created_at else None,
+        "updated_at": relation.updated_at.isoformat() if relation.updated_at else None,
+    }
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -553,6 +572,10 @@ class DeduplicatorV2:
         """Apply a single MergeGroup: rewrite winner, soft-delete losers, reassign FK refs."""
         from sqlalchemy import text
 
+        from alayaos_core.models.claim import L2Claim
+        from alayaos_core.models.relation import L1Relation
+        from alayaos_core.models.vector import VectorChunk
+
         winner = await entity_repo.get_by_id(winner_id)
         if winner is None:
             return 0
@@ -574,17 +597,73 @@ class DeduplicatorV2:
             description=merged_description,
             aliases=new_aliases,
         )
+        current_winner_snapshot = dict(before_snapshot)
 
         merged_count = 0
+        pending_audits: list[dict[str, object]] = []
         for loser_id in loser_ids:
             loser = await entity_repo.get_by_id(loser_id)
             if loser is None:
                 continue
 
+            loser_properties = dict(loser.properties or {})
+            audit_winner_snapshot = dict(current_winner_snapshot)
+
             # Add loser's original name as alias on winner
             if loser.name and loser.name not in new_aliases:
                 new_aliases = list(dict.fromkeys([*new_aliases, loser.name]))
                 await entity_repo.update(winner_id, aliases=new_aliases)
+
+            claims_result = await session.execute(
+                select(L2Claim.id)
+                .where(L2Claim.workspace_id == workspace_id)
+                .where(L2Claim.entity_id == loser_id)
+            )
+            moved_claim_ids = list(claims_result.scalars().all())
+
+            source_relations_result = await session.execute(
+                select(L1Relation)
+                .where(L1Relation.workspace_id == workspace_id)
+                .where(L1Relation.source_entity_id == loser_id)
+                .where(L1Relation.target_entity_id != winner_id)
+            )
+            source_relations = list(source_relations_result.scalars().all())
+
+            target_relations_result = await session.execute(
+                select(L1Relation)
+                .where(L1Relation.workspace_id == workspace_id)
+                .where(L1Relation.target_entity_id == loser_id)
+                .where(L1Relation.source_entity_id != winner_id)
+            )
+            target_relations = list(target_relations_result.scalars().all())
+
+            deleted_relations_result = await session.execute(
+                select(L1Relation)
+                .where(L1Relation.workspace_id == workspace_id)
+                .where(
+                    (
+                        (L1Relation.source_entity_id == loser_id)
+                        & (L1Relation.target_entity_id == winner_id)
+                    )
+                    | (
+                        (L1Relation.source_entity_id == winner_id)
+                        & (L1Relation.target_entity_id == loser_id)
+                    )
+                )
+            )
+            deleted_relations = list(deleted_relations_result.scalars().all())
+
+            vector_chunks_result = await session.execute(
+                select(VectorChunk.id)
+                .where(VectorChunk.workspace_id == workspace_id)
+                .where(VectorChunk.source_type == "entity")
+                .where(VectorChunk.source_id == loser_id)
+            )
+            moved_vector_chunk_ids = list(vector_chunks_result.scalars().all())
+
+            relation_snapshots_by_id: dict[str, dict[str, object]] = {}
+            for relation in [*source_relations, *target_relations, *deleted_relations]:
+                relation_snapshots_by_id.setdefault(str(relation.id), _serialize_relation_snapshot(relation))
 
             # Reassign claims from loser to winner
             await session.execute(
@@ -644,63 +723,157 @@ class DeduplicatorV2:
             loser_props["merged_into"] = str(winner_id)
             await entity_repo.update(loser_id, is_deleted=True, properties=loser_props)
 
-            # Record audit action (best-effort — failure doesn't abort merge)
-            if action_repo is not None:
-                try:
-                    from alayaos_core.schemas.integrator_action import IntegratorActionCreate
-
-                    await action_repo.create(
-                        workspace_id=workspace_id,
-                        data=IntegratorActionCreate(
-                            run_id=run_id,
-                            action_type="merge",
-                            entity_id=winner_id,
-                            params={
-                                "name": merged_name,
-                                "description": merged_description,
-                                "aliases": new_aliases,
-                            },
-                            targets=[str(loser_id)],
-                            inverse={
-                                "loser_id": str(loser_id),
-                                **before_snapshot,
-                            },
-                            confidence=confidence,
-                            rationale=rationale,
-                        ),
-                    )
-                except Exception:
-                    log.warning(
-                        "dedup_v2_action_record_failed",
-                        winner_id=str(winner_id),
-                        loser_id=str(loser_id),
-                    )
+            pending_audits.append(
+                {
+                    "loser_id": loser_id,
+                    "winner_snapshot": audit_winner_snapshot,
+                    "winner_after": {
+                        "name": merged_name,
+                        "description": merged_description,
+                        "aliases": list(new_aliases),
+                    },
+                    "loser_properties": loser_properties,
+                    "moved_claim_ids": moved_claim_ids,
+                    "source_relation_ids": [relation.id for relation in source_relations],
+                    "target_relation_ids": [relation.id for relation in target_relations],
+                    "vector_chunk_ids": moved_vector_chunk_ids,
+                    "deleted_relation_ids": [relation.id for relation in deleted_relations],
+                    "relation_snapshots": relation_snapshots_by_id,
+                }
+            )
+            current_winner_snapshot = {
+                "name": merged_name,
+                "description": merged_description,
+                "aliases": list(new_aliases),
+            }
 
             merged_count += 1
 
+        dedup_deleted_relation_ids: set[str] = set()
+        dedup_deleted_relation_snapshots: dict[str, dict[str, object]] = {}
         if merged_count > 0:
             # After reassigning all loser relations to the winner, duplicate
             # (source_entity_id, target_entity_id, relation_type) rows may exist on the winner.
             # Keep the oldest row per unique (source, target, type) tuple; delete the rest.
-            await session.execute(
+            dedup_deleted_rows = await session.execute(
                 text(
-                    "DELETE FROM l1_relations"
-                    " WHERE workspace_id = :ws_id"
-                    " AND id IN ("
-                    "   SELECT id FROM ("
-                    "     SELECT id,"
-                    "       ROW_NUMBER() OVER ("
-                    "         PARTITION BY source_entity_id, target_entity_id, relation_type"
-                    "         ORDER BY created_at ASC"
-                    "       ) AS row_number"
-                    "     FROM l1_relations"
-                    "     WHERE workspace_id = :ws_id"
-                    "       AND (source_entity_id = :winner_id OR target_entity_id = :winner_id)"
-                    "   ) ranked"
-                    "   WHERE row_number > 1"
-                    " )"
+                    "WITH deleted AS ("
+                    "  DELETE FROM l1_relations"
+                    "  WHERE workspace_id = :ws_id"
+                    "  AND id IN ("
+                    "    SELECT id FROM ("
+                    "      SELECT id,"
+                    "        ROW_NUMBER() OVER ("
+                    "          PARTITION BY source_entity_id, target_entity_id, relation_type"
+                    "          ORDER BY created_at ASC"
+                    "        ) AS row_number"
+                    "      FROM l1_relations"
+                    "      WHERE workspace_id = :ws_id"
+                    "        AND (source_entity_id = :winner_id OR target_entity_id = :winner_id)"
+                    "    ) ranked"
+                    "    WHERE row_number > 1"
+                    "  )"
+                    "  RETURNING"
+                    "    id,"
+                    "    source_entity_id,"
+                    "    target_entity_id,"
+                    "    relation_type,"
+                    "    confidence,"
+                    "    metadata,"
+                    "    extraction_run_id,"
+                    "    created_at,"
+                    "    updated_at"
+                    ")"
+                    " SELECT"
+                    "   id,"
+                    "   source_entity_id,"
+                    "   target_entity_id,"
+                    "   relation_type,"
+                    "   confidence,"
+                    "   metadata,"
+                    "   extraction_run_id,"
+                    "   created_at,"
+                    "   updated_at"
+                    " FROM deleted"
                 ),
                 {"ws_id": workspace_id, "winner_id": winner_id},
             )
+            for row in dedup_deleted_rows.mappings().all():
+                relation_id = str(row["id"])
+                dedup_deleted_relation_ids.add(relation_id)
+                dedup_deleted_relation_snapshots[relation_id] = {
+                    "id": relation_id,
+                    "source_entity_id": str(row["source_entity_id"]),
+                    "target_entity_id": str(row["target_entity_id"]),
+                    "relation_type": row["relation_type"],
+                    "confidence": row["confidence"],
+                    "metadata": dict(row["metadata"] or {}),
+                    "extraction_run_id": (
+                        str(row["extraction_run_id"]) if row["extraction_run_id"] is not None else None
+                    ),
+                    "created_at": row["created_at"].isoformat() if row["created_at"] is not None else None,
+                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] is not None else None,
+                }
+
+        # Record audit actions after all merge-side relation cleanup, so rollback sees
+        # the full set of moved rows and deleted relation snapshots.
+        for audit in pending_audits:
+            audit_deleted_relation_ids = {
+                str(relation_id) for relation_id in audit["deleted_relation_ids"]  # type: ignore[index]
+            }
+            relation_snapshots = dict(audit["relation_snapshots"])  # type: ignore[arg-type]
+            for relation_id, snapshot in dedup_deleted_relation_snapshots.items():
+                relation_snapshots.setdefault(relation_id, snapshot)
+            audit_deleted_relation_ids.update(dedup_deleted_relation_ids)
+
+            if action_repo is None:
+                continue
+            try:
+                from alayaos_core.schemas.integrator_action import IntegratorActionCreate
+
+                loser_id = audit["loser_id"]
+                winner_after = audit["winner_after"]  # type: ignore[assignment]
+                await action_repo.create(
+                    workspace_id=workspace_id,
+                    data=IntegratorActionCreate(
+                        run_id=run_id,
+                        action_type="merge",
+                        entity_id=winner_id,
+                        params={
+                            "winner_id": str(winner_id),
+                            "loser_id": str(loser_id),
+                            "name": winner_after["name"],
+                            "description": winner_after["description"],
+                            "aliases": winner_after["aliases"],
+                        },
+                        targets=[str(loser_id)],
+                        inverse={
+                            "loser_id": str(loser_id),
+                            "loser_properties": audit["loser_properties"],
+                            **audit["winner_snapshot"],
+                            "winner_snapshot": audit["winner_snapshot"],
+                            "moved": {
+                                "claim_ids": _uuid_list_as_strings(audit["moved_claim_ids"]),  # type: ignore[arg-type]
+                                "relation_source_ids": _uuid_list_as_strings(
+                                    audit["source_relation_ids"]  # type: ignore[arg-type]
+                                ),
+                                "relation_target_ids": _uuid_list_as_strings(
+                                    audit["target_relation_ids"]  # type: ignore[arg-type]
+                                ),
+                                "vector_chunk_ids": _uuid_list_as_strings(audit["vector_chunk_ids"]),  # type: ignore[arg-type]
+                            },
+                            "relation_snapshots": list(relation_snapshots.values()),
+                            "deleted_relation_ids": sorted(audit_deleted_relation_ids),
+                        },
+                        confidence=confidence,
+                        rationale=rationale,
+                    ),
+                )
+            except Exception:
+                log.warning(
+                    "dedup_v2_action_record_failed",
+                    winner_id=str(winner_id),
+                    loser_id=str(audit["loser_id"]),
+                )
 
         return merged_count

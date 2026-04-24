@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD: float = 0.9
     # Batch size for dedup v2 — number of entities per LLM dedup batch (N=9 default).
     INTEGRATOR_DEDUP_BATCH_SIZE: int = 9
+    CONSOLIDATOR_PANORAMIC_MAX_ENTITIES: int = 500
 
     # Embedding
     EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large"

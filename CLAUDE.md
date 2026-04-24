@@ -136,7 +136,7 @@ Entity Types: GET, POST, GET/{id}
 Predicates: GET, GET/{id} — read-only in Run 1
 Events: POST (idempotent upsert), GET, GET/{id}
 API Keys: POST (raw key once), GET (prefix only), DELETE/{prefix} (revoke)
-Claims: GET (supports entity filter), GET/{id}, PATCH/{id}
+Claims: GET (entity_id filter), GET/{id}, PATCH/{id}
 Relations: GET, GET/{id}
 Extraction Runs: GET, GET/{id}
 Ingestion: POST `/ingest/text` — trigger extraction pipeline
@@ -145,6 +145,7 @@ Chunks: GET (event_id, processing_stage, is_crystal filters), GET/{id}
 Pipeline Traces: GET /events/{id}/trace
 Integrator Runs: GET, GET/{id}, POST /trigger
 Integrator Actions: GET /integrator-actions, POST /integrator-actions/{id}/rollback
+Admin: POST /admin/backfill-embeddings
 Search: POST /search — hybrid 3-channel RRF (vector + FTS + entity name)
 Ask: POST /ask — LLM Q&A with citation validation
 Tree: GET /tree, GET /tree/{path}, POST /tree/export

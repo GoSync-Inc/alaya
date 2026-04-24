@@ -10,6 +10,19 @@ import pytest
 from alayaos_core.extraction.integrator.schemas import EntityWithContext
 
 
+def _make_session_mock(rows: list | None = None) -> AsyncMock:
+    """Create an AsyncMock session whose execute() returns a result with sync fetchall().
+
+    The new v2 audit code calls result.fetchall() (sync) after await session.execute(...).
+    A plain AsyncMock returns another coroutine for fetchall() — this helper fixes that.
+    """
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = rows if rows is not None else []
+    session = AsyncMock()
+    session.execute.return_value = mock_result
+    return session
+
+
 def _make_entity(
     name: str,
     entity_type: str = "person",
@@ -218,7 +231,7 @@ async def test_dedup_still_merges_obvious_duplicates():
         settings=settings,
     )
 
-    session = AsyncMock()
+    session = _make_session_mock()
     result = await engine.run(ws_id, session)
 
     assert isinstance(result, IntegratorRunResult)
@@ -442,7 +455,7 @@ async def test_dedup_shortlist_path_is_exercised():
     # Inject the fake embedding service (path a)
     engine._embedding_service = fake_embed
 
-    session = AsyncMock()
+    session = _make_session_mock()
     result = await engine.run(ws_id, session)
 
     assert isinstance(result, IntegratorRunResult)
@@ -782,7 +795,7 @@ async def test_merge_with_rewrite_output():
     )
     fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
 
-    session = AsyncMock()
+    session = _make_session_mock()
 
     deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
 
@@ -869,7 +882,7 @@ async def test_loser_soft_deleted():
     fake_llm = AsyncMock()
     fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
 
-    session = AsyncMock()
+    session = _make_session_mock()
     deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
 
     winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person")
@@ -944,7 +957,7 @@ async def test_claims_relations_reassigned():
     fake_llm = AsyncMock()
     fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
 
-    session = AsyncMock()
+    session = _make_session_mock()
     deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
 
     winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person")
@@ -997,6 +1010,239 @@ def test_assemble_batches_10_entities_batch_size_9_produces_balanced_batches():
     # All batches must fit within batch_size (rebalancing must not overflow)
     for i, batch in enumerate(batches):
         assert len(batch) <= 9, f"Batch {i} has {len(batch)} entities, exceeds batch_size=9"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 3: v2 audit inverse tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_apply_merge_group_writes_v2_audit_inverse():
+    """_apply_merge_group must write snapshot_schema_version=2 and all 7 v2 inverse fields.
+
+    params/targets shape must be unchanged (targets stays list-of-strings, params stays
+    as name/description/aliases dict).
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from alayaos_core.extraction.integrator.dedup import DeduplicatorV2
+    from alayaos_core.extraction.integrator.schemas import DedupResult, EntityWithContext, MergeGroup
+    from alayaos_core.schemas.integrator_action import IntegratorActionCreate  # noqa: TC001
+
+    winner_id = uuid.uuid4()
+    loser_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+
+    winner_entity = MagicMock()
+    winner_entity.id = winner_id
+    winner_entity.name = "Alice Johnson"
+    winner_entity.aliases = ["AJ"]
+    winner_entity.description = "engineer"
+    winner_entity.properties = {}
+
+    loser_entity = MagicMock()
+    loser_entity.id = loser_id
+    loser_entity.name = "Alice Jonson"
+    loser_entity.aliases = ["Alice J"]
+    loser_entity.description = "senior engineer"
+    loser_entity.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(
+        side_effect=lambda eid: {winner_id: winner_entity, loser_id: loser_entity}.get(eid)
+    )
+    entity_repo.update = AsyncMock()
+
+    dedup_result = DedupResult(
+        groups=[
+            MergeGroup(
+                winner_id=winner_id,
+                loser_ids=[loser_id],
+                merged_name="Alice Johnson",
+                merged_description="Senior engineer",
+                merged_aliases=["AJ", "Alice J"],
+                confidence=0.95,
+                rationale="Same person",
+            )
+        ]
+    )
+    fake_llm = AsyncMock()
+    fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
+
+    session = _make_session_mock()
+
+    # Capture the audit write
+    created_actions: list[IntegratorActionCreate] = []
+
+    async def capture_create(workspace_id, data):
+        created_actions.append(data)
+        mock_action = MagicMock()
+        return mock_action
+
+    action_repo = AsyncMock()
+    action_repo.create = AsyncMock(side_effect=capture_create)
+
+    deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
+    winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person", aliases=["AJ"])
+    loser_ewc = EntityWithContext(id=loser_id, name="Alice Jonson", entity_type="person", aliases=["Alice J"])
+
+    merged, _ = await deduplicator.execute_batches(
+        batches=[[winner_ewc, loser_ewc]],
+        entity_type="person",
+        workspace_id=ws_id,
+        run_id=run_id,
+        entity_repo=entity_repo,
+        session=session,
+        action_repo=action_repo,
+    )
+
+    assert merged >= 1
+    assert len(created_actions) == 1
+    audit = created_actions[0]
+
+    # snapshot_schema_version must be 2
+    assert audit.snapshot_schema_version == 2
+
+    # All 7 v2 inverse fields must be present
+    v2_fields = [
+        "moved_claim_ids",
+        "moved_relation_source_ids",
+        "moved_relation_target_ids",
+        "moved_chunk_ids",
+        "deleted_self_ref_relation_ids",
+        "deduplicated_relation_ids",
+        "winner_before",
+    ]
+    for field in v2_fields:
+        assert field in audit.inverse, f"Missing v2 inverse field: {field!r}"
+
+    # params shape: unchanged (name/description/aliases dict)
+    assert "name" in audit.params
+    assert "description" in audit.params
+    assert "aliases" in audit.params
+    # targets shape: unchanged (list-of-strings with loser_id)
+    assert isinstance(audit.targets, list)
+    assert len(audit.targets) == 1
+    assert audit.targets[0] == str(loser_id)
+
+
+@pytest.mark.asyncio
+async def test_apply_merge_group_dedup_inside_loop():
+    """Each loser gets its own per-loser dedup pass (scoped to that loser's winner).
+
+    Two losers: each produces a duplicate relation on the winner. Each loser's audit
+    must have deduplicated_relation_ids populated (per-loser, not global).
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from alayaos_core.extraction.integrator.dedup import DeduplicatorV2
+    from alayaos_core.extraction.integrator.schemas import DedupResult, EntityWithContext, MergeGroup
+    from alayaos_core.schemas.integrator_action import IntegratorActionCreate  # noqa: TC001
+
+    winner_id = uuid.uuid4()
+    loser1_id = uuid.uuid4()
+    loser2_id = uuid.uuid4()
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+    dup_rel1_id = uuid.uuid4()
+    dup_rel2_id = uuid.uuid4()
+
+    def _make_mock_entity(eid, name):
+        e = MagicMock()
+        e.id = eid
+        e.name = name
+        e.aliases = []
+        e.description = ""
+        e.properties = {}
+        return e
+
+    winner_entity = _make_mock_entity(winner_id, "Alice")
+    loser1_entity = _make_mock_entity(loser1_id, "Alice1")
+    loser2_entity = _make_mock_entity(loser2_id, "Alice2")
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(
+        side_effect=lambda eid: {
+            winner_id: winner_entity,
+            loser1_id: loser1_entity,
+            loser2_id: loser2_entity,
+        }.get(eid)
+    )
+    entity_repo.update = AsyncMock()
+
+    dedup_result = DedupResult(
+        groups=[
+            MergeGroup(
+                winner_id=winner_id,
+                loser_ids=[loser1_id, loser2_id],
+                merged_name="Alice",
+                merged_description="",
+                merged_aliases=[],
+                confidence=0.95,
+                rationale="Same",
+            )
+        ]
+    )
+    fake_llm = AsyncMock()
+    fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
+
+    # Alternate dedup results: loser1 pass deletes dup_rel1, loser2 pass deletes dup_rel2
+    call_count = 0
+
+    def execute_side_effect(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        mock_result = MagicMock()
+        # The dedup DELETE RETURNING query (appears once per loser)
+        sql_str = str(args[0]) if args else ""
+        if "RETURNING" in sql_str and "ROW_NUMBER" in sql_str:
+            # First loser: return dup_rel1_id; second loser: return dup_rel2_id
+            if call_count <= 10:
+                mock_result.fetchall.return_value = [(dup_rel1_id,)]
+            else:
+                mock_result.fetchall.return_value = [(dup_rel2_id,)]
+        else:
+            mock_result.fetchall.return_value = []
+        return mock_result
+
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=execute_side_effect)
+
+    # Capture audit writes
+    created_actions: list[IntegratorActionCreate] = []
+
+    async def capture_create(workspace_id, data):
+        created_actions.append(data)
+        return MagicMock()
+
+    action_repo = AsyncMock()
+    action_repo.create = AsyncMock(side_effect=capture_create)
+
+    deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
+
+    winner_ewc = EntityWithContext(id=winner_id, name="Alice", entity_type="person")
+    loser1_ewc = EntityWithContext(id=loser1_id, name="Alice1", entity_type="person")
+    loser2_ewc = EntityWithContext(id=loser2_id, name="Alice2", entity_type="person")
+
+    merged, _ = await deduplicator.execute_batches(
+        batches=[[winner_ewc, loser1_ewc, loser2_ewc]],
+        entity_type="person",
+        workspace_id=ws_id,
+        run_id=run_id,
+        entity_repo=entity_repo,
+        session=session,
+        action_repo=action_repo,
+    )
+
+    assert merged >= 2
+    # Two audit records: one per loser
+    assert len(created_actions) == 2
+    # Each audit has deduplicated_relation_ids (per-loser scoped)
+    for audit in created_actions:
+        assert "deduplicated_relation_ids" in audit.inverse
+        assert audit.snapshot_schema_version == 2
 
 
 def test_assemble_batches_drops_no_entity_for_various_sizes():
@@ -1106,7 +1352,7 @@ async def test_relation_dedup_after_merge_removes_duplicates():
     fake_llm = AsyncMock()
     fake_llm.extract = AsyncMock(return_value=(dedup_result, MagicMock()))
 
-    session = AsyncMock()
+    session = _make_session_mock()
     deduplicator = DeduplicatorV2(llm=fake_llm, batch_size=9)
 
     winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person")

@@ -841,6 +841,80 @@ class IntegratorEngine:
             entity_a = await self.entity_repo.get_by_id(pair.entity_a_id)
             if not entity_a or not entity_b:
                 continue
+
+            # Snapshot winner before modification (for v2 audit inverse)
+            winner_before_snapshot = {
+                "name": entity_a.name,
+                "description": getattr(entity_a, "description", "") or "",
+                "aliases": list(entity_a.aliases or []),
+            }
+
+            # --- Collect IDs BEFORE mutation (mirrors WHERE clauses below) ---
+
+            # Claims that will be moved
+            claim_result = await session.execute(
+                text("SELECT id FROM l2_claims WHERE entity_id = :b_id AND workspace_id = :ws_id"),
+                {"b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            moved_claim_ids = [str(r[0]) for r in claim_result.fetchall()]
+
+            # Relations where entity_b is source (reassigned, not self-ref deleted)
+            rel_src_result = await session.execute(
+                text(
+                    "SELECT id FROM l1_relations"
+                    " WHERE source_entity_id = :b_id AND target_entity_id != :a_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            moved_relation_source_ids = [str(r[0]) for r in rel_src_result.fetchall()]
+
+            # Self-ref b→a relations that will be deleted
+            self_ref_ba_result = await session.execute(
+                text(
+                    "SELECT id FROM l1_relations"
+                    " WHERE source_entity_id = :b_id AND target_entity_id = :a_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            deleted_self_ref_ba_ids = [str(r[0]) for r in self_ref_ba_result.fetchall()]
+
+            # Relations where entity_b is target (reassigned, not self-ref deleted)
+            rel_tgt_result = await session.execute(
+                text(
+                    "SELECT id FROM l1_relations"
+                    " WHERE target_entity_id = :b_id AND source_entity_id != :a_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            moved_relation_target_ids = [str(r[0]) for r in rel_tgt_result.fetchall()]
+
+            # Self-ref a→b relations that will be deleted
+            self_ref_ab_result = await session.execute(
+                text(
+                    "SELECT id FROM l1_relations"
+                    " WHERE source_entity_id = :a_id AND target_entity_id = :b_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            deleted_self_ref_ab_ids = [str(r[0]) for r in self_ref_ab_result.fetchall()]
+            deleted_self_ref_relation_ids = deleted_self_ref_ba_ids + deleted_self_ref_ab_ids
+
+            # Vector chunks that will be moved
+            chunk_result = await session.execute(
+                text(
+                    "SELECT id FROM vector_chunks"
+                    " WHERE source_id = :b_id AND source_type = 'entity' AND workspace_id = :ws_id"
+                ),
+                {"b_id": entity_b.id, "ws_id": workspace_id},
+            )
+            moved_chunk_ids = [str(r[0]) for r in chunk_result.fetchall()]
+
+            # --- Execute mutations ---
+
             # Step 1: Merge aliases — union of both alias lists + entity_b's name as an alias
             new_aliases = list(set(list(entity_a.aliases or []) + list(entity_b.aliases or []) + [entity_b.name]))
             await self.entity_repo.update(entity_a.id, aliases=new_aliases)
@@ -886,7 +960,7 @@ class IntegratorEngine:
                 {"a_id": entity_a.id, "b_id": entity_b.id, "ws_id": workspace_id},
             )
             # Step 5: Deduplicate relations on entity_a (same source, target, relation_type)
-            await session.execute(
+            dedup_result = await session.execute(
                 text(
                     "DELETE FROM l1_relations WHERE id IN ("
                     "  SELECT id FROM ("
@@ -897,10 +971,12 @@ class IntegratorEngine:
                     "    WHERE (source_entity_id = :a_id OR target_entity_id = :a_id)"
                     "    AND workspace_id = :ws_id"
                     "  ) ranked WHERE rn > 1"
-                    ")"
+                    ") RETURNING id"
                 ),
                 {"a_id": entity_a.id, "ws_id": workspace_id},
             )
+            deduplicated_rows = dedup_result.fetchall()
+            deduplicated_relation_ids = [str(r[0]) for r in deduplicated_rows]
             # Step 6: Reassign entity vector_chunks from entity_b to entity_a
             await session.execute(
                 text(
@@ -915,7 +991,7 @@ class IntegratorEngine:
             await self.entity_repo.update(entity_b.id, is_deleted=True, properties=props)
             # Step 8: Write audit record (best-effort — failure doesn't abort the merge)
             if action_repo is not None and run_id is not None:
-                with contextlib.suppress(Exception):
+                try:
                     from alayaos_core.schemas.integrator_action import IntegratorActionCreate
 
                     await action_repo.create(
@@ -929,8 +1005,25 @@ class IntegratorEngine:
                                 {"id": str(entity_a.id), "name": entity_a.name},
                                 {"id": str(entity_b.id), "name": entity_b.name},
                             ],
-                            inverse={"action": "unmerge", "loser_id": str(entity_b.id)},
+                            inverse={
+                                "action": "unmerge",
+                                "loser_id": str(entity_b.id),
+                                "moved_claim_ids": moved_claim_ids,
+                                "moved_relation_source_ids": moved_relation_source_ids,
+                                "moved_relation_target_ids": moved_relation_target_ids,
+                                "moved_chunk_ids": moved_chunk_ids,
+                                "deleted_self_ref_relation_ids": deleted_self_ref_relation_ids,
+                                "deduplicated_relation_ids": deduplicated_relation_ids,
+                                "winner_before": winner_before_snapshot,
+                            },
+                            snapshot_schema_version=2,
                         ),
+                    )
+                except Exception:
+                    log.error(
+                        "merge_audit_write_failed",
+                        loser_id=str(entity_b.id),
+                        exc_info=True,
                     )
             merged += 1
         return merged

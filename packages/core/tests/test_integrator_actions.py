@@ -732,3 +732,345 @@ class TestIntegratorActionRollback:
         assert "unknown_future_action" in result.conflicts[0]
         # action must remain applied, not rolled_back
         assert action.status == "applied"
+
+
+# ─── Sprint 3: v2 schema + rollback tests ─────────────────────────────────────
+
+
+class TestIntegratorActionV2Schema:
+    def test_integrator_action_create_preserves_snapshot_schema_version(self) -> None:
+        """IntegratorActionCreate.snapshot_schema_version defaults to 1 and accepts 2."""
+        from alayaos_core.schemas.integrator_action import IntegratorActionCreate
+
+        # Default is 1
+        data_v1 = IntegratorActionCreate(
+            run_id=uuid.uuid4(),
+            action_type="merge",
+        )
+        assert data_v1.snapshot_schema_version == 1
+
+        # Can be set to 2
+        data_v2 = IntegratorActionCreate(
+            run_id=uuid.uuid4(),
+            action_type="merge",
+            snapshot_schema_version=2,
+        )
+        assert data_v2.snapshot_schema_version == 2
+
+    def test_integrator_action_read_exposes_snapshot_schema_version(self) -> None:
+        """IntegratorActionRead must expose snapshot_schema_version from model."""
+        from alayaos_core.schemas.integrator_action import IntegratorActionRead
+
+        action = _make_action()
+        action.snapshot_schema_version = 2
+        read = IntegratorActionRead.model_validate(action)
+        assert read.snapshot_schema_version == 2
+
+
+class TestIntegratorActionCreatePassesVersion:
+    @pytest.mark.asyncio
+    async def test_create_passes_snapshot_schema_version_to_model(self) -> None:
+        """IntegratorActionRepository.create() passes snapshot_schema_version to ORM model."""
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+        from alayaos_core.schemas.integrator_action import IntegratorActionCreate
+
+        ws_id = uuid.uuid4()
+        run_id = uuid.uuid4()
+        expected = _make_action(ws_id=ws_id, action_type="merge", run_id=run_id)
+        expected.snapshot_schema_version = 2
+
+        session = make_session()
+        session.execute.return_value = make_result(expected)
+
+        repo = IntegratorActionRepository(session, ws_id)
+        data = IntegratorActionCreate(
+            run_id=run_id,
+            action_type="merge",
+            snapshot_schema_version=2,
+        )
+        await repo.create(ws_id, data)
+        # The constructor call must include snapshot_schema_version=2
+        add_call = session.add.call_args
+        created_action = add_call.args[0]
+        assert created_action.snapshot_schema_version == 2
+
+
+class TestRollbackMergeV2:
+    @pytest.mark.asyncio
+    async def test_rollback_merge_legacy_partial(self) -> None:
+        """v1 action: only is_deleted restored; log rollback_merge_legacy_partial with version=1."""
+        import structlog.testing
+
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        winner_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = winner_id
+        action.status = "applied"
+        action.snapshot_schema_version = 1  # v1 legacy
+        action.inverse = {"loser_id": str(loser_id)}
+        action.targets = [str(loser_id)]
+
+        loser = L1Entity(
+            id=loser_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Loser",
+            properties={},
+            is_deleted=True,
+        )
+        loser.external_ids = []
+
+        session = make_session()
+        session.execute.side_effect = [make_result(action), make_result(loser)]
+
+        repo = IntegratorActionRepository(session, ws_id)
+
+        with structlog.testing.capture_logs() as logs:
+            result = await repo.apply_rollback(ws_id, action.id)
+
+        assert result is not None
+        assert result.conflicts == []
+        assert loser.is_deleted is False
+        assert action.status == "rolled_back"
+        # Must log rollback_merge_legacy_partial
+        log_events = [lg["event"] for lg in logs]
+        assert "rollback_merge_legacy_partial" in log_events
+        partial_log = next(lg for lg in logs if lg["event"] == "rollback_merge_legacy_partial")
+        assert partial_log.get("version") == 1
+        assert partial_log.get("reason") == "version_lt_2"
+
+    @pytest.mark.asyncio
+    async def test_rollback_merge_missing_fields_partial(self) -> None:
+        """v2-stamped action missing moved_claim_ids: legacy-partial with missing_fields logged."""
+        import structlog.testing
+
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        winner_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = winner_id
+        action.status = "applied"
+        action.snapshot_schema_version = 2
+        # Missing moved_claim_ids and other required v2 fields
+        action.inverse = {
+            "loser_id": str(loser_id),
+            "action": "unmerge",
+            # Only partial fields — moved_claim_ids is missing
+        }
+        action.targets = [str(loser_id)]
+
+        loser = L1Entity(
+            id=loser_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Loser",
+            properties={},
+            is_deleted=True,
+        )
+        loser.external_ids = []
+
+        session = make_session()
+        session.execute.side_effect = [make_result(action), make_result(loser)]
+
+        repo = IntegratorActionRepository(session, ws_id)
+
+        with structlog.testing.capture_logs() as logs:
+            result = await repo.apply_rollback(ws_id, action.id)
+
+        assert result is not None
+        assert result.conflicts == []
+        assert loser.is_deleted is False
+        assert action.status == "rolled_back"
+
+        log_events = [lg["event"] for lg in logs]
+        assert "rollback_merge_legacy_partial" in log_events
+        partial_log = next(lg for lg in logs if lg["event"] == "rollback_merge_legacy_partial")
+        assert partial_log.get("reason") == "missing_fields"
+        assert "moved_claim_ids" in partial_log.get("missing_fields", [])
+
+    @pytest.mark.asyncio
+    async def test_rollback_merge_v2_happy_path(self) -> None:
+        """v2 action: full FK reversal + loser restored."""
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        winner_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+        claim_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = winner_id
+        action.status = "applied"
+        action.snapshot_schema_version = 2
+        action.inverse = {
+            "action": "unmerge",
+            "loser_id": str(loser_id),
+            "moved_claim_ids": [str(claim_id)],
+            "moved_relation_source_ids": [],
+            "moved_relation_target_ids": [],
+            "moved_chunk_ids": [],
+            "deleted_self_ref_relation_ids": [],
+            "deduplicated_relation_ids": [],
+            "winner_before": {"name": "Alice", "description": "", "aliases": []},
+        }
+        action.targets = [str(loser_id)]
+
+        loser = L1Entity(
+            id=loser_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Loser",
+            properties={},
+            is_deleted=True,
+        )
+        loser.external_ids = []
+
+        # Simulate: claim is currently held by winner_id → should be moved back to loser
+        claim_row = MagicMock()
+        claim_row.__getitem__ = lambda self, k: winner_id if k == 0 else None
+
+        session = make_session()
+        # Call sequence: get action, claim SELECT, loser SELECT
+        session.execute.side_effect = [
+            make_result(action),
+            MagicMock(fetchone=MagicMock(return_value=(winner_id,))),  # claim check
+            MagicMock(),  # UPDATE claims (reverse)
+            make_result(loser),  # loser lookup in _restore_loser
+        ]
+
+        repo = IntegratorActionRepository(session, ws_id)
+        result = await repo.apply_rollback(ws_id, action.id)
+
+        assert result is not None
+        assert result.conflicts == []
+        assert loser.is_deleted is False
+        assert action.status == "rolled_back"
+
+    @pytest.mark.asyncio
+    async def test_rollback_merge_v2_conflict_detection(self) -> None:
+        """v2 rollback: per-ID states correctly classified; conflicts returned when not forced."""
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        winner_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+        claim_id_winner = uuid.uuid4()  # held by winner → queue for reverse
+        claim_id_loser = uuid.uuid4()  # held by loser → already_restored
+        claim_id_other = uuid.uuid4()  # held by some other entity → conflict
+        other_entity_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = winner_id
+        action.status = "applied"
+        action.snapshot_schema_version = 2
+        action.inverse = {
+            "action": "unmerge",
+            "loser_id": str(loser_id),
+            "moved_claim_ids": [
+                str(claim_id_winner),
+                str(claim_id_loser),
+                str(claim_id_other),
+            ],
+            "moved_relation_source_ids": [],
+            "moved_relation_target_ids": [],
+            "moved_chunk_ids": [],
+            "deleted_self_ref_relation_ids": [],
+            "deduplicated_relation_ids": [],
+            "winner_before": {"name": "Alice", "description": "", "aliases": []},
+        }
+        action.targets = [str(loser_id)]
+
+        import structlog.testing
+
+        # Execute side_effect: get action, then 3 claim SELECTs
+        session = make_session()
+        session.execute.side_effect = [
+            make_result(action),
+            MagicMock(fetchone=MagicMock(return_value=(winner_id,))),  # claim_id_winner → winner_id
+            MagicMock(fetchone=MagicMock(return_value=(loser_id,))),  # claim_id_loser → loser_id
+            MagicMock(fetchone=MagicMock(return_value=(other_entity_id,))),  # claim_id_other → conflict
+        ]
+
+        repo = IntegratorActionRepository(session, ws_id)
+
+        with structlog.testing.capture_logs() as logs:
+            result = await repo.apply_rollback(ws_id, action.id)
+
+        assert result is not None
+        # Conflict must be detected (force=False)
+        assert len(result.conflicts) >= 1
+        assert any(str(claim_id_other) in c for c in result.conflicts)
+        # Action must NOT be rolled_back (conflict blocks)
+        assert action.status == "applied"
+
+        # already_restored log must have been emitted
+        log_events = [lg["event"] for lg in logs]
+        assert "rollback_merge_already_restored" in log_events
+
+    @pytest.mark.asyncio
+    async def test_rollback_merge_with_force_on_conflict(self) -> None:
+        """v2 rollback with force=True: conflict ignored and reversal applied."""
+        from alayaos_core.models.entity import L1Entity
+        from alayaos_core.repositories.integrator_action import IntegratorActionRepository
+
+        ws_id = uuid.uuid4()
+        winner_id = uuid.uuid4()
+        loser_id = uuid.uuid4()
+        claim_id = uuid.uuid4()
+        other_entity_id = uuid.uuid4()
+
+        action = _make_action(ws_id=ws_id, action_type="merge")
+        action.entity_id = winner_id
+        action.status = "applied"
+        action.snapshot_schema_version = 2
+        action.inverse = {
+            "action": "unmerge",
+            "loser_id": str(loser_id),
+            "moved_claim_ids": [str(claim_id)],
+            "moved_relation_source_ids": [],
+            "moved_relation_target_ids": [],
+            "moved_chunk_ids": [],
+            "deleted_self_ref_relation_ids": [],
+            "deduplicated_relation_ids": [],
+            "winner_before": {"name": "Alice", "description": "", "aliases": []},
+        }
+        action.targets = [str(loser_id)]
+
+        loser = L1Entity(
+            id=loser_id,
+            workspace_id=ws_id,
+            entity_type_id=uuid.uuid4(),
+            name="Loser",
+            properties={},
+            is_deleted=True,
+        )
+        loser.external_ids = []
+
+        session = make_session()
+        # Sequence: get action, claim SELECT (conflict: other_entity_id), loser restore.
+        # Note: since the conflict claim does NOT go into reverse_plan (it's a genuine conflict,
+        # not held by winner_id), _reverse_merge_fks has nothing to do (empty plan → no execute).
+        session.execute.side_effect = [
+            make_result(action),
+            MagicMock(fetchone=MagicMock(return_value=(other_entity_id,))),  # conflict claim
+            make_result(loser),  # loser lookup in _restore_loser
+        ]
+
+        repo = IntegratorActionRepository(session, ws_id)
+        result = await repo.apply_rollback(ws_id, action.id, force=True)
+
+        assert result is not None
+        # force=True means conflicts are ignored and empty conflicts returned
+        assert result.conflicts == []
+        assert loser.is_deleted is False
+        assert action.status == "rolled_back"

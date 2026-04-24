@@ -52,3 +52,16 @@ def test_sanity_window_uses_calendar_year_boundary() -> None:
     assert before_boundary.reason == "out_of_sanity_window"
     assert upper_boundary.normalized is True
     assert after_boundary.reason == "out_of_sanity_window"
+
+
+def test_sanity_window_accepts_exact_lower_calendar_boundary_with_non_midnight_anchor() -> None:
+    anchor = datetime(2026, 4, 25, 15, 30, tzinfo=UTC)
+
+    lower_boundary = DateNormalizer().normalize("2016-04-25", reference_date=anchor)
+    before_boundary = DateNormalizer().normalize("2016-04-24", reference_date=anchor)
+
+    assert lower_boundary.normalized is True
+    assert lower_boundary.iso == "2016-04-25T00:00:00+00:00"
+    assert lower_boundary.anchor == anchor
+    assert before_boundary.normalized is False
+    assert before_boundary.reason == "out_of_sanity_window"

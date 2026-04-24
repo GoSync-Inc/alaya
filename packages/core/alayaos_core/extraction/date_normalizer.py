@@ -69,4 +69,4 @@ class DateNormalizer:
 def _within_sanity_window(parsed: datetime, anchor: datetime) -> bool:
     lower = anchor - relativedelta(years=SANITY_PAST_YEARS)
     upper = anchor + relativedelta(years=SANITY_FUTURE_YEARS)
-    return lower <= parsed <= upper
+    return lower.date() <= parsed.date() <= upper.date()

@@ -19,9 +19,5 @@ def log_low_confidence_batch(run_id: str, avg_confidence: float, threshold: floa
         log.warning("extraction.low_confidence_batch", run_id=run_id, avg_confidence=avg_confidence)
 
 
-def log_restricted_skipped(event_id: str, access_level: str) -> None:
-    log.info("extraction.restricted_skipped", event_id=event_id, access_level=access_level)
-
-
 def log_resolver_ambiguous(entity_name: str, score: float, candidate_id: str) -> None:
     log.info("extraction.resolver_ambiguous", entity_name=entity_name, score=score, candidate_id=candidate_id)

@@ -7,7 +7,6 @@ from alayaos_core.extraction.monitoring import (
     log_injection_detected,
     log_low_confidence_batch,
     log_resolver_ambiguous,
-    log_restricted_skipped,
 )
 
 
@@ -83,15 +82,6 @@ def test_log_low_confidence_batch_above_threshold_no_log() -> None:
     with structlog.testing.capture_logs() as cap:
         log_low_confidence_batch(run_id="run-3", avg_confidence=0.8)
     assert len(cap) == 0
-
-
-def test_log_restricted_skipped_emits_info() -> None:
-    with structlog.testing.capture_logs() as cap:
-        log_restricted_skipped(event_id="evt-7", access_level="private")
-    assert len(cap) == 1
-    assert cap[0]["log_level"] == "info"
-    assert cap[0]["event"] == "extraction.restricted_skipped"
-    assert cap[0]["access_level"] == "private"
 
 
 def test_log_resolver_ambiguous_emits_info() -> None:

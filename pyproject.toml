@@ -20,6 +20,8 @@ packages = []
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
+# session scope required: session-scoped engine + per-test async fixtures
+# would otherwise hit "Future attached to different loop"
 asyncio_default_test_loop_scope = "session"
 addopts = "-m 'not integration'"
 markers = [

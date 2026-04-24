@@ -969,3 +969,50 @@ async def test_apply_action_normalize_date_calls_date_normalizer():
     props = update_kwargs["properties"]
     # DateNormalizer should have stored normalized_date
     assert "normalized_date" in props
+
+
+@pytest.mark.asyncio
+async def test_apply_action_normalize_date_logs_failure_reason():
+    """normalize_date action logs the shared DateNormalizer failure reason."""
+    import structlog.testing
+
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.schemas import EnrichmentAction
+
+    entity_id = uuid.uuid4()
+    entity_mock = MagicMock()
+    entity_mock.id = entity_id
+    entity_mock.properties = {"project": "X"}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=entity_mock)
+    entity_repo.update = AsyncMock(return_value=entity_mock)
+
+    engine = IntegratorEngine(
+        llm=MagicMock(),
+        entity_repo=entity_repo,
+        claim_repo=AsyncMock(),
+        relation_repo=AsyncMock(),
+        entity_cache=AsyncMock(),
+        redis=_make_redis_mock(),
+        settings=_make_settings(),
+    )
+
+    action = EnrichmentAction(
+        action="normalize_date",
+        entity_id=entity_id,
+        details={"date_value": "3000-01-01"},
+    )
+
+    with structlog.testing.capture_logs() as logs:
+        counters = await engine._apply_action(action, uuid.uuid4(), AsyncMock())
+
+    assert counters.get("claims_updated") == 1
+    update_kwargs = entity_repo.update.call_args.kwargs
+    assert "normalized_date" not in update_kwargs["properties"]
+    assert any(
+        log_entry["event"] == "date_normalization_failed"
+        and log_entry["reason"] == "out_of_sanity_window"
+        and log_entry["raw"] == "3000-01-01"
+        for log_entry in logs
+    )

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import uuid as _uuid
 from datetime import UTC, datetime
+from functools import lru_cache
 from typing import TYPE_CHECKING
 
 import structlog
 
+from alayaos_core.extraction.date_normalizer import DateNormalizer
 from alayaos_core.extraction.resolver import normalize_name
 from alayaos_core.repositories.claim import ClaimRepository
 from alayaos_core.repositories.entity import EntityRepository
@@ -28,13 +30,30 @@ log = structlog.get_logger()
 # ─── Task 1: Value normalization ─────────────────────────────────────────────
 
 
-def normalize_claim_value(value: str, value_type: str, *, resolved_entity_id: str | None = None) -> dict:
+@lru_cache(maxsize=1)
+def _get_date_normalizer() -> DateNormalizer:
+    return DateNormalizer()
+
+
+def normalize_claim_value(
+    value: str,
+    value_type: str,
+    *,
+    resolved_entity_id: str | None = None,
+    reference_date: datetime | None = None,
+) -> dict:
     """Normalize claim value to JSONB format per spec."""
     if value_type == "text":
         return {"text": value}
     elif value_type == "date":
-        iso = value if "T" in value else f"{value}T00:00:00Z"
-        return {"date": value, "iso": iso}
+        result = _get_date_normalizer().normalize(value, reference_date=reference_date)
+        return {
+            "date": result.raw,
+            "iso": result.iso,
+            "normalized": result.normalized,
+            "anchor": result.anchor.isoformat(),
+            "reason": result.reason,
+        }
     elif value_type == "number":
         try:
             num = float(value)
@@ -79,10 +98,13 @@ async def write_claim(
                     ref_id = eid
                     break
         normalized_value = normalize_claim_value(
-            claim.value, claim.value_type, resolved_entity_id=str(ref_id) if ref_id else None
+            claim.value,
+            claim.value_type,
+            resolved_entity_id=str(ref_id) if ref_id else None,
+            reference_date=claim_observed_at,
         )
     else:
-        normalized_value = normalize_claim_value(claim.value, claim.value_type)
+        normalized_value = normalize_claim_value(claim.value, claim.value_type, reference_date=claim_observed_at)
 
     # accumulate: dedup by value
     if strategy == "accumulate":
@@ -105,6 +127,14 @@ async def write_claim(
         source_summary=claim.source_summary,
         status="active",
     )
+    if claim.value_type == "date" and normalized_value.get("reason"):
+        log.info(
+            "claim.date_normalize_failed",
+            claim_id=str(new_claim.id),
+            event_id=str(event.id),
+            reason=normalized_value["reason"],
+            raw=normalized_value["date"],
+        )
 
     # Supersession (non-accumulate) — process ALL existing active claims
     superseded_count = 0

@@ -19,8 +19,14 @@ def test_normalize_claim_value_text() -> None:
 def test_normalize_claim_value_date() -> None:
     from alayaos_core.extraction.writer import normalize_claim_value
 
-    result = normalize_claim_value("2024-03-15", "date")
-    assert result == {"date": "2024-03-15", "iso": "2024-03-15T00:00:00Z"}
+    result = normalize_claim_value("2024-03-15", "date", reference_date=datetime(2024, 1, 1, tzinfo=UTC))
+    assert result == {
+        "date": "2024-03-15",
+        "iso": "2024-03-15T00:00:00+00:00",
+        "normalized": True,
+        "anchor": "2024-01-01T00:00:00+00:00",
+        "reason": None,
+    }
 
 
 def test_normalize_claim_value_number() -> None:

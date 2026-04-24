@@ -18,7 +18,7 @@ packages/
 │   └── alayaos_core/
 │       ├── models/                 # SQLAlchemy 2.0 (18 files)
 │       ├── schemas/                # Pydantic schemas (17 files)
-│       ├── repositories/           # Async repos with cursor pagination (16 files)
+│       ├── repositories/           # Async repos with cursor pagination (17 files)
 │       ├── services/               # workspace (seed), api_key (generate/verify), entity_cache (Redis)
 │       ├── extraction/             # Multi-stage intelligence pipeline
 │       │   ├── cortex/             # Chunker + classifier (L0 → L0Chunks with domain scores)

@@ -176,6 +176,23 @@ def test_sanitize_context_preserves_fullwidth_ascii_in_benign_text():
     assert result == text
 
 
+def test_sanitize_context_preserves_benign_substrings():
+    """Benign words containing role tokens as substrings must not trigger redaction.
+
+    Regression for codex Final Holistic P3: pre-fix, "AI" matched "air"
+    and "bot" matched "botanical" in "you are a ..." narrative.
+    """
+    from alayaos_core.services.ask import _sanitize_context
+
+    for benign in (
+        "You are a painter who loves air shows",
+        "You are a botanist studying botanical gardens",
+        "You are an airline pilot",
+    ):
+        result = _sanitize_context(benign)
+        assert result == benign, f"false positive on: {benign!r}"
+
+
 # Cross-unit injection detection — codex review P2 regression guard.
 
 

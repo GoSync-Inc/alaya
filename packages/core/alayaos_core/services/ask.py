@@ -165,7 +165,7 @@ _SANITIZER_PATTERNS = [
     # "you are a/an X" when the noun is clearly an AI role — narrow
     # enough to skip benign "you are a developer" while catching
     # "You are a helpful assistant" style payloads.
-    r"(?i)you\s+are\s+(?:now\s+)?(?:a|an|the)\s+[\w\s]{0,40}?(assistant|AI|bot|model|chatbot|language\s+model|jailb(?:roken|reak))",
+    r"(?i)you\s+are\s+(?:now\s+)?(?:a|an|the)\s+[\w\s]{0,40}?\b(assistant|AI|bot|model|chatbot|language\s+model|jailb(?:roken|reak))\b",
 ]
 
 

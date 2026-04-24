@@ -1,11 +1,13 @@
 """Health check endpoints."""
 
+import asyncio
 from contextlib import suppress
 from functools import lru_cache
 from typing import Annotated
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends
+from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +15,8 @@ from alayaos_api.deps import get_session
 from alayaos_core.config import Settings
 
 router = APIRouter(tags=["health"])
+REDIS_SOCKET_TIMEOUT_SECONDS = 2
+REDIS_PING_TIMEOUT_SECONDS = 2
 
 
 @lru_cache
@@ -20,15 +24,24 @@ def get_settings() -> Settings:
     return Settings()
 
 
-async def _check_redis(redis_url) -> str:
-    url = redis_url.get_secret_value() if hasattr(redis_url, "get_secret_value") else str(redis_url or "")
+async def _check_redis(redis_url: SecretStr | str | None) -> str:
+    url = redis_url.get_secret_value() if isinstance(redis_url, SecretStr) else str(redis_url or "")
     if not url:
         return "degraded"
 
-    client = None
+    client: aioredis.Redis | None = None
     try:
-        client = aioredis.from_url(url)
-        return "ok" if await client.ping() else "degraded"
+        client = aioredis.from_url(
+            url,
+            socket_connect_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+            socket_timeout=REDIS_SOCKET_TIMEOUT_SECONDS,
+        )
+        pong = await asyncio.wait_for(client.ping(), timeout=REDIS_PING_TIMEOUT_SECONDS)
+        return "ok" if pong else "degraded"
+    except asyncio.CancelledError:
+        raise
+    except TimeoutError:
+        return "down"
     except Exception:
         return "down"
     finally:

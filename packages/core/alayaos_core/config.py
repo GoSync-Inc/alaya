@@ -1,5 +1,10 @@
-from pydantic import SecretStr
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings
+
+FEATURE_FLAG_DEFAULTS: tuple[tuple[str, str], ...] = (("ALAYA_PART_OF_STRICT", "strict"),)
 
 
 class Settings(BaseSettings):
@@ -103,5 +108,24 @@ class Settings(BaseSettings):
     TREE_MAX_CLAIMS_PER_BRIEF: int = 50
 
     # Feature flags
+    # Lifecycle: Added 2026-04-25 Run 6.2 RUN6.1.FU.01; Owner @egor; Remove target 2026-Q3.
+    ALAYA_PART_OF_STRICT: Literal["strict", "warn", "off"] = Field(
+        default="strict",
+        validation_alias="ALAYA_PART_OF_STRICT",
+    )
     FEATURE_FLAG_USE_CORTEX: bool = True  # Cortex pipeline enabled (FakeLLM returns realistic DomainScores)
     FEATURE_FLAG_VECTOR_SEARCH: bool = False  # Enable after embedding backfill
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+def get_non_default_feature_flags(settings: Settings) -> list[tuple[str, str, str]]:
+    flags: list[tuple[str, str, str]] = []
+    for name, default in FEATURE_FLAG_DEFAULTS:
+        current = getattr(settings, name)
+        if current != default:
+            flags.append((name, current, default))
+    return flags

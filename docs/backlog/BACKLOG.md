@@ -217,6 +217,16 @@ RUN3.02 (integration tests all skipped) was marked DONE in prior run; Sprint 1 h
 
 ---
 
+## Run 6.2: Access & Normalization (2026-04-25)
+
+### Follow-ups
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN6.2.FU.01 | P2 | Instrument `part_of` tier violation counter | `packages/api/alayaos_api/routers/admin.py`, future log-store integration | `/admin/flags` intentionally reports `violations_last_24h=null` with `violations_last_24h_reason="counter_not_yet_instrumented"` until structured log counters are queryable. |
+
+---
+
 ## Closed
 
 Items verified DONE as of 2026-04-17 audit. Commit hashes reference the fix landing in this repo.

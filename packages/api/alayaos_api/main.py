@@ -6,7 +6,7 @@ import structlog
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from alayaos_core.config import Settings
+from alayaos_core.config import Settings, get_non_default_feature_flags, get_settings
 from alayaos_core.logging import setup_logging
 
 log = structlog.get_logger()
@@ -34,9 +34,17 @@ def _validate_production_secrets(settings: Settings) -> None:
         )
 
 
+def _log_non_default_feature_flags(settings: Settings) -> int:
+    flags = get_non_default_feature_flags(settings)
+    for name, value, default in flags:
+        log.warning("feature_flag_active", flag=name, value=value, default=default)
+    return len(flags)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings = Settings()
+    settings = get_settings()
+    _log_non_default_feature_flags(settings)
     # Redundant guard — create_app() also validates at import time so
     # the check stays effective even when lifespan is skipped
     # (e.g. `uvicorn --lifespan off` or ASGI wrappers).

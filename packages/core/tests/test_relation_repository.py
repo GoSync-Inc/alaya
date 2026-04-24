@@ -10,8 +10,10 @@ import uuid
 from typing import TYPE_CHECKING
 
 import pytest
+import structlog.testing
 from sqlalchemy import text
 
+from alayaos_core import config
 from alayaos_core.repositories.entity import EntityRepository
 from alayaos_core.repositories.entity_type import EntityTypeRepository
 from alayaos_core.repositories.errors import HierarchyViolationError
@@ -51,6 +53,83 @@ async def _create_entity(
         name=name or f"{slug}-{uuid.uuid4().hex[:6]}",
     )
     return entity.id
+
+
+# ---------------------------------------------------------------------------
+# ALAYA_PART_OF_STRICT mode matrix
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("mode", ["strict", "warn", "off"])
+@pytest.mark.parametrize("scenario", ["valid", "self_ref", "tier_inversion"])
+@pytest.mark.asyncio
+async def test_validate_part_of_tier_respects_strict_warn_off_modes(
+    workspace,
+    db_session,
+    monkeypatch,
+    mode: str,
+    scenario: str,
+) -> None:
+    monkeypatch.setenv("ALAYA_PART_OF_STRICT", mode)
+    config.get_settings.cache_clear()
+
+    task_id = await _create_entity(db_session, workspace.id, "task")
+    project_id = await _create_entity(db_session, workspace.id, "project")
+
+    if scenario == "valid":
+        source_id = task_id
+        target_id = project_id
+    elif scenario == "self_ref":
+        source_id = task_id
+        target_id = task_id
+    else:
+        source_id = project_id
+        target_id = task_id
+
+    repo = RelationRepository(db_session, workspace.id)
+
+    with structlog.testing.capture_logs() as logs:
+        if scenario == "self_ref":
+            with pytest.raises(HierarchyViolationError, match="self-referential"):
+                await repo.create(
+                    workspace_id=workspace.id,
+                    source_entity_id=source_id,
+                    target_entity_id=target_id,
+                    relation_type="part_of",
+                )
+        elif scenario == "tier_inversion" and mode == "strict":
+            with pytest.raises(HierarchyViolationError, match="part_of"):
+                await repo.create(
+                    workspace_id=workspace.id,
+                    source_entity_id=source_id,
+                    target_entity_id=target_id,
+                    relation_type="part_of",
+                )
+        else:
+            rel = await repo.create(
+                workspace_id=workspace.id,
+                source_entity_id=source_id,
+                target_entity_id=target_id,
+                relation_type="part_of",
+            )
+            assert rel is not None
+
+    warning_events = [entry for entry in logs if entry["event"] == "part_of.tier_violation"]
+    if scenario == "tier_inversion" and mode == "warn":
+        assert len(warning_events) == 1
+        assert warning_events[0]["mode"] == "warn"
+    else:
+        assert warning_events == []
+
+    result = await db_session.execute(
+        text("SELECT COUNT(*) FROM l1_relations WHERE workspace_id = :wid"),
+        {"wid": workspace.id},
+    )
+    count = result.scalar()
+    expected_count = 1 if scenario == "valid" or (scenario == "tier_inversion" and mode in {"warn", "off"}) else 0
+    assert count == expected_count
+
+    config.get_settings.cache_clear()
 
 
 # ---------------------------------------------------------------------------

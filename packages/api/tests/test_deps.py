@@ -36,6 +36,55 @@ def test_paginated_response_structure() -> None:
     assert result["pagination"]["next_cursor"] == "cursor123"
     assert result["pagination"]["has_more"] is True
     assert result["pagination"]["count"] == 1
+    assert result["meta"] == {"filtered_count": 0, "filter_reason": None}
+
+
+def test_paginated_response_populates_filter_reason_only_when_filtered() -> None:
+    from pydantic import BaseModel
+
+    class Item(BaseModel):
+        id: int
+
+        class Config:
+            from_attributes = True
+
+    class FakeObj:
+        id = 1
+
+    result = paginated_response(
+        [FakeObj()],
+        Item,
+        None,
+        False,
+        filtered_count=3,
+        filter_reason="access_level",
+    )
+    assert result["meta"] == {"filtered_count": 3, "filter_reason": "access_level"}
+
+    unfiltered = paginated_response(
+        [FakeObj()],
+        Item,
+        None,
+        False,
+        filtered_count=0,
+        filter_reason="access_level",
+    )
+    assert unfiltered["meta"] == {"filtered_count": 0, "filter_reason": None}
+
+
+def test_compute_allowed_levels_maps_scopes_and_fails_closed() -> None:
+    from alayaos_api.deps import _compute_allowed_levels
+
+    assert _compute_allowed_levels(["read"]) == {"public", "channel"}
+    assert _compute_allowed_levels(["write"]) == {"public", "channel", "private"}
+    assert _compute_allowed_levels(["admin"]) == {"public", "channel", "private", "restricted"}
+    assert _compute_allowed_levels(["unknown"]) == {"public"}
+    assert _compute_allowed_levels(["read", "admin", "unknown"]) == {
+        "public",
+        "channel",
+        "private",
+        "restricted",
+    }
 
 
 # ─── Auth dependency via HTTP endpoint ────────────────────────────────────────
@@ -210,25 +259,35 @@ async def test_require_scope_raises_403_when_missing() -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_local_validates_uuid() -> None:
-    """Regression: SET LOCAL must re-parse workspace_id as UUID to prevent injection."""
+async def test_workspace_session_sets_bound_request_context_gucs() -> None:
+    """Workspace context must use bound set_config params, not interpolated SET LOCAL SQL."""
     from alayaos_api.deps import get_workspace_session
 
-    valid_key, _raw_key = _valid_api_key()
+    valid_key, _raw_key = _valid_api_key(scopes=["write"])
 
     session = AsyncMock()
     session.execute = AsyncMock()
 
-    gen = get_workspace_session(session=session, api_key=valid_key)
-    await gen.__anext__()
+    with patch("alayaos_api.deps.bind_contextvars") as mock_bind:
+        gen = get_workspace_session(session=session, api_key=valid_key)
+        await gen.__anext__()
 
     call_args = session.execute.call_args
     assert call_args is not None
-    sql_text = str(call_args[0][0])
-    # Must contain the validated UUID, not a :wid placeholder
-    assert str(valid_key.workspace_id) in sql_text
-    # Must contain SET LOCAL with a quoted UUID value
-    assert "SET LOCAL app.workspace_id" in sql_text
+    sql_text = str(call_args.args[0])
+    params = call_args.args[1]
+    assert "set_config('app.workspace_id', :wid, true)" in sql_text
+    assert "set_config('app.allowed_access_levels', :allowed, true)" in sql_text
+    assert "set_config('hnsw.iterative_scan', 'strict_order', true)" in sql_text
+    assert "SET LOCAL" not in sql_text
+    assert params == {
+        "wid": str(valid_key.workspace_id),
+        "allowed": "channel,private,public",
+    }
+    mock_bind.assert_called_once_with(
+        workspace_id=str(valid_key.workspace_id),
+        allowed_access_levels="channel,private,public",
+    )
 
 
 @pytest.mark.asyncio

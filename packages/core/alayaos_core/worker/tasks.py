@@ -335,7 +335,7 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
             chunk_repo = ChunkRepository(session, uuid.UUID(workspace_id))
             trace_repo = PipelineTraceRepository(session, uuid.UUID(workspace_id))
 
-            event = await event_repo.get_by_id(uuid.UUID(event_id))
+            event = await event_repo.get_by_id_unfiltered(uuid.UUID(event_id))
             run = await run_repo.get_by_id(uuid.UUID(extraction_run_id))
             if not event or not run:
                 return {"status": "skipped", "reason": "event or run not found"}
@@ -446,7 +446,7 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
                 await run_repo.update_status(uuid.UUID(extraction_run_id), "completed")
                 await run_repo.recalc_usage(uuid.UUID(extraction_run_id))
                 event_repo = EventRepository(session, uuid.UUID(workspace_id))
-                event = await event_repo.get_by_id(uuid.UUID(event_id))
+                event = await event_repo.get_by_id_unfiltered(uuid.UUID(event_id))
                 if event:
                     event.is_extracted = True
                     await session.flush()
@@ -521,7 +521,7 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
                 chunk_repo = ChunkRepository(session, uuid.UUID(workspace_id))
                 trace_repo = PipelineTraceRepository(session, uuid.UUID(workspace_id))
 
-                chunk = await chunk_repo.get_by_id(uuid.UUID(chunk_id))
+                chunk = await chunk_repo.get_by_id_unfiltered(uuid.UUID(chunk_id))
                 if chunk is None:
                     return {"status": "skipped", "reason": "chunk not found"}
 

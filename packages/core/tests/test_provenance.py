@@ -210,12 +210,12 @@ async def test_claim_has_extraction_run_id_and_source_event_id() -> None:
         assert kwargs["source_event_id"] == event_id
 
 
-# ─── Relation provenance: extraction_run_id ──────────────────────────────────
+# ─── Relation provenance: extraction_run_id + source_event_id ────────────────
 
 
 @pytest.mark.asyncio
-async def test_relation_has_extraction_run_id() -> None:
-    """Every relation.create call must include extraction_run_id."""
+async def test_relation_has_extraction_run_id_and_source_event_id() -> None:
+    """Every relation.create call must include extraction_run_id and source_event_id."""
     from alayaos_core.extraction.writer import atomic_write
 
     event_id = uuid.uuid4()
@@ -290,9 +290,11 @@ async def test_relation_has_extraction_run_id() -> None:
     ):
         await atomic_write(extraction, event, run, session, llm)
 
-    # Every relation.create call must pass extraction_run_id
+    # Every relation.create call must pass extraction_run_id and source_event_id
     assert mock_relation_repo.create.call_count == 1
     for relation_call in mock_relation_repo.create.call_args_list:
         kwargs = relation_call.kwargs
         assert "extraction_run_id" in kwargs, f"relation.create missing extraction_run_id: {kwargs}"
         assert kwargs["extraction_run_id"] == run_id
+        assert "source_event_id" in kwargs, f"relation.create missing source_event_id: {kwargs}"
+        assert kwargs["source_event_id"] == event_id

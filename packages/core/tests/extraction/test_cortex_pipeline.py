@@ -85,6 +85,7 @@ async def test_cortex_pipeline_creates_chunks_and_traces() -> None:
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
     mock_run_repo = AsyncMock()
     mock_run_repo.get_by_id = AsyncMock(return_value=run)
     mock_chunk_repo = AsyncMock()
@@ -140,6 +141,7 @@ async def test_cortex_pipeline_crystal_selection_all_skipped_at_high_threshold()
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
     mock_run_repo = AsyncMock()
     mock_run_repo.get_by_id = AsyncMock(return_value=run)
     mock_chunk_repo = AsyncMock()
@@ -220,6 +222,7 @@ async def test_cortex_pipeline_empty_event_no_crystal_chunks() -> None:
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
     mock_run_repo = AsyncMock()
     mock_run_repo.get_by_id = AsyncMock(return_value=run)
     mock_chunk_repo = AsyncMock()
@@ -267,6 +270,7 @@ async def test_cortex_pipeline_skips_when_event_not_found() -> None:
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=None)  # not found
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=None)  # not found
     mock_run_repo = AsyncMock()
     mock_run_repo.get_by_id = AsyncMock(return_value=_make_run())
 

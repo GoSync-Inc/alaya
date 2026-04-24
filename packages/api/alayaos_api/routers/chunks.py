@@ -70,7 +70,17 @@ async def list_chunks(
         processing_stage=processing_stage,
         is_crystal=is_crystal,
     )
-    return paginated_response(items, ChunkRead, next_cursor, has_more)
+    filtered_count = getattr(repo, "last_filtered_count", 0)
+    if not isinstance(filtered_count, int):
+        filtered_count = 0
+    return paginated_response(
+        items,
+        ChunkRead,
+        next_cursor,
+        has_more,
+        filtered_count=filtered_count,
+        filter_reason="acl_filtered",
+    )
 
 
 @router.get("/chunks/{chunk_id}")

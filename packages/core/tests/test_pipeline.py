@@ -65,8 +65,8 @@ async def test_should_extract_public_allowed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_should_extract_restricted_skipped() -> None:
-    """Restricted access level: should_extract returns False and sets run status=skipped."""
+async def test_should_extract_restricted_extracts_and_logs_sensitive_event() -> None:
+    """Restricted events extract; retrieval ACL handles visibility later."""
     from alayaos_core.extraction.pipeline import should_extract
 
     session = MagicMock()
@@ -75,15 +75,21 @@ async def test_should_extract_restricted_skipped() -> None:
     run_repo.update_status = AsyncMock()
 
     event = _make_event(access_level="restricted")
-    result = await should_extract(event, run, run_repo, session)
+    with patch("alayaos_core.extraction.pipeline.log.info") as mock_info:
+        result = await should_extract(event, run, run_repo, session)
 
-    assert result is False
-    run_repo.update_status.assert_called_once_with(run.id, "skipped", error_message="access_level=restricted")
+    assert result is True
+    run_repo.update_status.assert_not_called()
+    mock_info.assert_called_once_with(
+        "extraction.sensitive_event_extracting",
+        event_id=str(event.id),
+        access_level="restricted",
+    )
 
 
 @pytest.mark.asyncio
-async def test_should_extract_private_no_optin_skipped() -> None:
-    """Private event without workspace opt-in: should skip."""
+async def test_should_extract_private_extracts_and_logs_sensitive_event() -> None:
+    """Private events extract; retrieval ACL handles visibility later."""
     from alayaos_core.extraction.pipeline import should_extract
 
     session = MagicMock()
@@ -92,19 +98,16 @@ async def test_should_extract_private_no_optin_skipped() -> None:
     run_repo.update_status = AsyncMock()
 
     event = _make_event(access_level="private")
-
-    # Workspace WITHOUT extract_private opt-in
-    workspace = MagicMock()
-    workspace.settings = {}  # no extract_private key
-
-    mock_ws_repo = AsyncMock()
-    mock_ws_repo.get_by_id = AsyncMock(return_value=workspace)
-
-    with patch("alayaos_core.extraction.pipeline.WorkspaceRepository", return_value=mock_ws_repo):
+    with patch("alayaos_core.extraction.pipeline.log.info") as mock_info:
         result = await should_extract(event, run, run_repo, session)
 
-    assert result is False
-    run_repo.update_status.assert_called_once_with(run.id, "skipped", error_message="private without opt-in")
+    assert result is True
+    run_repo.update_status.assert_not_called()
+    mock_info.assert_called_once_with(
+        "extraction.sensitive_event_extracting",
+        event_id=str(event.id),
+        access_level="private",
+    )
 
 
 @pytest.mark.asyncio
@@ -152,6 +155,7 @@ async def test_run_extraction_idempotent_skip() -> None:
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
 
     mock_run_repo = AsyncMock()
     mock_run_repo.get_by_id = AsyncMock(return_value=completed_run)
@@ -177,6 +181,53 @@ async def test_run_extraction_idempotent_skip() -> None:
 
     assert result is None
     preprocessor.chunk.assert_not_called()
+    mock_event_repo.get_by_id_unfiltered.assert_awaited_once_with(event_id)
+
+
+@pytest.mark.asyncio
+async def test_run_extraction_uses_unfiltered_event_lookup_for_internal_processing() -> None:
+    """run_extraction must not depend on retrieval ACL-filtered event lookup."""
+    from alayaos_core.extraction.extractor import Extractor
+    from alayaos_core.extraction.pipeline import run_extraction
+    from alayaos_core.extraction.preprocessor import Preprocessor
+
+    run_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+
+    completed_run = _make_run(run_id=run_id, status="completed")
+    event = _make_event(event_id=event_id, access_level="restricted")
+
+    session = MagicMock()
+
+    mock_event_repo = AsyncMock()
+    mock_event_repo.get_by_id = AsyncMock(return_value=None)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
+
+    mock_run_repo = AsyncMock()
+    mock_run_repo.get_by_id = AsyncMock(return_value=completed_run)
+
+    llm = AsyncMock()
+    preprocessor = MagicMock(spec=Preprocessor)
+    extractor = MagicMock(spec=Extractor)
+
+    with (
+        patch("alayaos_core.extraction.pipeline.EventRepository", return_value=mock_event_repo),
+        patch("alayaos_core.extraction.pipeline.ExtractionRunRepository", return_value=mock_run_repo),
+    ):
+        result = await run_extraction(
+            event_id=event_id,
+            run_id=run_id,
+            session=session,
+            llm=llm,
+            preprocessor=preprocessor,
+            extractor=extractor,
+            entity_types=[],
+            predicates=[],
+        )
+
+    assert result is None
+    mock_event_repo.get_by_id.assert_not_awaited()
+    mock_event_repo.get_by_id_unfiltered.assert_awaited_once_with(event_id)
 
 
 # ─── run_write tests ──────────────────────────────────────────────────────────
@@ -203,6 +254,7 @@ async def test_run_write_no_raw_extraction_fails() -> None:
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
 
     workspace = MagicMock()
     workspace.id = workspace_id
@@ -224,6 +276,54 @@ async def test_run_write_no_raw_extraction_fails() -> None:
         )
 
     assert result is None
+    mock_run_repo.update_status.assert_called_with(run.id, "failed", error_message="no raw_extraction")
+
+
+@pytest.mark.asyncio
+async def test_run_write_uses_unfiltered_event_lookup_for_internal_processing() -> None:
+    """run_write must not treat ACL-hidden processing events as missing."""
+    from alayaos_core.extraction.pipeline import run_write
+
+    run_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+
+    run = _make_run(run_id=run_id, status="writing", event_id=event_id, raw_extraction=None)
+    run.workspace_id = workspace_id
+    event = _make_event(event_id=event_id, workspace_id=workspace_id, access_level="private")
+
+    session = MagicMock()
+
+    mock_run_repo = AsyncMock()
+    mock_run_repo.get_by_id = AsyncMock(return_value=run)
+    mock_run_repo.update_status = AsyncMock()
+
+    mock_event_repo = AsyncMock()
+    mock_event_repo.get_by_id = AsyncMock(return_value=None)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
+
+    workspace = MagicMock()
+    workspace.id = workspace_id
+    mock_ws_repo = AsyncMock()
+    mock_ws_repo.get_by_id_for_update = AsyncMock(return_value=workspace)
+
+    llm = AsyncMock()
+
+    with (
+        patch("alayaos_core.extraction.pipeline.ExtractionRunRepository", return_value=mock_run_repo),
+        patch("alayaos_core.extraction.pipeline.EventRepository", return_value=mock_event_repo),
+        patch("alayaos_core.extraction.pipeline.WorkspaceRepository", return_value=mock_ws_repo),
+    ):
+        result = await run_write(
+            run_id=run_id,
+            session=session,
+            llm=llm,
+            redis=None,
+        )
+
+    assert result is None
+    mock_event_repo.get_by_id.assert_not_awaited()
+    mock_event_repo.get_by_id_unfiltered.assert_awaited_once_with(event_id)
     mock_run_repo.update_status.assert_called_with(run.id, "failed", error_message="no raw_extraction")
 
 
@@ -257,6 +357,7 @@ async def test_run_write_locks_workspace_before_atomic_write() -> None:
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
 
     mock_ws_repo = AsyncMock()
     mock_ws_repo.get_by_id_for_update = AsyncMock(return_value=workspace)
@@ -318,6 +419,7 @@ async def test_run_write_logs_warning_when_redis_lock_degrades() -> None:
 
     mock_event_repo = AsyncMock()
     mock_event_repo.get_by_id = AsyncMock(return_value=event)
+    mock_event_repo.get_by_id_unfiltered = AsyncMock(return_value=event)
 
     mock_ws_repo = AsyncMock()
     mock_ws_repo.get_by_id_for_update = AsyncMock(return_value=workspace)
@@ -360,6 +462,75 @@ async def test_run_write_logs_warning_when_redis_lock_degrades() -> None:
         workspace_id=str(workspace_id),
         error="redis down",
     )
+
+
+# ─── run_enrich tests ─────────────────────────────────────────────────────────
+
+
+class _ScalarsResult:
+    def __init__(self, rows: list) -> None:
+        self._rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self) -> list:
+        return self._rows
+
+
+@pytest.mark.asyncio
+async def test_run_enrich_uses_vector_repository_with_computed_access_levels() -> None:
+    """Entity/claim vector chunks are inserted through create_batch with computed ACLs."""
+    from alayaos_core.extraction.pipeline import run_enrich
+
+    run_id = uuid.uuid4()
+    workspace_id = uuid.uuid4()
+    entity_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
+
+    run = _make_run(run_id=run_id, workspace_id=workspace_id, status="completed")
+    entity = MagicMock()
+    entity.id = entity_id
+    entity.name = "Alice"
+    entity.description = "restricted-acquisition-codename"
+
+    claim = MagicMock()
+    claim.id = claim_id
+    claim.predicate = "status"
+    claim.value = {"text": "active"}
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=[_ScalarsResult([entity]), _ScalarsResult([claim])])
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+
+    run_repo = AsyncMock()
+    run_repo.get_by_id = AsyncMock(return_value=run)
+    run_repo.update_status = AsyncMock()
+
+    vector_repo = AsyncMock()
+    vector_repo.get_access_level_for_source = AsyncMock(side_effect=["channel", "restricted"])
+    vector_repo.create_batch = AsyncMock(return_value=2)
+
+    embedding_service = AsyncMock()
+    embedding_service.embed_texts = AsyncMock(return_value=[[0.1], [0.2]])
+
+    with (
+        patch("alayaos_core.extraction.pipeline.ExtractionRunRepository", return_value=run_repo),
+        patch("alayaos_core.repositories.vector.VectorChunkRepository", return_value=vector_repo) as repo_cls,
+    ):
+        await run_enrich(run_id, session, embedding_service)
+
+    repo_cls.assert_called_once_with(session, workspace_id)
+    vector_repo.get_access_level_for_source.assert_any_await("entity", entity_id)
+    vector_repo.get_access_level_for_source.assert_any_await("claim", claim_id)
+    vector_repo.create_batch.assert_awaited_once()
+    chunks = vector_repo.create_batch.await_args.args[0]
+    assert [chunk["access_level"] for chunk in chunks] == ["channel", "restricted"]
+    assert chunks[0]["content"] == "Alice"
+    assert "restricted-acquisition-codename" not in chunks[0]["content"]
+    embedding_service.embed_texts.assert_awaited_once_with(["Alice", "status: {'text': 'active'}"])
+    session.add.assert_not_called()
 
 
 # ─── workspace lock tests ─────────────────────────────────────────────────────

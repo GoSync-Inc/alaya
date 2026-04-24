@@ -24,18 +24,13 @@ log = structlog.get_logger()
 
 
 async def should_extract(event, run, run_repo, session) -> bool:
-    """Access level gate. Sets run.status='skipped' if denied."""
-    if event.access_level == "restricted":
-        log.info("skipping_restricted", event_id=str(event.id))
-        await run_repo.update_status(run.id, "skipped", error_message="access_level=restricted")
-        return False
-    if event.access_level == "private":
-        ws_repo = WorkspaceRepository(session)
-        workspace = await ws_repo.get_by_id(event.workspace_id)
-        if workspace and not workspace.settings.get("extract_private", False):
-            log.info("skipping_private_no_optin", event_id=str(event.id))
-            await run_repo.update_status(run.id, "skipped", error_message="private without opt-in")
-            return False
+    """Access-level observability; retrieval gates visibility after extraction."""
+    if event.access_level in ("restricted", "private"):
+        log.info(
+            "extraction.sensitive_event_extracting",
+            event_id=str(event.id),
+            access_level=event.access_level,
+        )
     return True
 
 
@@ -53,7 +48,7 @@ async def run_extraction(
     event_repo = EventRepository(session)
     run_repo = ExtractionRunRepository(session)
 
-    event = await event_repo.get_by_id(event_id)
+    event = await event_repo.get_by_id_unfiltered(event_id)
     run = await run_repo.get_by_id(run_id)
     if not event or not run:
         return None
@@ -130,7 +125,7 @@ async def run_write(
     if not run or run.status == "completed":
         return None
 
-    event = await event_repo.get_by_id(run.event_id) if run.event_id else None
+    event = await event_repo.get_by_id_unfiltered(run.event_id) if run.event_id else None
     if not event:
         await run_repo.update_status(run.id, "failed", error_message="event not found")
         return None
@@ -204,7 +199,7 @@ async def run_enrich(
 
     from alayaos_core.models.claim import L2Claim
     from alayaos_core.models.entity import L1Entity
-    from alayaos_core.models.vector import VectorChunk
+    from alayaos_core.repositories.vector import VectorChunkRepository
 
     run_repo = ExtractionRunRepository(session)
     run = await run_repo.get_by_id(run_id)
@@ -231,7 +226,7 @@ async def run_enrich(
     source_info: list[dict] = []
 
     for entity in entities:
-        text = f"{entity.name}: {entity.description or ''}"
+        text = entity.name
         texts.append(text)
         source_info.append({"source_type": "entity", "source_id": entity.id, "content": text})
 
@@ -249,17 +244,22 @@ async def run_enrich(
     embeddings = await embedding_service.embed_texts(texts)
 
     # Create VectorChunk rows
+    vector_repo = VectorChunkRepository(session, ws_id)
+    chunk_rows: list[dict] = []
     for info, embedding in zip(source_info, embeddings, strict=True):
-        chunk = VectorChunk(
-            workspace_id=ws_id,
-            source_type=info["source_type"],
-            source_id=info["source_id"],
-            chunk_index=0,
-            content=info["content"],
-            embedding=embedding,
+        access_level = await vector_repo.get_access_level_for_source(info["source_type"], info["source_id"])
+        chunk_rows.append(
+            {
+                "workspace_id": ws_id,
+                "source_type": info["source_type"],
+                "source_id": info["source_id"],
+                "chunk_index": 0,
+                "content": info["content"],
+                "embedding": embedding,
+                "access_level": access_level,
+            }
         )
-        session.add(chunk)
 
-    await session.flush()
+    await vector_repo.create_batch(chunk_rows)
     log.info("enrich_completed", run_id=str(run_id), chunks_created=len(texts))
     await run_repo.update_status(run.id, "completed")

@@ -244,6 +244,33 @@ class TestEventRepository:
         assert result is ev
 
     @pytest.mark.asyncio
+    async def test_get_by_id_unfiltered_event_preserves_workspace_scope_without_acl_predicate(self) -> None:
+        from alayaos_core.repositories.event import EventRepository
+
+        workspace_id = uuid.uuid4()
+        ev = L0Event(
+            id=uuid.uuid4(),
+            workspace_id=workspace_id,
+            source_type="gh",
+            source_id="PR1",
+            content={},
+            event_metadata={},
+        )
+        session = make_session()
+        session.execute.return_value = make_result(ev)
+        repo = EventRepository(session, workspace_id)
+
+        get_by_id_unfiltered = getattr(repo, "get_by_id_unfiltered", None)
+        assert get_by_id_unfiltered is not None
+        result = await get_by_id_unfiltered(ev.id)
+
+        stmt = session.execute.await_args.args[0]
+        compiled = str(stmt)
+        assert result is ev
+        assert "l0_events.workspace_id" in compiled
+        assert "alaya_current_allowed_access" not in compiled
+
+    @pytest.mark.asyncio
     async def test_create_or_update_creates_new(self) -> None:
         from alayaos_core.repositories.event import EventRepository
 

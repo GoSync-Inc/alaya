@@ -88,6 +88,34 @@ def test_ask_allows_read_scope() -> None:
     assert response.json()["answer"] == "Project Alpha is on track."
 
 
+def test_ask_preserves_service_meta() -> None:
+    app = make_app(make_api_key(scopes=["read"]))
+    redis_client = _mock_redis_client()
+    ask_result = {
+        "answer": "Project Alpha is on track.",
+        "answerable": True,
+        "citations": [],
+        "evidence": [],
+        "tokens_used": 12,
+        "cost_usd": 0.001,
+        "meta": {"filtered_count": 1, "filter_reason": "access_level"},
+    }
+
+    with (
+        patch("alayaos_api.routers.ask.aioredis.from_url", return_value=redis_client),
+        patch("alayaos_api.routers.ask.RateLimiterService") as mock_limiter_cls,
+        patch("alayaos_api.routers.ask.ask", new=AsyncMock(return_value=ask_result)),
+    ):
+        mock_limiter_cls.return_value.check = AsyncMock(
+            return_value=SimpleNamespace(allowed=True, retry_after=None, backend_available=True)
+        )
+        client = TestClient(app)
+        response = client.post("/api/v1/ask", headers={"X-Api-Key": RAW_KEY}, json={"question": "status?"})
+
+    assert response.status_code == 200
+    assert response.json()["meta"] == {"filtered_count": 1, "filter_reason": "access_level"}
+
+
 def test_ask_requires_read_scope() -> None:
     app = make_app(make_api_key(scopes=["write"]))
 

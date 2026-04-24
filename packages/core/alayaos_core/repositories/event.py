@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, literal_column, select
+from sqlalchemy import any_, func, literal_column, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from alayaos_core.models.event import L0Event
@@ -82,6 +82,17 @@ class EventRepository(BaseRepository):
         return row[0], bool(row[1])
 
     async def get_by_id(self, event_id: uuid.UUID) -> L0Event | None:
+        stmt = (
+            select(L0Event)
+            .where(L0Event.id == event_id)
+            .where(self._ws_filter(L0Event))
+            .where(L0Event.access_level == any_(func.alaya_current_allowed_access()))
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_id_unfiltered(self, event_id: uuid.UUID) -> L0Event | None:
+        """Internal lookup that bypasses retrieval ACL while preserving workspace scope."""
         stmt = select(L0Event).where(L0Event.id == event_id).where(self._ws_filter(L0Event))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
@@ -91,7 +102,10 @@ class EventRepository(BaseRepository):
         cursor: str | None = None,
         limit: int = 50,
     ) -> tuple[list[L0Event], str | None, bool]:
-        stmt = select(L0Event).where(self._ws_filter(L0Event))
+        base_stmt = select(L0Event).where(self._ws_filter(L0Event))
+        visible_stmt = base_stmt.where(L0Event.access_level == any_(func.alaya_current_allowed_access()))
+        self.last_filtered_count = await self._filtered_count(base_stmt, visible_stmt)
+        stmt = visible_stmt
         stmt = self.apply_cursor_pagination(stmt, cursor, limit, L0Event.created_at, L0Event.id)
         result = await self.session.execute(stmt)
         items = list(result.scalars().all())
@@ -101,3 +115,8 @@ class EventRepository(BaseRepository):
             items = items[:actual_limit]
         next_cursor = self.encode_cursor(items[-1].created_at, items[-1].id) if has_more else None
         return items, next_cursor, has_more
+
+    async def _filtered_count(self, base_stmt, visible_stmt) -> int:
+        total = await self.session.scalar(select(func.count()).select_from(base_stmt.subquery()))
+        visible = await self.session.scalar(select(func.count()).select_from(visible_stmt.subquery()))
+        return max(int(total or 0) - int(visible or 0), 0)

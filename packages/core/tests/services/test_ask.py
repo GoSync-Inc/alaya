@@ -412,6 +412,143 @@ async def test_ask_returns_unanswerable_when_no_evidence():
 
 
 @pytest.mark.asyncio
+async def test_ask_propagates_search_filtered_count_when_unanswerable():
+    """ACL-filtered search metadata must survive the no-evidence path."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from alayaos_core.services.ask import ask
+    from alayaos_core.services.search import SearchServiceResponse
+
+    mock_session = MagicMock()
+    mock_llm = AsyncMock()
+    mock_llm.extract = AsyncMock()
+    workspace_id = uuid.uuid4()
+
+    search_response = SearchServiceResponse(
+        query="hidden roadmap?",
+        results=[],
+        total=0,
+        channels_used=[],
+        elapsed_ms=1,
+        meta={"filtered_count": 4, "filter_reason": "acl_filtered"},
+    )
+
+    import alayaos_core.services.ask as ask_module
+
+    original_search = ask_module.hybrid_search
+    ask_module.hybrid_search = AsyncMock(return_value=search_response)
+
+    try:
+        result = await ask(
+            session=mock_session,
+            question="hidden roadmap?",
+            workspace_id=workspace_id,
+            llm=mock_llm,
+        )
+    finally:
+        ask_module.hybrid_search = original_search
+
+    assert result.answerable is False
+    assert result.meta == {"filtered_count": 4, "filter_reason": "acl_filtered"}
+
+
+@pytest.mark.asyncio
+async def test_ask_does_not_use_stale_entity_vector_chunk_evidence():
+    from unittest.mock import AsyncMock, MagicMock
+
+    import alayaos_core.services.ask as ask_module
+    from alayaos_core.llm.interface import LLMUsage
+    from alayaos_core.services import search as search_mod
+    from alayaos_core.services.ask import AskResponseModel, ask
+
+    class _FakeSettings:
+        SEARCH_RRF_K = 60
+        FEATURE_FLAG_VECTOR_SEARCH = True
+        SEARCH_HNSW_EF_SEARCH = 100
+        ASK_MAX_CONTEXT_TOKENS = 8000
+        ASK_MAX_OUTPUT_TOKENS = 1000
+        ASK_MAX_RESULTS_FOR_LLM = 10
+
+    class _FakeEmbedding:
+        async def embed_text(self, _text):
+            return [0.1, 0.2]
+
+    workspace_id = uuid.uuid4()
+    stale_entity_id = uuid.uuid4()
+    stale_content = "restricted codename BLACKBIRD"
+
+    async def execute(statement, params=None):
+        sql = str(statement)
+        result = MagicMock()
+
+        if "SET LOCAL hnsw.ef_search" in sql:
+            return result
+
+        if "COUNT(*)" in sql:
+            result.scalar_one.return_value = 0
+            return result
+
+        if "FROM vector_chunks vc" in sql and "vc.source_type <> 'entity'" not in sql:
+            result.mappings.return_value = [
+                {
+                    "source_type": "entity",
+                    "source_id": stale_entity_id,
+                    "content": stale_content,
+                    "chunk_id": uuid.uuid4(),
+                    "similarity": 0.99,
+                }
+            ]
+            return result
+
+        if "chunk_fts AS" in sql and "vc.source_type <> 'entity'" not in sql:
+            result.mappings.return_value = [
+                {
+                    "source_type": "entity",
+                    "source_id": stale_entity_id,
+                    "content": stale_content,
+                    "ref_id": stale_entity_id,
+                    "ref_type": "entity",
+                    "rank": 0.99,
+                }
+            ]
+            return result
+
+        result.mappings.return_value = []
+        return result
+
+    session = MagicMock()
+    session.execute = AsyncMock(side_effect=execute)
+
+    llm = MagicMock()
+    llm.extract = AsyncMock(
+        return_value=(
+            AskResponseModel(answer="leaked", answerable=True, citations=[]),
+            LLMUsage(tokens_in=1, tokens_out=1, tokens_cached=0, cost_usd=0.0),
+        )
+    )
+
+    original_ask_settings = ask_module.Settings
+    original_search_settings = search_mod.Settings
+    ask_module.Settings = _FakeSettings  # type: ignore[assignment]
+    search_mod.Settings = _FakeSettings  # type: ignore[assignment]
+    try:
+        result = await ask(
+            session=session,
+            question=stale_content,
+            workspace_id=workspace_id,
+            llm=llm,
+            embedding_service=_FakeEmbedding(),
+        )
+    finally:
+        ask_module.Settings = original_ask_settings
+        search_mod.Settings = original_search_settings
+
+    assert result.answerable is False
+    assert result.evidence == []
+    llm.extract.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_ask_validates_citations_and_drops_hallucinated():
     """Citations with IDs not in evidence are dropped."""
     from unittest.mock import AsyncMock, MagicMock

@@ -17,6 +17,7 @@ from alayaos_core.extraction.schemas import ExtractedEntity, ExtractedRelation, 
 from alayaos_core.extraction.writer import atomic_write
 from alayaos_core.repositories.entity import EntityRepository
 from alayaos_core.repositories.entity_type import EntityTypeRepository
+from alayaos_core.repositories.event import EventRepository
 
 pytestmark = pytest.mark.integration
 
@@ -65,13 +66,14 @@ async def test_writer_skips_invalid_part_of_and_continues(workspace, db_session)
         claims=[],
     )
 
-    # Build mock event + run
-    event = MagicMock()
-    event.id = uuid.uuid4()
-    event.workspace_id = ws_id
-    event.occurred_at = None
-    event.created_at = None
-    event.is_extracted = False
+    # Build real event + mock run
+    event_repo = EventRepository(db_session, ws_id)
+    event = await event_repo.create(
+        workspace_id=ws_id,
+        source_type="test",
+        source_id=f"writer-hierarchy-{uuid.uuid4()}",
+        content={"text": "TaskBeta is part of ProjectAlpha."},
+    )
 
     run = MagicMock()
     run.id = None  # avoid FK constraint on extraction_run_id

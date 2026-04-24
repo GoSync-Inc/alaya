@@ -151,6 +151,30 @@ jobs:
           python-version: "3.13"
           enable-cache: true
       - run: uv sync --locked --all-packages
+      - name: Verify pgvector >=0.8
+        run: |
+          docker run --rm -d --name pgvector-smoke \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=postgres \
+            pgvector/pgvector:pg17
+          trap 'docker rm -f pgvector-smoke >/dev/null 2>&1 || true' EXIT
+          for _ in {1..30}; do
+            if docker exec pgvector-smoke pg_isready -U postgres >/dev/null 2>&1; then
+              break
+            fi
+            sleep 1
+          done
+          docker exec pgvector-smoke pg_isready -U postgres
+          VERSION=$(docker exec pgvector-smoke psql -U postgres -d postgres -tAc "CREATE EXTENSION IF NOT EXISTS vector; SELECT extversion FROM pg_extension WHERE extname = 'vector';" | tail -n 1 | xargs)
+          python - "$VERSION" <<'PY'
+          import sys
+
+          version = sys.argv[1].strip()
+          parts = tuple(int(part) for part in version.split(".")[:2])
+          if parts < (0, 8):
+              raise SystemExit(f"pgvector >=0.8 required, found {version}")
+          print(f"pgvector >=0.8 smoke passed: {version}")
+          PY
       # NOTE: alembic check is disabled — composite FKs are defined differently
       # in SQLAlchemy metadata vs. raw SQL migrations, causing a false positive drift.
       # - name: Check for migration drift

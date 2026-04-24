@@ -186,6 +186,23 @@ class TestEntitiesRouter:
         assert response.status_code == 200
         assert "data" in response.json()
 
+    def test_list_entities_reports_acl_filtered_count(self) -> None:
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+
+        entity = self._make_entity()
+        with patch("alayaos_api.routers.entities.EntityRepository") as mock_cls:
+            repo = AsyncMock()
+            repo.list = AsyncMock(return_value=([entity], None, False))
+            repo.last_filtered_count = 1
+            mock_cls.return_value = repo
+
+            client = TestClient(app)
+            response = client.get("/api/v1/entities", headers={"X-Api-Key": RAW_KEY})
+
+        assert response.status_code == 200
+        assert response.json()["meta"] == {"filtered_count": 1, "filter_reason": "acl_filtered"}
+
     def test_get_entity_not_found_returns_404(self) -> None:
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
@@ -278,6 +295,23 @@ class TestEventsRouter:
 
         assert response.status_code == 200
         assert "data" in response.json()
+
+    def test_list_events_reports_acl_filtered_count(self) -> None:
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+
+        event = self._make_event()
+        with patch("alayaos_api.routers.events.EventRepository") as mock_cls:
+            repo = AsyncMock()
+            repo.list = AsyncMock(return_value=([event], None, False))
+            repo.last_filtered_count = 1
+            mock_cls.return_value = repo
+
+            client = TestClient(app)
+            response = client.get("/api/v1/events", headers={"X-Api-Key": RAW_KEY})
+
+        assert response.status_code == 200
+        assert response.json()["meta"] == {"filtered_count": 1, "filter_reason": "acl_filtered"}
 
     def test_create_event_idempotent_returns_201(self) -> None:
         api_key = make_api_key()

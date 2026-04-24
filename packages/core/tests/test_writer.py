@@ -151,6 +151,122 @@ async def test_write_claim_latest_wins_supersedes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_write_claim_latest_wins_uses_internal_unfiltered_supersession_when_available() -> None:
+    """Writer supersession uses the internal unfiltered mutation path."""
+    from alayaos_core.extraction.schemas import ExtractedClaim
+    from alayaos_core.extraction.writer import write_claim
+
+    old_id = uuid.uuid4()
+    new_id = uuid.uuid4()
+    old_claim = _make_claim(old_id, {"text": "old"}, datetime(2024, 1, 1, tzinfo=UTC))
+    new_claim = _make_claim(new_id, {"text": "new"}, datetime(2024, 6, 1, tzinfo=UTC))
+
+    class ClaimRepo:
+        def __init__(self) -> None:
+            self.session = MagicMock(add=MagicMock(), flush=AsyncMock())
+            self.create = AsyncMock(return_value=new_claim)
+            self.get_active_for_entity_predicate = AsyncMock(return_value=[old_claim, new_claim])
+            self.mark_superseded = AsyncMock(side_effect=AssertionError("filtered supersession used"))
+            self.mark_superseded_unfiltered_calls = []
+
+        async def mark_superseded_unfiltered(self, old_claim_id, new_claim_id, valid_to):
+            self.mark_superseded_unfiltered_calls.append((old_claim_id, new_claim_id, valid_to))
+
+    claim_repo = ClaimRepo()
+    predicate_repo = AsyncMock()
+    predicate_repo.get_by_slug = AsyncMock(return_value=_make_predicate_def("latest_wins"))
+    event = MagicMock(
+        workspace_id=uuid.uuid4(),
+        id=uuid.uuid4(),
+        occurred_at=datetime(2024, 6, 1, tzinfo=UTC),
+        created_at=datetime(2024, 6, 1, tzinfo=UTC),
+    )
+    run = MagicMock(id=uuid.uuid4())
+
+    await write_claim(
+        claim=ExtractedClaim(
+            entity="Alice",
+            predicate="status",
+            value="active",
+            value_type="text",
+            confidence=0.9,
+        ),
+        entity_id=uuid.uuid4(),
+        event=event,
+        run=run,
+        claim_repo=claim_repo,
+        predicate_repo=predicate_repo,
+        entity_name_to_id={},
+    )
+
+    assert claim_repo.mark_superseded_unfiltered_calls == [(old_id, new_id, event.occurred_at)]
+    claim_repo.mark_superseded.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_write_claim_populates_claim_source_for_event() -> None:
+    """Writer creates a claim_sources row for the source event in the same session."""
+    from alayaos_core.extraction.schemas import ExtractedClaim
+    from alayaos_core.extraction.writer import write_claim
+    from alayaos_core.models.claim import ClaimSource
+
+    workspace_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
+    entity_id = uuid.uuid4()
+    created_claim = _make_claim(claim_id, {"text": "active"}, datetime(2024, 6, 1, tzinfo=UTC))
+
+    session = MagicMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+
+    claim_repo = AsyncMock()
+    claim_repo.session = session
+    claim_repo.create = AsyncMock(return_value=created_claim)
+    claim_repo.get_active_for_entity_predicate = AsyncMock(return_value=[created_claim])
+    claim_repo.mark_superseded = AsyncMock(return_value=None)
+    claim_repo.update_status = AsyncMock(return_value=None)
+
+    predicate_repo = AsyncMock()
+    predicate_repo.get_by_slug = AsyncMock(return_value=_make_predicate_def("latest_wins"))
+
+    event = MagicMock()
+    event.workspace_id = workspace_id
+    event.id = event_id
+    event.occurred_at = datetime(2024, 6, 1, tzinfo=UTC)
+    event.created_at = datetime(2024, 6, 1, tzinfo=UTC)
+
+    run = MagicMock()
+    run.id = uuid.uuid4()
+
+    extracted_claim = ExtractedClaim(
+        entity="Alice",
+        predicate="status",
+        value="active",
+        value_type="text",
+        confidence=0.9,
+    )
+
+    result, superseded = await write_claim(
+        claim=extracted_claim,
+        entity_id=entity_id,
+        event=event,
+        run=run,
+        claim_repo=claim_repo,
+        predicate_repo=predicate_repo,
+        entity_name_to_id={},
+    )
+
+    assert result is created_claim
+    assert superseded == 0
+    added = session.add.call_args.args[0]
+    assert isinstance(added, ClaimSource)
+    assert added.workspace_id == workspace_id
+    assert added.claim_id == claim_id
+    assert added.event_id == event_id
+
+
+@pytest.mark.asyncio
 async def test_write_claim_latest_wins_late_arriving() -> None:
     """latest_wins: older claim arriving late gets marked superseded itself."""
     from alayaos_core.extraction.schemas import ExtractedClaim
@@ -308,6 +424,60 @@ async def test_write_claim_explicit_only_disputed() -> None:
     assert result is new_claim
     claim_repo.mark_superseded.assert_not_called()
     claim_repo.update_status.assert_called_once_with(new_id, "disputed")
+
+
+@pytest.mark.asyncio
+async def test_write_claim_explicit_only_uses_internal_unfiltered_status_when_available() -> None:
+    """Writer dispute status update uses the internal unfiltered mutation path."""
+    from alayaos_core.extraction.schemas import ExtractedClaim
+    from alayaos_core.extraction.writer import write_claim
+
+    old_id = uuid.uuid4()
+    new_id = uuid.uuid4()
+    old_claim = _make_claim(old_id, {"text": "old-role"}, datetime(2024, 1, 1, tzinfo=UTC))
+    new_claim = _make_claim(new_id, {"text": "new-role"}, datetime(2024, 6, 1, tzinfo=UTC))
+
+    class ClaimRepo:
+        def __init__(self) -> None:
+            self.session = MagicMock(add=MagicMock(), flush=AsyncMock())
+            self.create = AsyncMock(return_value=new_claim)
+            self.get_active_for_entity_predicate = AsyncMock(return_value=[old_claim, new_claim])
+            self.update_status = AsyncMock(side_effect=AssertionError("filtered status update used"))
+            self.update_status_unfiltered_calls = []
+
+        async def update_status_unfiltered(self, claim_id, status):
+            self.update_status_unfiltered_calls.append((claim_id, status))
+            return new_claim
+
+    claim_repo = ClaimRepo()
+    predicate_repo = AsyncMock()
+    predicate_repo.get_by_slug = AsyncMock(return_value=_make_predicate_def("explicit_only"))
+    event = MagicMock(
+        workspace_id=uuid.uuid4(),
+        id=uuid.uuid4(),
+        occurred_at=datetime(2024, 6, 1, tzinfo=UTC),
+        created_at=datetime(2024, 6, 1, tzinfo=UTC),
+    )
+    run = MagicMock(id=uuid.uuid4())
+
+    await write_claim(
+        claim=ExtractedClaim(
+            entity="Alice",
+            predicate="role",
+            value="new-role",
+            value_type="text",
+            confidence=0.7,
+        ),
+        entity_id=uuid.uuid4(),
+        event=event,
+        run=run,
+        claim_repo=claim_repo,
+        predicate_repo=predicate_repo,
+        entity_name_to_id={},
+    )
+
+    assert claim_repo.update_status_unfiltered_calls == [(new_id, "disputed")]
+    claim_repo.update_status.assert_not_awaited()
 
 
 @pytest.mark.asyncio

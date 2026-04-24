@@ -103,6 +103,14 @@ def test_request_id_matches_error_envelope_for_allowed_host_errors(monkeypatch) 
 
     monkeypatch.setenv("ALAYA_TRUSTED_HOSTS", '["api.example.com","testserver"]')
 
+    async def fake_validate_pgvector_extension(engine) -> None:
+        pass
+
+    monkeypatch.setattr(
+        "alayaos_api.main._validate_pgvector_extension",
+        fake_validate_pgvector_extension,
+    )
+
     app = create_app()
     with TestClient(app, base_url="http://api.example.com") as client:
         response = client.get("/api/v1/workspaces")

@@ -1,9 +1,25 @@
 """Tree node and briefing schemas."""
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, field_validator
+
+
+@dataclass(frozen=True, slots=True)
+class TreeNodeView:
+    """Tree endpoint DTO that prevents non-admin summary leaks."""
+
+    id: uuid.UUID
+    path: str
+    workspace_id: uuid.UUID
+    entity_id: uuid.UUID | None
+    node_type: str
+    is_dirty: bool
+    last_rebuilt_at: datetime | None
+    markdown_cache: str | None
+    summary: dict | None
 
 
 class TreeNodeResponse(BaseModel):

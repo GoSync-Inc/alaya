@@ -1,12 +1,15 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
+
+Scope = Literal["read", "write", "admin"]
 
 
 class APIKeyCreate(BaseModel):
     name: str
-    scopes: list[str] | None = None
+    scopes: list[Scope] | None = None
     expires_at: datetime | None = None
 
 

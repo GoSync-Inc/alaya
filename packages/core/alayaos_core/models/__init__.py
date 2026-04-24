@@ -4,6 +4,7 @@ from alayaos_core.models.audit import AuditLog
 from alayaos_core.models.base import Base
 from alayaos_core.models.chunk import L0Chunk
 from alayaos_core.models.claim import ClaimSource, L2Claim
+from alayaos_core.models.claim_effective_access import ClaimEffectiveAccess
 from alayaos_core.models.entity import EntityExternalId, L1Entity
 from alayaos_core.models.entity_type import EntityTypeDefinition
 from alayaos_core.models.event import L0Event
@@ -23,6 +24,7 @@ __all__ = [
     "AccessGroupMember",
     "AuditLog",
     "Base",
+    "ClaimEffectiveAccess",
     "ClaimSource",
     "EntityExternalId",
     "EntityTypeDefinition",

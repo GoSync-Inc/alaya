@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid as _uuid
 from datetime import UTC, datetime
 from functools import lru_cache
+from inspect import isawaitable
 from typing import TYPE_CHECKING
 
 import structlog
@@ -25,6 +26,24 @@ if TYPE_CHECKING:
     from alayaos_core.models.extraction_run import ExtractionRun
 
 log = structlog.get_logger()
+
+
+async def _mark_claim_superseded_internal(claim_repo, old_claim_id, new_claim_id, valid_to):
+    if hasattr(type(claim_repo), "mark_superseded_unfiltered"):
+        return await claim_repo.mark_superseded_unfiltered(old_claim_id, new_claim_id, valid_to)
+    return await claim_repo.mark_superseded(old_claim_id, new_claim_id, valid_to)
+
+
+async def _update_claim_status_internal(claim_repo, claim_id, status):
+    if hasattr(type(claim_repo), "update_status_unfiltered"):
+        return await claim_repo.update_status_unfiltered(claim_id, status)
+    return await claim_repo.update_status(claim_id, status)
+
+
+async def _get_entity_internal(entity_repo, entity_id):
+    if hasattr(type(entity_repo), "get_by_id_unfiltered"):
+        return await entity_repo.get_by_id_unfiltered(entity_id)
+    return await entity_repo.get_by_id(entity_id)
 
 
 # ─── Task 1: Value normalization ─────────────────────────────────────────────
@@ -81,7 +100,7 @@ async def write_claim(
     claim_repo: ClaimRepository,
     predicate_repo: PredicateRepository,
     entity_name_to_id: dict[str, _uuid.UUID],
-) -> L2Claim | None:
+) -> tuple[L2Claim | None, int]:
     """Write a claim with predicate-specific supersession policy."""
     predicate_def = await predicate_repo.get_by_slug(event.workspace_id, claim.predicate)
     strategy = predicate_def.supersession_strategy if predicate_def else "latest_wins"
@@ -127,6 +146,18 @@ async def write_claim(
         source_summary=claim.source_summary,
         status="active",
     )
+    from alayaos_core.models.claim import ClaimSource
+
+    add_result = claim_repo.session.add(
+        ClaimSource(
+            workspace_id=event.workspace_id,
+            claim_id=new_claim.id,
+            event_id=event.id,
+        )
+    )
+    if isawaitable(add_result):
+        await add_result
+    await claim_repo.session.flush()
     if claim.value_type == "date" and normalized_value.get("reason"):
         log.info(
             "claim.date_normalize_failed",
@@ -146,17 +177,17 @@ async def write_claim(
             old_observed = old.observed_at or old.created_at
             if strategy == "latest_wins":
                 if claim_observed_at >= old_observed:
-                    await claim_repo.mark_superseded(old.id, new_claim.id, claim_observed_at)
+                    await _mark_claim_superseded_internal(claim_repo, old.id, new_claim.id, claim_observed_at)
                     superseded_count += 1
                 else:
-                    await claim_repo.mark_superseded(new_claim.id, old.id, old_observed)
+                    await _mark_claim_superseded_internal(claim_repo, new_claim.id, old.id, old_observed)
                     break  # new claim superseded — stop processing
             elif strategy == "explicit_only":
                 if claim.confidence >= 0.85 and normalized_value != old.value and claim_observed_at >= old_observed:
-                    await claim_repo.mark_superseded(old.id, new_claim.id, claim_observed_at)
+                    await _mark_claim_superseded_internal(claim_repo, old.id, new_claim.id, claim_observed_at)
                     superseded_count += 1
                 elif normalized_value != old.value:
-                    await claim_repo.update_status(new_claim.id, "disputed")
+                    await _update_claim_status_internal(claim_repo, new_claim.id, "disputed")
                     break  # new claim disputed — stop processing
 
     return new_claim, superseded_count
@@ -218,6 +249,7 @@ async def atomic_write(
                     relation_type=rel.relation_type,
                     confidence=rel.confidence,
                     extraction_run_id=run.id,
+                    source_event_id=event.id,
                 )
                 counters["relations_created"] += 1
             # NOTE: only HierarchyViolationError is caught here — other failures
@@ -276,7 +308,7 @@ async def atomic_write(
         # entity_name_to_id keys are raw mentions; look up canonical names from DB.
         canonical_names = set()
         for eid in entity_ids:
-            entity = await entity_repo.get_by_id(eid)
+            entity = await _get_entity_internal(entity_repo, eid)
             if entity:
                 canonical_names.add(entity.name)
         # Also invalidate raw mention names (covers exact-match entries)

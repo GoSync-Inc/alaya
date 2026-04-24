@@ -1088,16 +1088,18 @@ class IntegratorEngine:
                 counters["claims_updated"] = 1
 
             elif action.action == "normalize_date" and action.entity_id:
-                from alayaos_core.extraction.integrator.date_normalizer import DateNormalizer
+                from alayaos_core.extraction.date_normalizer import DateNormalizer
 
                 normalizer = DateNormalizer()
                 entity = await self.entity_repo.get_by_id(action.entity_id)
                 if entity:
                     merged_props = dict(entity.properties or {})
                     raw_date = action.details.get("date_value", "")
-                    normalized = normalizer.normalize(raw_date)
-                    if normalized:
-                        merged_props["normalized_date"] = normalized
+                    result = normalizer.normalize(raw_date)
+                    if result.normalized:
+                        merged_props["normalized_date"] = result.iso
+                    else:
+                        log.info("date_normalization_failed", reason=result.reason, raw=result.raw)
                     # Merge remaining action details regardless of normalization outcome
                     merged_props.update(action.details)
                     await self.entity_repo.update(action.entity_id, properties=merged_props)

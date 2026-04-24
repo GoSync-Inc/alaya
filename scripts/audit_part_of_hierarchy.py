@@ -80,12 +80,14 @@ async def _run_audit(database_url: str, workspace_id: uuid.UUID | None, sample_s
     sample_sql = text(
         f"""
         SELECT
-            r.id            AS relation_id,
+            r.id                    AS relation_id,
             r.workspace_id,
-            se.name         AS source_name,
-            sd.slug         AS source_type,
-            te.name         AS target_name,
-            td.slug         AS target_type
+            se.name                 AS source_name,
+            sd.slug                 AS source_type,
+            te.name                 AS target_name,
+            td.slug                 AS target_type,
+            r.created_at            AS created_at,
+            r.extraction_run_id     AS extraction_run_id
         FROM l1_relations r
         JOIN l1_entities se ON se.id = r.source_entity_id AND se.workspace_id = r.workspace_id
         JOIN l1_entities te ON te.id = r.target_entity_id AND te.workspace_id = r.workspace_id
@@ -128,16 +130,19 @@ async def _run_audit(database_url: str, workspace_id: uuid.UUID | None, sample_s
             rows = sample_result.mappings().all()
             print(f"\nSample (up to {sample_size}):")
             print(
-                f"{'relation_id':<38}  {'source_name':<20}  {'source_type':<12}  {'target_name':<20}  {'target_type'}"
+                f"{'relation_id':<38}  {'source_name':<20}  {'source_type':<12}  "
+                f"{'target_name':<20}  {'target_type':<12}  {'created_at':<27}  {'extraction_run_id'}"
             )
-            print("-" * 120)
+            print("-" * 160)
             for row in rows:
                 print(
                     f"{row['relation_id']!s:<38}  "
                     f"{row['source_name']!s:<20}  "
                     f"{row['source_type']!s:<12}  "
                     f"{row['target_name']!s:<20}  "
-                    f"{row['target_type']!s}"
+                    f"{row['target_type']!s:<12}  "
+                    f"{row['created_at']!s:<27}  "
+                    f"{row['extraction_run_id']!s}"
                 )
 
     await engine.dispose()

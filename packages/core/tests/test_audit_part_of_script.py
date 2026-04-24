@@ -9,7 +9,6 @@ Marked integration because it requires a running testcontainer postgres.
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 import uuid
 
@@ -124,80 +123,76 @@ async def _seed_workspace_and_entities(
     return ws_id, task_id, project_id, project2_id, task2_id
 
 
-@pytest.mark.asyncio
-async def test_audit_script_detects_violations(superuser_session, migrated_container):
-    """Audit script exits 1 and reports 2 violations when seeded with inverted relations."""
-    ws_id, task_id, project_id, project2_id, task2_id = await _seed_workspace_and_entities(superuser_session)
+def test_audit_script_exit_code_when_violations_found(monkeypatch):
+    """main() exits with code 1 when _run_audit returns a non-zero violation count."""
+    scripts_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "scripts"))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    import audit_part_of_hierarchy as script
 
-    # Seed 2 valid relations (should not be flagged)
-    await _direct_insert_relation(superuser_session, ws_id, task_id, project_id, "part_of")
-    await _direct_insert_relation(superuser_session, ws_id, task2_id, project2_id, "part_of")
+    # Monkeypatch _run_audit to return 2 violations synchronously via a coroutine
+    async def _fake_run_audit(database_url, workspace_id, sample_size):
+        return 2
 
-    # Seed 2 inverted relations (project → task: project rank=2 >= task rank=1 → violation)
-    await _direct_insert_relation(superuser_session, ws_id, project_id, task_id, "part_of")
-    await _direct_insert_relation(superuser_session, ws_id, project2_id, task2_id, "part_of")
+    monkeypatch.setattr(script, "_run_audit", _fake_run_audit)
+    monkeypatch.setenv("ALAYA_DATABASE_URL", "postgresql+asyncpg://fake/fake")
+    monkeypatch.setattr(sys, "argv", ["audit_part_of_hierarchy.py", "--workspace-id", str(uuid.uuid4())])
 
-    # Flush so the subprocess sees the data (same transaction; but subprocess uses its own conn)
-    # We need to commit for subprocess visibility.
-    await superuser_session.flush()
+    with pytest.raises(SystemExit) as exc_info:
+        script.main()
 
-    # Build DB URL for the subprocess from the container
-    db_url = migrated_container.get_connection_url()
-
-    script_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "scripts", "audit_part_of_hierarchy.py")
-    script_path = os.path.normpath(script_path)
-
-    env = os.environ.copy()
-    env["ALAYA_DATABASE_URL"] = db_url
-
-    subprocess.run(
-        [sys.executable, script_path, "--workspace-id", str(ws_id)],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-
-    # The subprocess cannot see uncommitted data → commit first (outer txn)
-    # But our fixture uses sess.begin() which is rolled back at teardown.
-    # Since we need the subprocess to see data, we need to commit.
-    # The fixture rolls back AFTER yield — so data is committed for the subprocess window.
-    # Actually: the fixture does `async with sess.begin(): yield sess; rollback()`
-    # The rollback happens after yield returns, so AFTER this test body runs.
-    # BUT the subprocess runs during the test body, BEFORE rollback.
-    # However, the outer BEGIN is not yet committed — so subprocess won't see it!
-    # We need to flush+commit before running subprocess. Since the fixture uses
-    # begin() context, we can't commit mid-test. Instead we work around by using
-    # a savepoint commit pattern — but that's complex.
-    #
-    # Simpler: skip the subprocess approach and test the audit logic directly.
-    # See test_audit_logic_directly below.
-
-    # This test documents the subprocess approach (may be skipped if data not visible)
-    # The subprocess sees only committed data. Since we're inside a transaction, exit code
-    # will be 0 (no violations visible). This is a known limitation of the subprocess approach.
-    # The direct-function test below tests the logic properly.
-    pass
+    assert exc_info.value.code == 1
 
 
 @pytest.mark.asyncio
-async def test_audit_logic_directly(superuser_session, migrated_container, engine_superuser):
-    """Test audit logic directly (without subprocess) by calling _run_audit."""
-    # We need committed data for this — use a separate committed transaction
-    ws_id, task_id, project_id, project2_id, task2_id = await _seed_workspace_and_entities(superuser_session)
-    await _direct_insert_relation(superuser_session, ws_id, task_id, project_id, "part_of")
-    await _direct_insert_relation(superuser_session, ws_id, task2_id, project2_id, "part_of")
-    await _direct_insert_relation(superuser_session, ws_id, project_id, task_id, "part_of")
-    await _direct_insert_relation(superuser_session, ws_id, project2_id, task2_id, "part_of")
-    await superuser_session.flush()
+async def test_audit_logic_directly(migrated_container, engine_superuser):
+    """Test audit logic directly (without subprocess) by calling _run_audit.
 
-    # Commit the data by ending the transaction early
-    await superuser_session.commit()
+    Uses a standalone committed transaction for seeding so that _run_audit (which
+    opens its own connection) can see the data. A try/finally ensures cleanup even
+    if the assertion fails — rows are deleted by workspace_id cascade or explicit DELETE.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    session_factory = async_sessionmaker(engine_superuser, expire_on_commit=False)
+
+    # Seed data in a standalone committed transaction
+    ws_id = uuid.uuid4()
+    async with session_factory() as seed_sess, seed_sess.begin():
+        ws_id, task_id, project_id, project2_id, task2_id = await _seed_workspace_and_entities(seed_sess)
+        await _direct_insert_relation(seed_sess, ws_id, task_id, project_id, "part_of")
+        await _direct_insert_relation(seed_sess, ws_id, task2_id, project2_id, "part_of")
+        await _direct_insert_relation(seed_sess, ws_id, project_id, task_id, "part_of")
+        await _direct_insert_relation(seed_sess, ws_id, project2_id, task2_id, "part_of")
+    # Transaction committed here — _run_audit will see the rows
 
     # Import the audit function directly
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "scripts"))
+    scripts_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "scripts"))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
     from audit_part_of_hierarchy import _run_audit
 
     db_url = migrated_container.get_connection_url()
-    count = await _run_audit(db_url, ws_id, 20)
-
-    assert count == 2, f"Expected 2 violations, got {count}"
+    try:
+        count = await _run_audit(db_url, ws_id, 20)
+        assert count == 2, f"Expected 2 violations, got {count}"
+    finally:
+        # Clean up seeded rows so they don't leak into subsequent tests.
+        # Delete in FK-dependency order: relations → entities → entity_type_definitions → workspace.
+        async with session_factory() as cleanup_sess, cleanup_sess.begin():
+            await cleanup_sess.execute(
+                text("DELETE FROM l1_relations WHERE workspace_id = :ws_id"),
+                {"ws_id": ws_id},
+            )
+            await cleanup_sess.execute(
+                text("DELETE FROM l1_entities WHERE workspace_id = :ws_id"),
+                {"ws_id": ws_id},
+            )
+            await cleanup_sess.execute(
+                text("DELETE FROM entity_type_definitions WHERE workspace_id = :ws_id"),
+                {"ws_id": ws_id},
+            )
+            await cleanup_sess.execute(
+                text("DELETE FROM workspaces WHERE id = :ws_id"),
+                {"ws_id": ws_id},
+            )

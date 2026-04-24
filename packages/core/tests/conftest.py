@@ -168,10 +168,12 @@ async def workspace(db_session: AsyncSession):
         slug=f"test-ws-{uuid.uuid4().hex[:8]}",
     )
     await db_session.flush()
-    # SET LOCAL at the outer connection level so all subsequent queries in
-    # this test respect RLS for this workspace.
+    # SET LOCAL on the outer connection (db_session.connection()) rather than
+    # via the session's savepoint frame. This ensures the GUC survives nested
+    # begin_nested()/rollback used in tests.
     wid = str(uuid.UUID(str(ws.id)))
-    await db_session.execute(text(f"SET LOCAL app.workspace_id = '{wid}'"))
+    conn = await db_session.connection()
+    await conn.execute(text(f"SET LOCAL app.workspace_id = '{wid}'"))
     return ws
 
 

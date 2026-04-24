@@ -41,7 +41,7 @@ packages/
 │       └── routers/                # 18 routers: health, workspaces, entities, claims, chunks, pipeline_traces, integrator_runs, integrator_actions, search, ask, tree, etc.
 ├── cli-go/                         # Go CLI (Cobra): search, ask, tree, entity, claim, ingest, key, setup agent
 └── connectors/                     # Source connectors (placeholder)
-alembic/                            # Migrations (001: 18 tables + RLS, 002: auth bypass, 003: extraction schema, 004: intelligence pipeline, 005a/005b: search indexes, 006: consolidator schema)
+alembic/                            # Migrations (001: 18 tables + RLS, 002: auth bypass, 003: extraction schema, 004: intelligence pipeline, 005a/005b: search indexes, 006: consolidator schema, 007: multi-tenant hardening)
 docker/                             # seed.py, init-db.sql, Caddyfile
 ```
 

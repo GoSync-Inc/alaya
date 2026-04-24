@@ -46,7 +46,7 @@ alembic/                            # Migrations (001: 18 tables + RLS, 002: aut
 docker/                             # seed.py, init-db.sql, Caddyfile
 ```
 
-**Data flow:** Sources -> L0 Events -> Cortex (chunk + classify) -> Crystallizer (LLM extract) -> Write (resolve + normalize date claims + persist) -> Integrator (dedup + enrich) -> L1 Entities + L2 Claims -> L3 Knowledge Tree -> CLI/MCP/API
+**Data flow:** Sources -> L0 Events -> Cortex (chunk + classify) -> Crystallizer (LLM extract) -> Write (resolve + normalize date claims + persist) -> Integrator (dedup + enrich) -> L1 Entities + L2 Claims -> L3 Knowledge Tree -> CLI/MCP/API. Writer date claim JSONB is `{date, iso, normalized, anchor, reason}`; when a post-create date normalization failure leaves `reason` set, writer logs `claim.date_normalize_failed`.
 
 ## Current Focus
 

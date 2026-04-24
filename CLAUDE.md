@@ -16,7 +16,7 @@ Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · 
 packages/
 ├── core/                           # Brain: models, schemas, repositories, services
 │   └── alayaos_core/
-│       ├── models/                 # SQLAlchemy 2.0 (18 files)
+│       ├── models/                 # SQLAlchemy 2.0 (19 files)
 │       ├── schemas/                # Pydantic schemas (17 files)
 │       ├── repositories/           # Async repos with cursor pagination (17 files)
 │       ├── services/               # workspace (seed), api_key (generate/verify), entity_cache (Redis)
@@ -42,7 +42,7 @@ packages/
 │       └── routers/                # 18 routers: health, workspaces, entities, claims, chunks, pipeline_traces, integrator_runs, integrator_actions, search, ask, tree, etc.
 ├── cli-go/                         # Go CLI (Cobra): search, ask, tree, entity, claim, ingest, key, setup agent
 └── connectors/                     # Source connectors (placeholder)
-alembic/                            # Migrations (001: 18 tables + RLS, 002: auth bypass, 003: extraction schema, 004: intelligence pipeline, 005a/005b: search indexes, 006: consolidator schema, 007: multi-tenant hardening)
+alembic/                            # Migrations 001-008 (001: 18 tables + RLS, 002: auth bypass, 003: extraction schema, 004: intelligence pipeline, 005a/005b: search indexes, 006: consolidator schema, 007: multi-tenant hardening, 008: ACL propagation)
 docker/                             # seed.py, init-db.sql, Caddyfile
 ```
 

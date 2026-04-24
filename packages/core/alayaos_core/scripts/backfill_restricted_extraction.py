@@ -1,4 +1,4 @@
-"""Backfill extraction for existing restricted events."""
+"""Backfill extraction for existing restricted/private events."""
 
 from __future__ import annotations
 
@@ -90,8 +90,15 @@ async def main(
                             """
                             SELECT e.id FROM l0_events e
                             WHERE e.workspace_id = :ws
-                              AND e.access_level = 'restricted'
+                              AND e.access_level IN ('restricted', 'private')
                               AND e.is_extracted = false
+                              AND NOT EXISTS (
+                                  SELECT 1
+                                  FROM extraction_runs r
+                                  WHERE r.workspace_id = e.workspace_id
+                                    AND r.event_id = e.id
+                                    AND r.status NOT IN ('completed', 'failed')
+                              )
                             ORDER BY e.created_at
                             LIMIT :limit
                             FOR UPDATE SKIP LOCKED
@@ -102,14 +109,17 @@ async def main(
                     event_ids = [row["id"] for row in result.mappings()]
 
                     if args.dry_run:
-                        print(f"[dry-run] Would enqueue {len(event_ids)} events. Use --apply to execute.")
+                        print(
+                            f"[dry-run] Would enqueue {len(event_ids)} restricted/private events. "
+                            "Use --apply to execute."
+                        )
                         raise _DryRunRollback()
             except _DryRunRollback:
                 return 0
 
         for event_id in event_ids:
             await enqueue_event(event_id)
-        print(f"[apply] Enqueued {len(event_ids)} events for extraction.")
+        print(f"[apply] Enqueued {len(event_ids)} restricted/private events for extraction.")
         return len(event_ids)
     finally:
         if engine is not None:

@@ -60,24 +60,6 @@ def _tree_node_payload(node, allowed_tiers: set[str], *, hide_non_admin_markdown
     }
 
 
-async def _get_node(svc: TreeService, path: str, allowed_tiers: set[str]):
-    try:
-        return await svc.get_node(path, allowed_tiers=allowed_tiers)
-    except TypeError as exc:
-        if "allowed_tiers" not in str(exc):
-            raise
-        return await svc.get_node(path)
-
-
-async def _export_subtree(svc: TreeService, path: str, allowed_tiers: set[str]) -> str:
-    try:
-        return await svc.export_subtree(path, allowed_tiers=allowed_tiers)
-    except TypeError as exc:
-        if "allowed_tiers" not in str(exc):
-            raise
-        return await svc.export_subtree(path)
-
-
 @router.get("/tree")
 async def get_tree_root(
     session: Annotated[AsyncSession, Depends(get_workspace_session)],
@@ -113,7 +95,7 @@ async def get_tree_node(
         )
     svc = TreeService(session, api_key.workspace_id)
     allowed_tiers = _allowed_tiers_from_context(api_key)
-    node = await _get_node(svc, path, allowed_tiers)
+    node = await svc.get_node(path, allowed_tiers=allowed_tiers)
     if node is None:
         raise _not_found(path)
     return data_response(_tree_node_payload(node, allowed_tiers))
@@ -128,5 +110,5 @@ async def export_subtree(
     """Export a subtree as markdown text."""
     svc = TreeService(session, api_key.workspace_id)
     allowed_tiers = _allowed_tiers_from_context(api_key)
-    markdown = await _export_subtree(svc, body.path, allowed_tiers)
+    markdown = await svc.export_subtree(body.path, allowed_tiers=allowed_tiers)
     return PlainTextResponse(content=markdown, media_type="text/markdown")

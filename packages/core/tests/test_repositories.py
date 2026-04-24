@@ -330,6 +330,40 @@ class TestEventRepository:
         assert created is False
         assert ev is existing
 
+    @pytest.mark.asyncio
+    async def test_create_or_update_preserves_existing_access_level_on_conflict(self) -> None:
+        from alayaos_core.repositories.event import EventRepository
+
+        existing = L0Event(
+            id=uuid.uuid4(),
+            workspace_id=uuid.uuid4(),
+            source_type="slack",
+            source_id="MSG3",
+            content={"text": "v2"},
+            content_hash="hash_v2",
+            event_metadata={},
+            access_level="restricted",
+        )
+        session = make_session()
+        row = MagicMock()
+        row.__getitem__ = MagicMock(side_effect=lambda i: existing if i == 0 else False)
+        result = MagicMock()
+        result.one.return_value = row
+        session.execute.return_value = result
+        repo = EventRepository(session)
+
+        await repo.create_or_update(
+            workspace_id=existing.workspace_id,
+            source_type="slack",
+            source_id="MSG3",
+            content={"text": "v2"},
+            content_hash="hash_v2",
+        )
+
+        stmt = session.execute.await_args.args[0]
+        compiled = str(stmt)
+        assert "access_level = excluded.access_level" not in compiled
+
 
 # ─── EntityTypeRepository ─────────────────────────────────────────────────────
 

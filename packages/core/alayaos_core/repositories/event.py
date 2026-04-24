@@ -64,7 +64,9 @@ class EventRepository(BaseRepository):
             "content": stmt.excluded.content,
             "content_hash": stmt.excluded.content_hash,
             "raw_text": stmt.excluded.raw_text,
-            "access_level": stmt.excluded.access_level,
+            "access_level": func.rank_to_level(
+                func.greatest(func.tier_rank(L0Event.access_level), func.tier_rank(stmt.excluded.access_level))
+            ),
             "event_kind": stmt.excluded.event_kind,
             "occurred_at": stmt.excluded.occurred_at,
             "updated_at": func.now(),
@@ -77,7 +79,7 @@ class EventRepository(BaseRepository):
             set_=update_set,
         )
         stmt = stmt.returning(L0Event, literal_column("xmax = 0").label("inserted"))
-        result = await self.session.execute(stmt)
+        result = await self.session.execute(stmt.execution_options(populate_existing=True))
         row = result.one()
         return row[0], bool(row[1])
 

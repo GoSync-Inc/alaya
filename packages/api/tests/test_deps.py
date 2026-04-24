@@ -245,6 +245,33 @@ async def test_require_scope_passes_when_scope_present() -> None:
 
 
 @pytest.mark.asyncio
+async def test_require_scope_allows_write_and_admin_to_read() -> None:
+    from alayaos_api.deps import require_scope
+
+    write_key, _ = _valid_api_key(scopes=["write"])
+    admin_key, _ = _valid_api_key(scopes=["admin"])
+    checker = require_scope("read")
+
+    assert await checker(api_key=write_key) is write_key
+    assert await checker(api_key=admin_key) is admin_key
+
+
+@pytest.mark.asyncio
+async def test_require_scope_does_not_allow_read_to_write_or_admin() -> None:
+    from fastapi import HTTPException
+
+    from alayaos_api.deps import require_scope
+
+    read_key, _ = _valid_api_key(scopes=["read"])
+
+    with pytest.raises(HTTPException):
+        await require_scope("write")(api_key=read_key)
+
+    with pytest.raises(HTTPException):
+        await require_scope("admin")(api_key=read_key)
+
+
+@pytest.mark.asyncio
 async def test_require_scope_raises_403_when_missing() -> None:
     from fastapi import HTTPException
 

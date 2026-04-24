@@ -124,7 +124,10 @@ def require_scope(scope: str):
     """Return a dependency that enforces the given scope on the API key."""
 
     async def _check_scope(api_key: Annotated[APIKey, Depends(get_api_key)]) -> APIKey:
-        if scope not in api_key.scopes:
+        has_scope = scope in api_key.scopes or (
+            scope == "read" and any(s in api_key.scopes for s in ("write", "admin"))
+        )
+        if not has_scope:
             raise HTTPException(
                 status_code=403,
                 detail=_error_response(

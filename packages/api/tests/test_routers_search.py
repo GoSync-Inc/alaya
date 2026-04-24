@@ -114,14 +114,54 @@ def test_search_preserves_service_meta() -> None:
     assert response.json()["meta"] == {"filtered_count": 2, "filter_reason": "access_level"}
 
 
-def test_search_requires_read_scope() -> None:
+def test_search_allows_write_scope_for_read_endpoint() -> None:
     app = make_app(make_api_key(scopes=["write"]))
+    redis_client = _mock_redis_client()
+    response_payload = SearchResponse(
+        query="alpha",
+        results=[],
+        total=0,
+        channels_used=["fts"],
+        elapsed_ms=1,
+    )
 
-    client = TestClient(app)
-    response = client.post("/api/v1/search", headers={"X-Api-Key": RAW_KEY}, json={"query": "alpha"})
+    with (
+        patch("alayaos_api.routers.search.aioredis.from_url", return_value=redis_client),
+        patch("alayaos_api.routers.search.RateLimiterService") as mock_limiter_cls,
+        patch("alayaos_api.routers.search.hybrid_search", new=AsyncMock(return_value=response_payload)),
+    ):
+        mock_limiter_cls.return_value.check = AsyncMock(
+            return_value=SimpleNamespace(allowed=True, retry_after=None, backend_available=True)
+        )
+        client = TestClient(app)
+        response = client.post("/api/v1/search", headers={"X-Api-Key": RAW_KEY}, json={"query": "alpha"})
 
-    assert response.status_code == 403
-    assert response.json()["error"]["code"] == "auth.insufficient_scope"
+    assert response.status_code == 200
+
+
+def test_search_allows_admin_scope_for_read_endpoint() -> None:
+    app = make_app(make_api_key(scopes=["admin"]))
+    redis_client = _mock_redis_client()
+    response_payload = SearchResponse(
+        query="alpha",
+        results=[],
+        total=0,
+        channels_used=["fts"],
+        elapsed_ms=1,
+    )
+
+    with (
+        patch("alayaos_api.routers.search.aioredis.from_url", return_value=redis_client),
+        patch("alayaos_api.routers.search.RateLimiterService") as mock_limiter_cls,
+        patch("alayaos_api.routers.search.hybrid_search", new=AsyncMock(return_value=response_payload)),
+    ):
+        mock_limiter_cls.return_value.check = AsyncMock(
+            return_value=SimpleNamespace(allowed=True, retry_after=None, backend_available=True)
+        )
+        client = TestClient(app)
+        response = client.post("/api/v1/search", headers={"X-Api-Key": RAW_KEY}, json={"query": "alpha"})
+
+    assert response.status_code == 200
 
 
 def test_search_returns_structured_429_when_limited() -> None:

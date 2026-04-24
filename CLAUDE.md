@@ -109,7 +109,7 @@ Run before every commit:
 11. **All relation writes are self-reference-rejected** — `RelationRepository._reject_self_reference` enforces this universally in `create()` and `create_batch()`; raises `HierarchyViolationError` (`repositories/errors.py`).
 12. **`part_of` relations are ENTITY_TYPE_TIER_RANK-enforced by default** — `_validate_part_of_tier` prevents downward or lateral containment when `ALAYA_PART_OF_STRICT=strict`; `warn` logs `part_of.tier_violation` and persists, `off` skips tier-rank validation. Callers (writer, panoramic, enrichment) each catch `HierarchyViolationError`, log a named structured event, and continue (best-effort — never abort the batch).
 13. **Merge rollback is schema-versioned.** `IntegratorActionRepository._rollback_merge` branches on `snapshot_schema_version`: v1 restores only `is_deleted=False` (legacy partial); v2 performs full FK reversal, per-ID conflict detection, and winner-metadata restore from `inverse["winner_before"]`.
-14. **Access extraction gate:** `restricted` events are skipped; `private` events require workspace `extract_private`; `channel` events extract like public events but are retrieval tier 1 after S1.
+14. **Run 6.2 access semantics:** `channel` events extract identically to public and are tier 1 at retrieval; `restricted` events now extract and rely on retrieval ACL via `vector_chunks.access_level` and `claim_effective_access`; `private` events remain workspace opt-in gated.
 
 ## Code Conventions
 

@@ -1,8 +1,10 @@
 """Tests for health endpoints."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -40,7 +42,8 @@ def make_test_app():
 
 def mock_redis_ping(monkeypatch, *, result=True, side_effect=None):
     redis_client = MagicMock()
-    redis_client.ping = AsyncMock(return_value=result, side_effect=side_effect)
+    ping_kwargs = {"side_effect": side_effect} if side_effect is not None else {"return_value": result}
+    redis_client.ping = AsyncMock(**ping_kwargs)
     redis_client.aclose = AsyncMock()
     monkeypatch.setattr(health.aioredis, "from_url", MagicMock(return_value=redis_client))
     return redis_client
@@ -125,6 +128,23 @@ def test_health_ready_reports_redis_down_when_ping_fails(monkeypatch) -> None:
     body = response.json()
     assert body["status"] == "degraded"
     assert body["checks"]["redis"] == "down"
+
+
+@pytest.mark.asyncio
+async def test_check_redis_reports_down_when_ping_times_out(monkeypatch) -> None:
+    monkeypatch.setattr(health, "REDIS_PING_TIMEOUT_SECONDS", 0.01, raising=False)
+
+    async def never_returns():
+        await asyncio.Event().wait()
+
+    redis_client = MagicMock()
+    redis_client.ping = AsyncMock(side_effect=never_returns)
+    redis_client.aclose = AsyncMock()
+    monkeypatch.setattr(health.aioredis, "from_url", MagicMock(return_value=redis_client))
+
+    result = await asyncio.wait_for(health._check_redis("redis://localhost:6379/0"), timeout=0.1)
+
+    assert result == "down"
 
 
 def test_health_ready_uses_cached_settings(monkeypatch) -> None:

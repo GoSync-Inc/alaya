@@ -16,16 +16,16 @@ See `docs/vision/` for the full picture.
 
 Four sequential runs. Each closes with a merged PR set and a post-merge audit. Planning discipline: `docs/superflow/plans/*` (internal) per run; progress is tracked in this file and in `docs/backlog/BACKLOG.md`.
 
-### Run 6.1 — Data Integrity
+### Run 6.1 — Data Integrity ✅ MERGED 2026-04-25
 
 **Goal:** close structural invariants that slipped through prior reviews; unblock the integration test suite so subsequent runs can move safely.
 
-**Sprints (3):**
-- S1 — Unblock 18 skipped integration tests (`RUN3.02`). Stand up conftest with temp DB, migrations, seed data. RLS and composite FK get real CI coverage.
-- S2 — Enforce `ENTITY_TYPE_TIER_RANK` on `part_of` writes (`RUN5.4.FU.01`). Any non-panoramic path that tries to create a tier-inverted edge is rejected.
-- S3 — `_rollback_merge` reverses claim/relation/chunk FK reassignment (`RUN5.4.FU.02`). Restores the "every mutation reversible" invariant.
+**Sprints (3, all merged):**
+- S1 (PR #108, merged `40be788`) — Integration harness replaced with testcontainers + `alembic upgrade head` + non-superuser `alaya_app` role. Four new RLS negatives + `test_rls_policy_coverage` + pgvector smoke. CI `integration-test` job no longer needs `services: postgres`.
+- S2 (PR #109, merged `f083bf7`) — `ENTITY_TYPE_TIER_RANK` enforced at every `part_of` write; universal self-reference rejection for ALL relation types. Writer / panoramic / enrichment each catch `HierarchyViolationError` with their own structured log. `scripts/audit_part_of_hierarchy.py` preflight audit script. Closed `RUN5.4.FU.01`.
+- S3 (PR #110, merged `20af24f`) — `_rollback_merge` branches on `snapshot_schema_version`: v1 graceful partial, v2 full FK + winner-metadata reversal via additive `inverse` payload. `params`/`targets` shapes preserved per-producer; API round-trip tests verify. Closed `RUN5.4.FU.02`.
 
-**Exit criteria:** `just test-integration` runs green in CI; `pytest` proves tier_rank violation raises; merge rollback regression test verifies FK reversal.
+**Outcome:** `just test-integration` runs green in CI; `pytest` proves tier_rank + self-ref enforcement; merge rollback integration test proves FK + winner metadata reversal; legacy v1 audits degrade gracefully. Preflight audit artifact: `docs/superflow/audits/2026-04-25-run6.1-audit.md`.
 
 ### Run 6.2 — Access & Normalization
 

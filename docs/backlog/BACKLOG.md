@@ -4,7 +4,7 @@ Single source of truth for all tech debt, known limitations, and research items 
 
 **Format:** `[RUN-N.NN]` prefix for traceability. Priority: P1 (next run), P2 (eventually), P3 (nice to have).
 
-_Last audited: 2026-04-17. Closed items moved to `## Closed` section with commit hashes._
+_Last audited: 2026-04-25. Closed items moved to `## Closed` section with commit hashes._
 
 ---
 
@@ -143,8 +143,6 @@ Merged 2026-04-16 via PRs #87–#94. Plan files not in repo (planning artifacts)
 
 | ID | P | Title | Where | Details |
 |----|---|-------|-------|---------|
-| RUN5.4.FU.01 | P1 | Enforce `ENTITY_TYPE_TIER_RANK` on `part_of` writes | `packages/core/alayaos_core/repositories/relation.py`, `packages/core/alayaos_core/services/workspace.py:27-32` | Spec §1b: "if both entities have a `tier_rank`, require `parent.tier_rank > child.tier_rank`". The constant exists and is referenced in the panoramic prompt (`passes/panoramic.py:117`), but no runtime check on `L1Relation.create`. Any non-panoramic path (direct POST on `/relations`, future connectors) can write tier-inverted `part_of` edges. |
-| RUN5.4.FU.02 | P1 | `_rollback_merge` does not reverse FK reassignment | `packages/core/alayaos_core/repositories/integrator_action.py:228-254` | Brief's edge-case explicitly requires: "Reversing a `merge` must resurrect the soft-deleted entity AND move claims/relations/chunks back". Current implementation only flips `loser.is_deleted = False`; claims/relations/chunks stay assigned to the winner. Audit-log invariant is broken for the merge action type. |
 | RUN5.4.FU.03 | P1 | Complete RUN5.4.09 integrator cost observability | `packages/core/alayaos_core/extraction/integrator/engine.py`, `packages/core/alayaos_core/extraction/integrator/schemas.py:87-88`, `packages/core/alayaos_core/worker/tasks.py:761` | `IntegratorRunResult.cost_usd` / `tokens_used` default 0.0 / 0 and are never populated. `update_counters` accepts the field but the worker forwards values that were never set. No `pipeline_traces → integrator_runs` aggregation mirror of the Run 5.3 `recalc_usage` pattern was added. Two paths to close: (a) mirror `recalc_usage` for integrator by summing `pipeline_traces` joined on `run_id`; (b) plumb LLM usage returns from `PanoramicPass` + `DeduplicatorV2` back through `_run_locked`. Cross-link: prior RUN5.3 follow-up #1. |
 | RUN5.4.FU.04 | P1 | Run post-merge Step D benchmark on 40-event fixture | `scripts/bench_ingest.py`, `data/slack_export/slack_sample_40.jsonl` (local) | Run 5.4 audit records every quality-facing brief target as ⚠️ "unverified — benchmark deferred" because no re-benchmark was executed after PR #94 merged. Items that resolve only after Step D: dedup merge count, garbage remaining, description-fill rate, task/goal/north_star usage, synthetic project count, multi-pass wallclock, `extraction_runs.cost_usd` under multi-pass. |
 
@@ -180,6 +178,42 @@ Ported verbatim from the brief's "Items deferred" table (RUN5.4.10–15).
 | Backlog ID | Title | Evidence |
 |-----------|-------|----------|
 | RUN3.01 | Entity dedup: soft-delete only, no claim/relation reassignment | Closed in code by DeduplicatorV2 (`packages/core/alayaos_core/extraction/integrator/dedup.py:589-640`) and the v1 fallback fix (`packages/core/alayaos_core/extraction/integrator/engine.py:807-860`). Raw-SQL reassignment of claims, relations, chunks now runs on every merge path. |
+
+---
+
+## Run 6.1: Data Integrity (2026-04-25)
+
+Merged 2026-04-25 via PRs #108 (S1), #109 (S2), #110 (S3). Charter + spec + plan in `docs/superflow/{specs,plans}/2026-04-24-run6.1-data-integrity-*`. Preflight audit artifact: `docs/superflow/audits/2026-04-25-run6.1-audit.md`.
+
+### P1 — must fix next
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN6.1.FU.01 | P1 | Implement `ALAYA_PART_OF_STRICT` feature flag | `packages/core/alayaos_core/repositories/relation.py`, `packages/core/alayaos_core/config.py` | Charter documented `ALAYA_PART_OF_STRICT=false` as warn-only fallback when preflight audit finds inverted rows in production. Not implemented in Run 6.1 (scope). Needed IF a future deployed environment surfaces inverted rows that cannot be fixed in-place before merging new code. Today strict enforcement always raises. |
+
+### P2 — important hygiene
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN6.1.FU.02 | P2 | Bulk-SELECT tier validation in `create_batch` | `packages/core/alayaos_core/repositories/relation.py` `_validate_part_of_tier` | Holistic code review H2: per-row SELECT during `create_batch` pre-validation is N round-trips. Replace with single `SELECT source_id, sd.slug, target_id, td.slug ... WHERE (source_id, target_id) = ANY(ARRAY[...])` per batch, map slug→rank in Python. Low real-world impact today (small batches); promote if extraction pipeline ingests batches with many part_of edges. |
+| RUN6.1.FU.03 | P2 | Bulk conflict check in `_check_merge_rollback_conflicts` | `packages/core/alayaos_core/repositories/integrator_action.py` | Holistic code review M3: per-ID SELECT across 4 FK kinds is O(N) round-trips. Rare admin rollback today — promote only when rollback timeout becomes a concern. Replace with 4 bulk SELECTs (`WHERE id = ANY(:ids)`) classified in Python. |
+
+### P3 — nice to have
+
+| ID | P | Title | Where | Details |
+|----|---|-------|-------|---------|
+| RUN6.1.FU.04 | P3 | Split panoramic log event for self-ref vs tier inversion | `packages/core/alayaos_core/extraction/integrator/engine.py:474,514` | Holistic product review M1: `panoramic_part_of_rejected` is emitted for both tier violations AND self-ref rejections (via the universal `_reject_self_reference` guard). The `action` field disambiguates, but the event name misleads ops filtering. Either split into `panoramic_self_ref_rejected` + `panoramic_tier_violation_rejected`, or add a `violation_type` structured field. |
+| RUN6.1.FU.05 | P3 | Add `rollback_merge_skipped_deleted_relations` log-capture assertion | `packages/core/tests/integration/test_integrator_merge_rollback.py` | Holistic product review M2: `test_rollback_merge_does_not_resurrect_self_ref` verifies the data invariant but does not assert the structured log. Future regression that silently drops the log emission would pass today. Wrap `apply_rollback` in `structlog.testing.capture_logs()` + assert. |
+| RUN6.1.FU.06 | P3 | Factor duplicated "SELECT IDs before mutation" between dedup and engine | `packages/core/alayaos_core/extraction/integrator/dedup.py`, `.../engine.py` | Holistic code review backlog: both merge producers have near-identical scaffolding for the v2 audit ID capture. If `_merge_duplicates` (legacy engine path) is later retired once dedup v2 fully covers the merge scenarios, extract into shared helper. Not dead code today (both producers active). |
+
+### Closed in Run 6.1 (audit verification)
+
+| Backlog ID | Title | Evidence |
+|-----------|-------|----------|
+| RUN5.4.FU.01 | Enforce `ENTITY_TYPE_TIER_RANK` on `part_of` writes | Closed by Sprint 2 — `RelationRepository._validate_part_of_tier` (`packages/core/alayaos_core/repositories/relation.py`) fires on every `create()` and `create_batch()` call. Writer (`writer.py`), panoramic (`engine.py:462,485`), enrichment (`engine.py:911`) each catch `HierarchyViolationError` and log a named structured event. Preflight audit script `scripts/audit_part_of_hierarchy.py`. Commits `e89512b`, `de4f2a2`, `1ebdd24`, `f083bf7`. |
+| RUN5.4.FU.02 | `_rollback_merge` FK reassignment | Closed by Sprint 3 — `_rollback_merge` branches on `snapshot_schema_version`. v2 path walks `moved_claim_ids` + `moved_relation_source_ids` + `moved_relation_target_ids` + `moved_chunk_ids` and bulk-UPDATEs FK back to loser; restores winner metadata from `inverse["winner_before"]`. v1 actions degrade gracefully. Commits `a31be88`, `f0789af`, `c875f57`, `20af24f`. |
+
+RUN3.02 (integration tests all skipped) was marked DONE in prior run; Sprint 1 hardened further by replacing the harness with testcontainers + alembic + non-superuser `alaya_app` role (commits `ec5d44d`, `7038194`, `40be788`). RLS negatives are now proven against a real role.
 
 ---
 

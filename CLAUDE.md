@@ -59,7 +59,7 @@ uv run ruff check .              # Lint
 uv run ruff format --check .     # Format check
 uv run pyright                   # Type check
 uv run pytest                    # Run unit tests
-uv run pytest -m integration     # Run integration tests (requires PostgreSQL)
+uv run pytest -m integration     # Run integration tests (requires Docker — testcontainers spawns ephemeral postgres)
 docker compose up -d             # Start all services
 docker compose up postgres redis # Start only DB + cache
 just check                       # Lint + format + typecheck + tests

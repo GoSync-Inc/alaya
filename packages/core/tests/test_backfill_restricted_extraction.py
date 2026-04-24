@@ -38,6 +38,7 @@ class _FakeSession:
         self.event_ids = event_ids
         self.transaction = _FakeTransaction(order)
         self.execute_params: dict | None = None
+        self.executed_sql: list[str] = []
 
     async def __aenter__(self):
         return self
@@ -50,6 +51,19 @@ class _FakeSession:
 
     async def execute(self, _stmt, params: dict) -> _FakeResult:
         self.execute_params = params
+        self.executed_sql.append(str(_stmt))
+        return _FakeResult(self.event_ids)
+
+
+class _WritingRunFakeSession(_FakeSession):
+    async def execute(self, _stmt, params: dict) -> _FakeResult:
+        self.execute_params = params
+        sql = str(_stmt)
+        self.executed_sql.append(sql)
+        if "FROM l0_events e" not in sql:
+            return _FakeResult([])
+        if "r.status NOT IN ('completed', 'failed')" in sql:
+            return _FakeResult([])
         return _FakeResult(self.event_ids)
 
 
@@ -71,8 +85,9 @@ async def test_dry_run_rolls_back_selected_events_and_does_not_enqueue(capsys) -
     assert session.execute_params == {"ws": workspace_id, "limit": 5}
     assert session.transaction.rolled_back is True
     assert session.transaction.committed is False
+    assert "e.access_level IN ('restricted', 'private')" in session.executed_sql[-1]
     enqueue.assert_not_awaited()
-    assert "[dry-run] Would enqueue 1 events." in capsys.readouterr().out
+    assert "[dry-run] Would enqueue 1 restricted/private events." in capsys.readouterr().out
 
 
 @pytest.mark.asyncio
@@ -101,4 +116,24 @@ async def test_apply_commits_select_transaction_before_enqueue(capsys) -> None:
     assert session.transaction.committed is True
     assert order == ["commit", f"enqueue:{first_event_id}", f"enqueue:{second_event_id}"]
     assert enqueued == [first_event_id, second_event_id]
-    assert "[apply] Enqueued 2 events for extraction." in capsys.readouterr().out
+    assert "[apply] Enqueued 2 restricted/private events for extraction." in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_apply_does_not_enqueue_event_with_writing_extraction_run(capsys) -> None:
+    from alayaos_core.scripts.backfill_restricted_extraction import main
+
+    workspace_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+    session = _WritingRunFakeSession([event_id])
+    enqueue = AsyncMock()
+
+    count = await main(
+        ["--workspace-id", str(workspace_id), "--apply"],
+        session_factory=lambda: session,
+        enqueue=enqueue,
+    )
+
+    assert count == 0
+    enqueue.assert_not_awaited()
+    assert "[apply] Enqueued 0 restricted/private events for extraction." in capsys.readouterr().out

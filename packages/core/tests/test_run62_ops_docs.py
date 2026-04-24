@@ -22,11 +22,13 @@ def test_run62_changelog_has_required_operator_bullets() -> None:
     changelog = Path("docs/CHANGELOG-run6.2.md").read_text().lower()
 
     required = [
-        "restricted events now extract",
+        "restricted and private events now extract",
         "claim.value.iso can be null",
         "pgvector >=0.8 required",
         "backfill_restricted_extraction.py",
         "non-admin /tree bypasses cache",
+        "for update skip locked",
+        "duplicate enqueue",
     ]
     for phrase in required:
         assert phrase in changelog

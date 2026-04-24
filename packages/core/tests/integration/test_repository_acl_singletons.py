@@ -11,6 +11,7 @@ from alayaos_core.models.claim import ClaimSource, L2Claim
 from alayaos_core.models.entity import L1Entity
 from alayaos_core.models.event import L0Event
 from alayaos_core.models.relation import L1Relation, RelationSource
+from alayaos_core.models.vector import VectorChunk
 from alayaos_core.repositories.chunk import ChunkRepository
 from alayaos_core.repositories.claim import ClaimRepository
 from alayaos_core.repositories.entity import EntityRepository
@@ -104,6 +105,91 @@ async def test_event_list_hides_disallowed_access_level_and_counts_filtered_rows
     assert [item.id for item in items] == [public_event.id]
     assert has_more is False
     assert repo.last_filtered_count == 1
+
+
+async def test_event_upsert_preserves_existing_restricted_access_level_and_vector_stamp(
+    db_session: AsyncSession,
+    workspace,
+) -> None:
+    event = L0Event(
+        workspace_id=workspace.id,
+        source_type="slack",
+        source_id=f"restricted-{uuid.uuid4()}",
+        content={"text": "restricted update"},
+        event_metadata={},
+        access_level="restricted",
+    )
+    db_session.add(event)
+    await db_session.flush()
+    vector = VectorChunk(
+        workspace_id=workspace.id,
+        source_type="event",
+        source_id=event.id,
+        chunk_index=0,
+        content="restricted update",
+        access_level="restricted",
+    )
+    db_session.add(vector)
+    await db_session.flush()
+
+    repo = EventRepository(db_session, workspace.id)
+    updated_event, created = await repo.create_or_update(
+        workspace_id=workspace.id,
+        source_type=event.source_type,
+        source_id=event.source_id,
+        content={"text": "upserted text"},
+    )
+    await db_session.flush()
+
+    assert created is False
+    assert updated_event.id == event.id
+    assert updated_event.access_level == "restricted"
+    await db_session.refresh(vector)
+    assert vector.access_level == "restricted"
+
+
+@pytest.mark.parametrize("incoming_access_level", ["restricted", "private"])
+async def test_event_upsert_tightens_existing_public_access_level_and_restamps_vector_chunks(
+    db_session: AsyncSession,
+    workspace,
+    incoming_access_level: str,
+) -> None:
+    event = L0Event(
+        workspace_id=workspace.id,
+        source_type="slack",
+        source_id=f"public-{incoming_access_level}-{uuid.uuid4()}",
+        content={"text": "public update"},
+        event_metadata={},
+        access_level="public",
+    )
+    db_session.add(event)
+    await db_session.flush()
+    vector = VectorChunk(
+        workspace_id=workspace.id,
+        source_type="event",
+        source_id=event.id,
+        chunk_index=0,
+        content="public update",
+        access_level="public",
+    )
+    db_session.add(vector)
+    await db_session.flush()
+
+    repo = EventRepository(db_session, workspace.id)
+    updated_event, created = await repo.create_or_update(
+        workspace_id=workspace.id,
+        source_type=event.source_type,
+        source_id=event.source_id,
+        content={"text": "tightened text"},
+        access_level=incoming_access_level,
+    )
+    await db_session.flush()
+
+    assert created is False
+    assert updated_event.id == event.id
+    assert updated_event.access_level == incoming_access_level
+    await db_session.refresh(vector)
+    assert vector.access_level == incoming_access_level
 
 
 async def test_claim_get_by_id_treats_source_less_claims_as_admin_only(
@@ -590,7 +676,7 @@ async def test_relation_create_writes_source_event_provenance(
     assert row["event_id"] == event.id
 
 
-async def test_entity_get_by_id_requires_visible_active_claim(
+async def test_entity_get_by_id_hides_entity_with_only_restricted_claims_from_non_admin(
     db_session: AsyncSession,
     workspace,
 ) -> None:
@@ -623,6 +709,71 @@ async def test_entity_get_by_id_requires_visible_active_claim(
 
     await _set_allowed_access(db_session, ["public", "channel", "private", "restricted"])
     assert await repo.get_by_id(entity.id) is entity
+
+
+async def test_entity_claimless_manual_get_update_delete_remains_manageable(
+    db_session: AsyncSession,
+    workspace,
+) -> None:
+    entity = await _create_entity(db_session, workspace.id, description="manual note", properties={"kind": "manual"})
+    repo = EntityRepository(db_session, workspace.id)
+    await _set_allowed_access(db_session, ["public", "channel", "private"])
+
+    visible = await repo.get_by_id(entity.id)
+    assert visible is not None
+    assert visible.id == entity.id
+    assert visible.description == "manual note"
+    assert visible.properties == {"kind": "manual"}
+
+    updated = await repo.update(entity.id, name="Updated manual entity")
+    assert updated is not None
+    assert updated.id == entity.id
+
+    deleted = await repo.update(entity.id, is_deleted=True)
+    assert deleted is not None
+    assert deleted.is_deleted is True
+
+
+async def test_entity_with_inactive_restricted_claim_history_is_hidden_from_non_admin_reads_and_writes(
+    db_session: AsyncSession,
+    workspace,
+) -> None:
+    entity = await _create_entity(
+        db_session,
+        workspace.id,
+        description="restricted inactive history",
+        properties={"secret": "inactive"},
+    )
+    event = L0Event(
+        workspace_id=workspace.id,
+        source_type="slack",
+        source_id=f"restricted-inactive-{uuid.uuid4()}",
+        content={"text": "restricted inactive evidence"},
+        event_metadata={},
+        access_level="restricted",
+    )
+    claim = L2Claim(
+        workspace_id=workspace.id,
+        entity_id=entity.id,
+        predicate="status",
+        value={"v": "inactive"},
+        confidence=0.9,
+        status="retracted",
+        value_type="text",
+    )
+    db_session.add_all([event, claim])
+    await db_session.flush()
+    db_session.add(ClaimSource(workspace_id=workspace.id, claim_id=claim.id, event_id=event.id))
+    await db_session.flush()
+    await _set_allowed_access(db_session, ["public", "channel", "private"])
+
+    repo = EntityRepository(db_session, workspace.id)
+
+    assert await repo.get_by_id(entity.id) is None
+    items, _cursor, has_more = await repo.list()
+    assert entity.id not in [item.id for item in items]
+    assert has_more is False
+    assert await repo.update(entity.id, name="Leaked inactive entity") is None
 
 
 async def test_entity_list_hides_entities_without_visible_active_claim_and_counts_filtered_rows(
@@ -799,5 +950,5 @@ async def test_entity_get_by_id_unfiltered_allows_internal_claimless_lookup(
     repo = EntityRepository(db_session, workspace.id)
     await _set_allowed_access(db_session, ["public"])
 
-    assert await repo.get_by_id(entity.id) is None
+    assert await repo.get_by_id(entity.id) is entity
     assert await repo.get_by_id_unfiltered(entity.id) is entity

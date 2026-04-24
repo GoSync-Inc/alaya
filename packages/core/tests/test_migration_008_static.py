@@ -27,7 +27,7 @@ def test_migration_008_contains_required_upgrade_ordering() -> None:
     no_force = text.index("NO FORCE ROW LEVEL SECURITY")
     tier_rank = text.index("CREATE OR REPLACE FUNCTION tier_rank")
     rank_to_level = text.index("CREATE OR REPLACE FUNCTION rank_to_level")
-    add_access = text.index('op.add_column("vector_chunks"')
+    add_access = text.index("ALTER TABLE vector_chunks ADD COLUMN IF NOT EXISTS access_level")
     duplicate_preflight = text.index("duplicate rows in claim_sources")
     unique_concurrently = text.index("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS")
     claim_sources_backfill = text.index("ON CONFLICT (workspace_id, claim_id, event_id) DO NOTHING")
@@ -77,6 +77,13 @@ def test_migration_008_uses_most_restrictive_claim_sources_and_safe_helpers() ->
     assert 'op.execute("DELETE FROM claim_sources' not in text
     assert "op.execute('DELETE FROM claim_sources" not in text
     assert "claim_sources backfill rows left in place" in text
+
+
+def test_migration_008_vector_access_column_is_reentrant() -> None:
+    text = _migration_text()
+
+    assert "ALTER TABLE vector_chunks ADD COLUMN IF NOT EXISTS access_level text" in text
+    assert 'op.add_column("vector_chunks"' not in text
 
 
 def test_migration_008_restamps_vectors_when_claim_sources_change() -> None:

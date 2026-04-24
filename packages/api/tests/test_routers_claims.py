@@ -100,6 +100,21 @@ class TestClaimsRouter:
         assert "data" in body
         assert "pagination" in body
 
+    def test_list_claims_allows_write_and_admin_scopes_for_read_endpoint(self) -> None:
+        claim = make_claim()
+
+        for scopes in (["write"], ["admin"]):
+            app = make_app_with_mock_session(make_api_key(scopes=scopes))
+            with patch("alayaos_api.routers.claims.ClaimRepository") as mock_cls:
+                repo = AsyncMock()
+                repo.list = AsyncMock(return_value=([claim], None, False))
+                mock_cls.return_value = repo
+
+                client = TestClient(app)
+                response = client.get("/api/v1/claims", headers={"X-Api-Key": RAW_KEY})
+
+            assert response.status_code == 200
+
     def test_list_claims_reports_acl_filtered_count(self) -> None:
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)

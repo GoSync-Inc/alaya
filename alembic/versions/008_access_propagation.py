@@ -82,7 +82,7 @@ def _upgrade_impl() -> None:
     """)
 
     # ---- 3. Add vector_chunks.access_level nullable for backfill -----------
-    op.add_column("vector_chunks", sa.Column("access_level", sa.Text(), nullable=True))
+    op.execute("ALTER TABLE vector_chunks ADD COLUMN IF NOT EXISTS access_level text")
 
     # ---- 4a. Preflight duplicate claim_sources rows -----------------------
     if not alembic_context.is_offline_mode():

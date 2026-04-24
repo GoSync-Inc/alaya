@@ -136,3 +136,31 @@ def test_tree_path_hides_index_cached_markdown_for_non_admin() -> None:
     payload = response.json()["data"]
     assert payload["markdown_cache"] is None
     assert payload["summary"] is None
+
+
+def test_tree_node_does_not_retry_without_allowed_tiers() -> None:
+    app = make_app(make_api_key(scopes=["read"]))
+
+    with patch("alayaos_api.routers.tree.TreeService") as mock_service_cls:
+        service = mock_service_cls.return_value
+        service.get_node = AsyncMock(side_effect=TypeError("missing required keyword-only argument: allowed_tiers"))
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/api/v1/tree/people/alice", headers={"X-Api-Key": RAW_KEY})
+
+    assert response.status_code == 500
+    service.get_node.assert_awaited_once_with("people/alice", allowed_tiers={"channel", "public"})
+
+
+def test_tree_export_does_not_retry_without_allowed_tiers() -> None:
+    app = make_app(make_api_key(scopes=["read"]))
+
+    with patch("alayaos_api.routers.tree.TreeService") as mock_service_cls:
+        service = mock_service_cls.return_value
+        service.export_subtree = AsyncMock(
+            side_effect=TypeError("missing required keyword-only argument: allowed_tiers")
+        )
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post("/api/v1/tree/export", headers={"X-Api-Key": RAW_KEY}, json={"path": "people"})
+
+    assert response.status_code == 500
+    service.export_subtree.assert_awaited_once_with("people", allowed_tiers={"channel", "public"})

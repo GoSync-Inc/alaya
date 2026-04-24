@@ -998,3 +998,50 @@ async def test_enrichment_sees_post_convergence_entities():
     assert stale_entity_id not in enriched_ids, (
         "Enricher saw the stale entity — post-loop reload before enrichment is missing"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test: _apply_action enrichment hierarchy guard — Sprint 2
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enrichment_hierarchy_guard_part_of_rejected():
+    """_apply_action with inverted part_of → returns {} and logs enrichment_part_of_rejected."""
+    import structlog.testing
+
+    from alayaos_core.extraction.integrator.schemas import EnrichmentAction
+    from alayaos_core.repositories.errors import HierarchyViolationError
+
+    source_id = uuid.uuid4()
+    target_id = uuid.uuid4()
+
+    relation_repo = AsyncMock()
+    relation_repo.create = AsyncMock(
+        side_effect=HierarchyViolationError("part_of: goal(3) cannot be part_of project(2)")
+    )
+
+    engine = _make_engine()
+    engine.relation_repo = relation_repo
+
+    action = EnrichmentAction(
+        action="add_relation",
+        entity_id=source_id,
+        details={
+            "target_entity_id": str(target_id),
+            "relation_type": "part_of",
+        },
+    )
+
+    ws_id = uuid.uuid4()
+    session = AsyncMock()
+
+    with structlog.testing.capture_logs() as cap_logs:
+        counters = await engine._apply_action(action, ws_id, session)
+
+    # Must return empty counters (not raise)
+    assert counters == {}, f"Expected empty counters, got {counters}"
+
+    # Must emit enrichment_part_of_rejected log
+    rejection_events = [e for e in cap_logs if e.get("event") == "enrichment_part_of_rejected"]
+    assert len(rejection_events) == 1, f"Expected 1 enrichment_part_of_rejected log event, got {len(rejection_events)}"

@@ -11,6 +11,7 @@ import structlog
 from alayaos_core.extraction.resolver import normalize_name
 from alayaos_core.repositories.claim import ClaimRepository
 from alayaos_core.repositories.entity import EntityRepository
+from alayaos_core.repositories.errors import HierarchyViolationError
 from alayaos_core.repositories.extraction_run import ExtractionRunRepository
 from alayaos_core.repositories.predicate import PredicateRepository
 from alayaos_core.repositories.relation import RelationRepository
@@ -179,15 +180,25 @@ async def atomic_write(
         src_id = entity_name_to_id.get(rel.source_entity)
         tgt_id = entity_name_to_id.get(rel.target_entity)
         if src_id and tgt_id:
-            await relation_repo.create(
-                workspace_id=event.workspace_id,
-                source_entity_id=src_id,
-                target_entity_id=tgt_id,
-                relation_type=rel.relation_type,
-                confidence=rel.confidence,
-                extraction_run_id=run.id,
-            )
-            counters["relations_created"] += 1
+            try:
+                await relation_repo.create(
+                    workspace_id=event.workspace_id,
+                    source_entity_id=src_id,
+                    target_entity_id=tgt_id,
+                    relation_type=rel.relation_type,
+                    confidence=rel.confidence,
+                    extraction_run_id=run.id,
+                )
+                counters["relations_created"] += 1
+            except HierarchyViolationError as e:
+                log.warning(
+                    "writer_part_of_rejected",
+                    extraction_run_id=str(run.id),
+                    source_id=str(src_id),
+                    target_id=str(tgt_id),
+                    relation_type=rel.relation_type,
+                    error=str(e),
+                )
 
     # Write claims
     for claim in extraction_result.claims:

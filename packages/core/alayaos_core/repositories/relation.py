@@ -4,13 +4,83 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, text
 
 from alayaos_core.models.relation import L1Relation
 from alayaos_core.repositories.base import BaseRepository
+from alayaos_core.repositories.errors import HierarchyViolationError
+from alayaos_core.services.workspace import ENTITY_TYPE_TIER_RANK
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+_PART_OF_SLUG_QUERY = text(
+    """
+    SELECT
+        se.id           AS source_entity_id,
+        sd.slug         AS source_slug,
+        te.id           AS target_entity_id,
+        td.slug         AS target_slug
+    FROM l1_entities se
+    JOIN entity_type_definitions sd
+        ON sd.id = se.entity_type_id AND sd.workspace_id = se.workspace_id
+    JOIN l1_entities te
+        ON te.id = :target_entity_id AND te.workspace_id = :workspace_id
+    JOIN entity_type_definitions td
+        ON td.id = te.entity_type_id AND td.workspace_id = te.workspace_id
+    WHERE se.id = :source_entity_id
+      AND se.workspace_id = :workspace_id
+    """
+)
+
+
+def _reject_self_reference(source_id: uuid.UUID, target_id: uuid.UUID) -> None:
+    """Raise HierarchyViolationError if source_id == target_id."""
+    if source_id == target_id:
+        raise HierarchyViolationError("relation cannot be self-referential")
 
 
 class RelationRepository(BaseRepository):
+    async def _validate_part_of_tier(
+        self,
+        session,
+        workspace_id: uuid.UUID,
+        source_entity_id: uuid.UUID,
+        target_entity_id: uuid.UUID,
+    ) -> None:
+        """Validate ENTITY_TYPE_TIER_RANK for a part_of relation.
+
+        If both entity type slugs are in ENTITY_TYPE_TIER_RANK and
+        source_rank >= target_rank, raise HierarchyViolationError.
+        If either slug is absent from the rank table, silently pass.
+        """
+        result = await session.execute(
+            _PART_OF_SLUG_QUERY,
+            {
+                "workspace_id": workspace_id,
+                "source_entity_id": source_entity_id,
+                "target_entity_id": target_entity_id,
+            },
+        )
+        row = result.mappings().first()
+        if row is None:
+            return  # entities not found — let DB constraints handle it
+
+        source_slug = row["source_slug"]
+        target_slug = row["target_slug"]
+
+        source_rank = ENTITY_TYPE_TIER_RANK.get(source_slug)
+        target_rank = ENTITY_TYPE_TIER_RANK.get(target_slug)
+
+        if source_rank is None or target_rank is None:
+            return  # non-tiered type — allowed
+
+        if source_rank >= target_rank:
+            raise HierarchyViolationError(
+                f"part_of: {source_slug}({source_rank}) cannot be part_of {target_slug}({target_rank})"
+            )
+
     async def create(
         self,
         workspace_id: uuid.UUID,
@@ -20,6 +90,10 @@ class RelationRepository(BaseRepository):
         confidence: float = 1.0,
         extraction_run_id: uuid.UUID | None = None,
     ) -> L1Relation:
+        _reject_self_reference(source_entity_id, target_entity_id)
+        if relation_type == "part_of":
+            await self._validate_part_of_tier(self.session, workspace_id, source_entity_id, target_entity_id)
+
         relation = L1Relation(
             workspace_id=workspace_id,
             source_entity_id=source_entity_id,
@@ -63,7 +137,16 @@ class RelationRepository(BaseRepository):
         return items, next_cursor, has_more
 
     async def create_batch(self, workspace_id: uuid.UUID, relations: list[dict]) -> list[L1Relation]:
-        """Bulk create relations. Flushes once after all inserts."""
+        """Bulk create relations. Validates ALL rows before any session.add."""
+        # Validate all rows first — batch fails atomically if any row is invalid
+        for rel_data in relations:
+            source_id = rel_data["source_entity_id"]
+            target_id = rel_data["target_entity_id"]
+            _reject_self_reference(source_id, target_id)
+            if rel_data["relation_type"] == "part_of":
+                await self._validate_part_of_tier(self.session, workspace_id, source_id, target_id)
+
+        # All validations passed — now insert
         created = []
         for rel_data in relations:
             relation = L1Relation(

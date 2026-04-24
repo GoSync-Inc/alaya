@@ -8,7 +8,7 @@ Alaya is an open-source corporate memory platform (BSL 1.1). It ingests data fro
 
 ## Stack
 
-Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · Redis · TaskIQ · Anthropic SDK · Go (Cobra CLI) · FastEmbed
+Python 3.13 · FastAPI · SQLAlchemy 2.0 + Pydantic · PostgreSQL + pgvector · Redis · TaskIQ · Anthropic SDK · Go (Cobra CLI) · FastEmbed · dateparser + python-dateutil
 
 ## Project Structure
 
@@ -23,10 +23,11 @@ packages/
 │       ├── extraction/             # Multi-stage intelligence pipeline
 │       │   ├── cortex/             # Chunker + classifier (L0 → L0Chunks with domain scores)
 │       │   ├── crystallizer/       # LLM extractor + verifier (L0Chunks → claims with confidence tiers)
-│       │   ├── integrator/         # Multi-pass KG consolidation: panoramic triage, dedup v2 (composite signal, N=9 batches, merge-with-rewrite), enricher, date normalizer; passes/ subpackage (panoramic.py)
+│       │   ├── integrator/         # Multi-pass KG consolidation: panoramic triage, dedup v2 (composite signal, N=9 batches, merge-with-rewrite), enricher; passes/ subpackage (panoramic.py)
+│       │   ├── date_normalizer.py  # Shared DateNormalizer + NormalizedDate payload for writer/integrator date claims
 │       │   ├── pipeline.py         # Orchestration: run_extraction, run_write, run_enrich, should_extract
 │       │   ├── monitoring.py       # Structlog anomaly detection events
-│       │   ├── writer.py           # Atomic persist, dirty-set trigger, workspace lock
+│       │   ├── writer.py           # Atomic persist, date-claim normalization, dirty-set trigger, workspace lock
 │       │   ├── resolver.py         # 3-tier entity resolution with transliteration
 │       │   ├── sanitizer.py        # Input sanitization (NFKC, injection detection)
 │       │   └── schemas.py          # ExtractionResult, ExtractedEntity, ExtractedClaim
@@ -45,7 +46,7 @@ alembic/                            # Migrations (001: 18 tables + RLS, 002: aut
 docker/                             # seed.py, init-db.sql, Caddyfile
 ```
 
-**Data flow:** Sources -> L0 Events -> Cortex (chunk + classify) -> Crystallizer (LLM extract) -> Write (resolve + persist) -> Integrator (dedup + enrich) -> L1 Entities + L2 Claims -> L3 Knowledge Tree -> CLI/MCP/API
+**Data flow:** Sources -> L0 Events -> Cortex (chunk + classify) -> Crystallizer (LLM extract) -> Write (resolve + normalize date claims + persist) -> Integrator (dedup + enrich) -> L1 Entities + L2 Claims -> L3 Knowledge Tree -> CLI/MCP/API
 
 ## Current Focus
 

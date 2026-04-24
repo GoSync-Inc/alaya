@@ -101,6 +101,8 @@ Run before every commit:
 8. **No `session.commit()` in repositories** — commit at service/endpoint level only.
 9. **Cursor-based pagination only** — no offset/page. Limit clamped to max 200.
 10. **LLM output = untrusted user input.** All LLM responses pass through Pydantic schema validation before persistence. Never trust raw LLM text.
+11. **All relation writes are self-reference-rejected** — `RelationRepository._reject_self_reference` enforces this universally in `create()` and `create_batch()`; raises `HierarchyViolationError` (`repositories/errors.py`).
+12. **`part_of` relations are ENTITY_TYPE_TIER_RANK-enforced** — `_validate_part_of_tier` prevents downward or lateral containment. Callers (writer, panoramic, enrichment) each catch `HierarchyViolationError`, log a named structured event, and continue (best-effort — never abort the batch).
 
 ## Code Conventions
 
@@ -157,4 +159,8 @@ Model-agnostic: `LLMServiceInterface` with provider adapters.
 Config: per-stage model selection via `CORTEX_CLASSIFIER_MODEL`, `CRYSTALLIZER_MODEL`, `INTEGRATOR_MODEL`.
 Provider-specific features preserved — no lowest common denominator.
 
-<!-- updated-by-superflow:2026-04-16 -->
+## Scripts
+
+- `scripts/audit_part_of_hierarchy.py` — read-only preflight audit: `--workspace-id <uuid> [--sample-size N]`; exit 0 = clean, exit 1 = violations found with sample rows.
+
+<!-- updated-by-superflow:2026-04-24 -->

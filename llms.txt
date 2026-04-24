@@ -87,7 +87,7 @@ POST /tree/export         — export subtree as markdown
 
 ## Data Model
 
-23 tables across 4 layers (Alembic migrations 001–006):
+23 tables across 4 layers (Alembic migrations 001-007, including split 005a/005b):
 
 - **L0 Events** — Raw ingested events with source metadata. `l0_chunks` stores chunked text segments per event.
 - **L1 Entities** — Resolved named entities (person, project, team, etc.). 13 seeded entity types, 21 seeded predicates per workspace.

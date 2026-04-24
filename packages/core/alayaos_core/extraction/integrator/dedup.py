@@ -776,7 +776,7 @@ class DeduplicatorV2:
                     )
                 except Exception:
                     log.error(
-                        "dedup_v2_action_record_failed",
+                        "merge_audit_write_failed",
                         winner_id=str(winner_id),
                         loser_id=str(loser_id),
                         exc_info=True,

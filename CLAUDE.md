@@ -64,7 +64,7 @@ docker compose up -d             # Start all services
 docker compose up postgres redis # Start only DB + cache
 just check                       # Lint + format + typecheck + tests
 just smoke                       # Docker smoke test
-taskiq worker alayaos_core.worker.tasks:broker  # Start pipeline worker (job_extract, job_write, job_cortex, job_crystallize, job_enrich, job_integrate, job_check_integrator); on task exception, run transitions to `failed` via ExtractionRunRepository.mark_failed (idempotent for terminal states); at every terminal transition (completed or failed) ExtractionRunRepository.recalc_usage aggregates tokens_in/cost_usd from pipeline_traces — skipped when no traces exist (legacy non-Cortex path writes these fields directly)
+taskiq worker alayaos_core.worker.tasks:broker  # Start pipeline worker (job_extract, job_write, job_cortex, job_crystallize, job_enrich, job_integrate, job_feature_flag_digest, job_check_integrator); on task exception, run transitions to `failed` via ExtractionRunRepository.mark_failed (idempotent for terminal states); at every terminal transition (completed or failed) ExtractionRunRepository.recalc_usage aggregates tokens_in/cost_usd from pipeline_traces — skipped when no traces exist (legacy non-Cortex path writes these fields directly)
 ```
 
 ## Verification
@@ -87,6 +87,7 @@ Run before every commit:
 - `INTEGRATOR_DEDUP_BATCH_SIZE` (default `9`) — entities per LLM batch in dedup v2 composite-signal pass.
 - `CONSOLIDATOR_PANORAMIC_MAX_ENTITIES` (default `500`) — entity cap for the panoramic triage pass; configurable via constructor param.
 - `ASK_RATE_LIMIT_PER_MINUTE` (default `10`) / `ASK_RATE_LIMIT_PER_HOUR` (default `100`) — rate limits for `/ask` and `/search`; enforced fail-closed (503 when Redis is unavailable).
+- `ALAYA_PART_OF_STRICT` (default `strict`, values `strict|warn|off`) — controls `part_of` tier-rank validation only; non-default values emit `feature_flag_active` at API startup and in `job_feature_flag_digest`. Self-reference remains always rejected.
 - `SECRET_KEY` — must be set to a strong random value in production; defaults to `"change-me-in-production"` which is insecure.
 
 ## Architecture Rules
@@ -102,7 +103,7 @@ Run before every commit:
 9. **Cursor-based pagination only** — no offset/page. Limit clamped to max 200.
 10. **LLM output = untrusted user input.** All LLM responses pass through Pydantic schema validation before persistence. Never trust raw LLM text.
 11. **All relation writes are self-reference-rejected** — `RelationRepository._reject_self_reference` enforces this universally in `create()` and `create_batch()`; raises `HierarchyViolationError` (`repositories/errors.py`).
-12. **`part_of` relations are ENTITY_TYPE_TIER_RANK-enforced** — `_validate_part_of_tier` prevents downward or lateral containment. Callers (writer, panoramic, enrichment) each catch `HierarchyViolationError`, log a named structured event, and continue (best-effort — never abort the batch).
+12. **`part_of` relations are ENTITY_TYPE_TIER_RANK-enforced by default** — `_validate_part_of_tier` prevents downward or lateral containment when `ALAYA_PART_OF_STRICT=strict`; `warn` logs `part_of.tier_violation` and persists, `off` skips tier-rank validation. Callers (writer, panoramic, enrichment) each catch `HierarchyViolationError`, log a named structured event, and continue (best-effort — never abort the batch).
 13. **Merge rollback is schema-versioned.** `IntegratorActionRepository._rollback_merge` branches on `snapshot_schema_version`: v1 restores only `is_deleted=False` (legacy partial); v2 performs full FK reversal, per-ID conflict detection, and winner-metadata restore from `inverse["winner_before"]`.
 
 ## Code Conventions
@@ -122,7 +123,7 @@ Core entity types: 13 seeded per workspace (person, project, team, document, dec
 Claims and relations carry `extraction_run_id` for full provenance tracing.
 `integrator_actions.snapshot_schema_version` (int, default 1) — audit payload format version; v2 actions carry additive `inverse` fields enabling full FK + winner-metadata reversal on rollback.
 
-## API Endpoints (44 total)
+## API Endpoints (45 total)
 
 Health: `/health/live`, `/health/ready`
 Workspaces: POST, GET, GET/{id}, PATCH/{id} — bootstrap key required for create
@@ -135,6 +136,7 @@ Claims: GET, GET/{id}, GET (by entity)
 Relations: GET, GET/{id}
 Extraction Runs: GET, GET/{id}
 Ingestion: POST `/ingest/text` — trigger extraction pipeline
+Admin: GET /admin/flags — bootstrap-admin feature flag state
 Chunks: GET (event_id, processing_stage, is_crystal filters), GET/{id}
 Pipeline Traces: GET /events/{id}/trace
 Integrator Runs: GET, GET/{id}, POST /trigger

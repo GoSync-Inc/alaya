@@ -586,6 +586,72 @@ class DeduplicatorV2:
                 new_aliases = list(dict.fromkeys([*new_aliases, loser.name]))
                 await entity_repo.update(winner_id, aliases=new_aliases)
 
+            # --- Collect IDs BEFORE mutation (mirrors WHERE clauses below) ---
+
+            # Claims that will be moved
+            claim_result = await session.execute(
+                text("SELECT id FROM l2_claims WHERE entity_id = :b_id AND workspace_id = :ws_id"),
+                {"b_id": loser_id, "ws_id": workspace_id},
+            )
+            moved_claim_ids = [str(r[0]) for r in claim_result.fetchall()]
+
+            # Relations where loser is source (that will be reassigned, not self-ref deleted)
+            rel_src_result = await session.execute(
+                text(
+                    "SELECT id FROM l1_relations"
+                    " WHERE source_entity_id = :b_id AND target_entity_id != :a_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": winner_id, "b_id": loser_id, "ws_id": workspace_id},
+            )
+            moved_relation_source_ids = [str(r[0]) for r in rel_src_result.fetchall()]
+
+            # Self-ref b→a relations that will be deleted
+            self_ref_ba_result = await session.execute(
+                text(
+                    "SELECT id FROM l1_relations"
+                    " WHERE source_entity_id = :b_id AND target_entity_id = :a_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": winner_id, "b_id": loser_id, "ws_id": workspace_id},
+            )
+            deleted_self_ref_ba_ids = [str(r[0]) for r in self_ref_ba_result.fetchall()]
+
+            # Relations where loser is target (that will be reassigned, not self-ref deleted)
+            rel_tgt_result = await session.execute(
+                text(
+                    "SELECT id FROM l1_relations"
+                    " WHERE target_entity_id = :b_id AND source_entity_id != :a_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": winner_id, "b_id": loser_id, "ws_id": workspace_id},
+            )
+            moved_relation_target_ids = [str(r[0]) for r in rel_tgt_result.fetchall()]
+
+            # Self-ref a→b relations that will be deleted
+            self_ref_ab_result = await session.execute(
+                text(
+                    "SELECT id FROM l1_relations"
+                    " WHERE source_entity_id = :a_id AND target_entity_id = :b_id"
+                    " AND workspace_id = :ws_id"
+                ),
+                {"a_id": winner_id, "b_id": loser_id, "ws_id": workspace_id},
+            )
+            deleted_self_ref_ab_ids = [str(r[0]) for r in self_ref_ab_result.fetchall()]
+            deleted_self_ref_relation_ids = deleted_self_ref_ba_ids + deleted_self_ref_ab_ids
+
+            # Vector chunks that will be moved
+            chunk_result = await session.execute(
+                text(
+                    "SELECT id FROM vector_chunks"
+                    " WHERE source_id = :b_id AND source_type = 'entity' AND workspace_id = :ws_id"
+                ),
+                {"b_id": loser_id, "ws_id": workspace_id},
+            )
+            moved_chunk_ids = [str(r[0]) for r in chunk_result.fetchall()]
+
+            # --- Execute mutations ---
+
             # Reassign claims from loser to winner
             await session.execute(
                 text("UPDATE l2_claims SET entity_id = :a_id WHERE entity_id = :b_id AND workspace_id = :ws_id"),
@@ -639,10 +705,47 @@ class DeduplicatorV2:
                 {"a_id": winner_id, "b_id": loser_id, "ws_id": workspace_id},
             )
 
+            # Duplicate relations caused per-loser by the FK moves just made: scope dedup pass to
+            # this single loser's winner to yield accurate per-loser audit fidelity.
+            dedup_result = await session.execute(
+                text(
+                    "DELETE FROM l1_relations"
+                    " WHERE workspace_id = :ws_id"
+                    " AND id IN ("
+                    "   SELECT id FROM ("
+                    "     SELECT id,"
+                    "       ROW_NUMBER() OVER ("
+                    "         PARTITION BY source_entity_id, target_entity_id, relation_type"
+                    "         ORDER BY created_at ASC"
+                    "       ) AS row_number"
+                    "     FROM l1_relations"
+                    "     WHERE workspace_id = :ws_id"
+                    "       AND (source_entity_id = :winner_id OR target_entity_id = :winner_id)"
+                    "   ) ranked"
+                    "   WHERE row_number > 1"
+                    " )"
+                    " RETURNING id"
+                ),
+                {"ws_id": workspace_id, "winner_id": winner_id},
+            )
+            deduplicated_rows = dedup_result.fetchall()
+            deduplicated_relation_ids = [str(r[0]) for r in deduplicated_rows]
+
             # Soft-delete loser with provenance
             loser_props = dict(loser.properties or {})
             loser_props["merged_into"] = str(winner_id)
             await entity_repo.update(loser_id, is_deleted=True, properties=loser_props)
+
+            # v2 inverse payload (additive on top of existing keys)
+            v2_payload = {
+                "moved_claim_ids": moved_claim_ids,
+                "moved_relation_source_ids": moved_relation_source_ids,
+                "moved_relation_target_ids": moved_relation_target_ids,
+                "moved_chunk_ids": moved_chunk_ids,
+                "deleted_self_ref_relation_ids": deleted_self_ref_relation_ids,
+                "deduplicated_relation_ids": deduplicated_relation_ids,
+                "winner_before": before_snapshot,
+            }
 
             # Record audit action (best-effort — failure doesn't abort merge)
             if action_repo is not None:
@@ -662,11 +765,13 @@ class DeduplicatorV2:
                             },
                             targets=[str(loser_id)],
                             inverse={
+                                "action": "unmerge",
                                 "loser_id": str(loser_id),
-                                **before_snapshot,
+                                **v2_payload,
                             },
                             confidence=confidence,
                             rationale=rationale,
+                            snapshot_schema_version=2,
                         ),
                     )
                 except Exception:
@@ -677,30 +782,5 @@ class DeduplicatorV2:
                     )
 
             merged_count += 1
-
-        if merged_count > 0:
-            # After reassigning all loser relations to the winner, duplicate
-            # (source_entity_id, target_entity_id, relation_type) rows may exist on the winner.
-            # Keep the oldest row per unique (source, target, type) tuple; delete the rest.
-            await session.execute(
-                text(
-                    "DELETE FROM l1_relations"
-                    " WHERE workspace_id = :ws_id"
-                    " AND id IN ("
-                    "   SELECT id FROM ("
-                    "     SELECT id,"
-                    "       ROW_NUMBER() OVER ("
-                    "         PARTITION BY source_entity_id, target_entity_id, relation_type"
-                    "         ORDER BY created_at ASC"
-                    "       ) AS row_number"
-                    "     FROM l1_relations"
-                    "     WHERE workspace_id = :ws_id"
-                    "       AND (source_entity_id = :winner_id OR target_entity_id = :winner_id)"
-                    "   ) ranked"
-                    "   WHERE row_number > 1"
-                    " )"
-                ),
-                {"ws_id": workspace_id, "winner_id": winner_id},
-            )
 
         return merged_count

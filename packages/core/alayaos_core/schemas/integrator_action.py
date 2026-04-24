@@ -18,6 +18,7 @@ class IntegratorActionCreate(BaseModel):
     model_id: str | None = None
     confidence: float | None = None
     rationale: str | None = None
+    snapshot_schema_version: int = 1
 
 
 class IntegratorActionRead(BaseModel):

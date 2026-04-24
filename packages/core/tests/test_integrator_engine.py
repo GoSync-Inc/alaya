@@ -856,8 +856,10 @@ async def test_merge_duplicates_writes_audit_records():
 
     engine = _make_engine(entity_repo=entity_repo)
 
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = []
     session = AsyncMock()
-    session.execute = AsyncMock()
+    session.execute = AsyncMock(return_value=mock_result)
 
     action_repo = AsyncMock()
     action_repo.create = AsyncMock(return_value=MagicMock())
@@ -1001,7 +1003,7 @@ async def test_enrichment_sees_post_convergence_entities():
 
 
 # ---------------------------------------------------------------------------
-# Test: _apply_action enrichment hierarchy guard — Sprint 2
+# Sprint 2: _apply_action enrichment hierarchy guard
 # ---------------------------------------------------------------------------
 
 
@@ -1045,3 +1047,161 @@ async def test_enrichment_hierarchy_guard_part_of_rejected():
     # Must emit enrichment_part_of_rejected log
     rejection_events = [e for e in cap_logs if e.get("event") == "enrichment_part_of_rejected"]
     assert len(rejection_events) == 1, f"Expected 1 enrichment_part_of_rejected log event, got {len(rejection_events)}"
+
+
+# ---------------------------------------------------------------------------
+# Sprint 3: _merge_duplicates v2 audit inverse + audit failure logging
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_merge_duplicates_writes_v2_audit_inverse():
+    """_merge_duplicates writes snapshot_schema_version=2 with v2 inverse fields.
+
+    params must preserve {loser_id, merged_name}; targets must remain list-of-dicts.
+    """
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+    from alayaos_core.schemas.integrator_action import IntegratorActionCreate  # noqa: TC001
+
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_a = MagicMock()
+    entity_a.id = entity_a_id
+    entity_a.name = "Alice"
+    entity_a.aliases = []
+    entity_a.properties = {}
+
+    entity_b = MagicMock()
+    entity_b.id = entity_b_id
+    entity_b.name = "Alicia"
+    entity_b.aliases = ["Ali"]
+    entity_b.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(side_effect=lambda eid: entity_a if eid == entity_a_id else entity_b)
+    entity_repo.update = AsyncMock()
+    entity_repo.list_recent = AsyncMock(return_value=[])
+
+    engine = _make_engine(entity_repo=entity_repo)
+
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=mock_result)
+
+    created_actions: list[IntegratorActionCreate] = []
+
+    async def capture_create(workspace_id, data):
+        created_actions.append(data)
+        return MagicMock()
+
+    action_repo = AsyncMock()
+    action_repo.create = AsyncMock(side_effect=capture_create)
+
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="Alice",
+        entity_b_name="Alicia",
+        score=0.95,
+        method="vector_shortlist",
+    )
+
+    merged = await engine._merge_duplicates([pair], ws_id, session, run_id=run_id, action_repo=action_repo)
+    assert merged == 1
+    assert len(created_actions) == 1
+
+    audit = created_actions[0]
+    # snapshot_schema_version must be 2
+    assert audit.snapshot_schema_version == 2
+
+    # v2 inverse fields must all be present
+    v2_fields = [
+        "moved_claim_ids",
+        "moved_relation_source_ids",
+        "moved_relation_target_ids",
+        "moved_chunk_ids",
+        "deleted_self_ref_relation_ids",
+        "deduplicated_relation_ids",
+        "winner_before",
+    ]
+    for field in v2_fields:
+        assert field in audit.inverse, f"Missing v2 inverse field: {field!r}"
+
+    # params shape preserved: {loser_id, merged_name}
+    assert "loser_id" in audit.params
+    assert "merged_name" in audit.params
+    assert str(entity_b_id) == audit.params["loser_id"]
+
+    # targets shape preserved: list-of-dicts with id/name keys
+    assert isinstance(audit.targets, list)
+    assert len(audit.targets) == 2
+    for t in audit.targets:
+        assert isinstance(t, dict)
+        assert "id" in t
+        assert "name" in t
+
+
+@pytest.mark.asyncio
+async def test_merge_duplicates_audit_write_failure_logged():
+    """When action_repo.create raises, merge_audit_write_failed is logged and merge still completes."""
+    import structlog.testing
+
+    from alayaos_core.extraction.integrator.schemas import DuplicatePair
+
+    entity_a_id = uuid.uuid4()
+    entity_b_id = uuid.uuid4()
+
+    entity_a = MagicMock()
+    entity_a.id = entity_a_id
+    entity_a.name = "Alice"
+    entity_a.aliases = []
+    entity_a.properties = {}
+
+    entity_b = MagicMock()
+    entity_b.id = entity_b_id
+    entity_b.name = "Alicia"
+    entity_b.aliases = ["Ali"]
+    entity_b.properties = {}
+
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(side_effect=lambda eid: entity_a if eid == entity_a_id else entity_b)
+    entity_repo.update = AsyncMock()
+    entity_repo.list_recent = AsyncMock(return_value=[])
+
+    engine = _make_engine(entity_repo=entity_repo)
+
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = []
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=mock_result)
+
+    # action_repo.create always raises
+    action_repo = AsyncMock()
+    action_repo.create = AsyncMock(side_effect=RuntimeError("DB write failed"))
+
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+
+    pair = DuplicatePair(
+        entity_a_id=entity_a_id,
+        entity_b_id=entity_b_id,
+        entity_a_name="Alice",
+        entity_b_name="Alicia",
+        score=0.95,
+        method="vector_shortlist",
+    )
+
+    with structlog.testing.capture_logs() as logs:
+        merged = await engine._merge_duplicates([pair], ws_id, session, run_id=run_id, action_repo=action_repo)
+
+    # Merge must still succeed despite audit write failure
+    assert merged == 1
+
+    # merge_audit_write_failed must be logged
+    log_events = [lg["event"] for lg in logs]
+    assert "merge_audit_write_failed" in log_events, f"Expected merge_audit_write_failed log. Got: {log_events}"

@@ -34,6 +34,22 @@ def _make_settings(workspace_id=None):
     return settings
 
 
+def _make_session_mock(rows: list | None = None) -> AsyncMock:
+    """Create a session mock where execute().fetchall() returns a plain list.
+
+    The new _merge_duplicates code issues multiple SELECT queries before mutations.
+    Each calls result.fetchall() synchronously on the awaited execute() return value.
+    With a bare AsyncMock, fetchall() returns a coroutine instead of a list.
+    This helper configures execute() to always return a MagicMock whose fetchall()
+    gives an empty list (or the provided rows).
+    """
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = rows if rows is not None else []
+    session = AsyncMock()
+    session.execute.return_value = mock_result
+    return session
+
+
 @pytest.mark.asyncio
 async def test_engine_returns_skipped_when_locked():
     """Engine returns status=skipped when lock cannot be acquired."""
@@ -410,7 +426,7 @@ async def test_merge_duplicates_soft_deletes_entity_b_and_merges_aliases():
         method="fuzzy",
     )
 
-    session = AsyncMock()
+    session = _make_session_mock()
     merged_count = await engine._merge_duplicates([pair], ws_id, session)
 
     assert merged_count == 1
@@ -478,7 +494,7 @@ async def test_merge_reassigns_claims():
         method="fuzzy",
     )
 
-    session = AsyncMock()
+    session = _make_session_mock()
     await engine._merge_duplicates([pair], ws_id, session)
 
     # session.execute must be called with an UPDATE l2_claims statement
@@ -540,7 +556,7 @@ async def test_merge_reassigns_relations():
         method="fuzzy",
     )
 
-    session = AsyncMock()
+    session = _make_session_mock()
     await engine._merge_duplicates([pair], ws_id, session)
 
     executed_sqls = [str(call.args[0]) for call in session.execute.call_args_list]
@@ -609,7 +625,7 @@ async def test_merge_prevents_self_referential_relations_not_broad_delete():
         method="fuzzy",
     )
 
-    session = AsyncMock()
+    session = _make_session_mock()
     await engine._merge_duplicates([pair], ws_id, session)
 
     executed_sqls = [str(call.args[0]) for call in session.execute.call_args_list]
@@ -698,7 +714,7 @@ async def test_merge_deduplicates_relations_after_reassignment():
         method="fuzzy",
     )
 
-    session = AsyncMock()
+    session = _make_session_mock()
     await engine._merge_duplicates([pair], ws_id, session)
 
     executed_sqls = [str(call.args[0]) for call in session.execute.call_args_list]
@@ -759,7 +775,7 @@ async def test_merge_updates_vector_chunks():
         method="fuzzy",
     )
 
-    session = AsyncMock()
+    session = _make_session_mock()
     await engine._merge_duplicates([pair], ws_id, session)
 
     executed_sqls = [str(call.args[0]) for call in session.execute.call_args_list]
@@ -820,7 +836,7 @@ async def test_merge_records_merged_into():
         method="fuzzy",
     )
 
-    session = AsyncMock()
+    session = _make_session_mock()
     await engine._merge_duplicates([pair], ws_id, session)
 
     # The call that soft-deletes entity_b must also carry merged_into in properties

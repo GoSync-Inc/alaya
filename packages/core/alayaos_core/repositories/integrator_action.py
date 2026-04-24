@@ -5,11 +5,22 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+import structlog
 from sqlalchemy import select
 
 from alayaos_core.models.integrator_action import IntegratorAction
 from alayaos_core.repositories.base import BaseRepository
 from alayaos_core.schemas.integrator_action import IntegratorActionCreate, IntegratorActionRollbackResponse
+
+log = structlog.get_logger(__name__)
+
+# Fields that must be present in inverse for v2 rollback to be performed.
+_V2_REQUIRED_INVERSE_FIELDS = (
+    "moved_claim_ids",
+    "moved_relation_source_ids",
+    "moved_relation_target_ids",
+    "moved_chunk_ids",
+)
 
 
 class IntegratorActionRepository(BaseRepository):
@@ -31,6 +42,7 @@ class IntegratorActionRepository(BaseRepository):
             model_id=data.model_id,
             confidence=data.confidence,
             rationale=data.rationale,
+            snapshot_schema_version=data.snapshot_schema_version,
             applied_at=datetime.now(UTC),
         )
         self.session.add(action)
@@ -225,16 +237,209 @@ async def _rollback_rewrite(
     return []
 
 
+# ─── Merge rollback helpers ────────────────────────────────────────────────────
+
+
+async def _restore_loser(
+    repo: IntegratorActionRepository,
+    action: IntegratorAction,
+    loser_id: uuid.UUID,
+) -> None:
+    """Set loser.is_deleted = False. Used by both legacy and v2 paths."""
+    from alayaos_core.models.entity import L1Entity
+
+    stmt = select(L1Entity).where(L1Entity.id == loser_id).where(L1Entity.workspace_id == action.workspace_id)
+    result = await repo.session.execute(stmt)
+    loser = result.scalar_one_or_none()
+    if loser is not None:
+        loser.is_deleted = False
+
+
+async def _check_merge_rollback_conflicts(
+    repo: IntegratorActionRepository,
+    action: IntegratorAction,
+    loser_id: uuid.UUID,
+    winner_id: uuid.UUID,
+    *,
+    force: bool,
+) -> tuple[list[dict], dict[str, list[uuid.UUID]]]:
+    """Per-ID state model conflict check.
+
+    For each ID in moved_claim_ids + moved_relation_source_ids + moved_relation_target_ids
+    + moved_chunk_ids, determines:
+      - winner_id  → queue for reverse (add to reverse_plan)
+      - loser_id   → already_restored (log + skip)
+      - missing/soft-deleted → target_gone (log + skip)
+      - other UUID → genuine conflict
+
+    Returns (conflicts, reverse_plan).
+    """
+    from sqlalchemy import text
+
+    inverse = action.inverse
+    moved_claim_ids: list[str] = inverse.get("moved_claim_ids") or []
+    moved_relation_source_ids: list[str] = inverse.get("moved_relation_source_ids") or []
+    moved_relation_target_ids: list[str] = inverse.get("moved_relation_target_ids") or []
+    moved_chunk_ids: list[str] = inverse.get("moved_chunk_ids") or []
+
+    conflicts: list[dict] = []
+    reverse_plan: dict[str, list[uuid.UUID]] = {
+        "claim_ids": [],
+        "relation_source_ids": [],
+        "relation_target_ids": [],
+        "chunk_ids": [],
+    }
+
+    ws_id = action.workspace_id
+
+    # Check claims
+    for claim_id_str in moved_claim_ids:
+        try:
+            claim_id = uuid.UUID(claim_id_str)
+        except ValueError:
+            continue
+        result = await repo.session.execute(
+            text("SELECT entity_id FROM l2_claims WHERE id = :id AND workspace_id = :ws_id"),
+            {"id": claim_id, "ws_id": ws_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            log.info("rollback_merge_target_gone", kind="claim", id=claim_id_str)
+            continue
+        current = uuid.UUID(str(row[0]))
+        if current == winner_id:
+            reverse_plan["claim_ids"].append(claim_id)
+        elif current == loser_id:
+            log.info("rollback_merge_already_restored", kind="claim", id=claim_id_str)
+        else:
+            conflicts.append({"id": claim_id_str, "current_holder": str(current), "expected_holder": str(winner_id)})
+
+    # Check relations where loser was source
+    for rel_id_str in moved_relation_source_ids:
+        try:
+            rel_id = uuid.UUID(rel_id_str)
+        except ValueError:
+            continue
+        result = await repo.session.execute(
+            text("SELECT source_entity_id FROM l1_relations WHERE id = :id AND workspace_id = :ws_id"),
+            {"id": rel_id, "ws_id": ws_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            log.info("rollback_merge_target_gone", kind="relation_source", id=rel_id_str)
+            continue
+        current = uuid.UUID(str(row[0]))
+        if current == winner_id:
+            reverse_plan["relation_source_ids"].append(rel_id)
+        elif current == loser_id:
+            log.info("rollback_merge_already_restored", kind="relation_source", id=rel_id_str)
+        else:
+            conflicts.append({"id": rel_id_str, "current_holder": str(current), "expected_holder": str(winner_id)})
+
+    # Check relations where loser was target
+    for rel_id_str in moved_relation_target_ids:
+        try:
+            rel_id = uuid.UUID(rel_id_str)
+        except ValueError:
+            continue
+        result = await repo.session.execute(
+            text("SELECT target_entity_id FROM l1_relations WHERE id = :id AND workspace_id = :ws_id"),
+            {"id": rel_id, "ws_id": ws_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            log.info("rollback_merge_target_gone", kind="relation_target", id=rel_id_str)
+            continue
+        current = uuid.UUID(str(row[0]))
+        if current == winner_id:
+            reverse_plan["relation_target_ids"].append(rel_id)
+        elif current == loser_id:
+            log.info("rollback_merge_already_restored", kind="relation_target", id=rel_id_str)
+        else:
+            conflicts.append({"id": rel_id_str, "current_holder": str(current), "expected_holder": str(winner_id)})
+
+    # Check chunks
+    for chunk_id_str in moved_chunk_ids:
+        try:
+            chunk_id = uuid.UUID(chunk_id_str)
+        except ValueError:
+            continue
+        result = await repo.session.execute(
+            text(
+                "SELECT source_id FROM vector_chunks"
+                " WHERE id = :id AND workspace_id = :ws_id AND source_type = 'entity'"
+            ),
+            {"id": chunk_id, "ws_id": ws_id},
+        )
+        row = result.fetchone()
+        if row is None:
+            log.info("rollback_merge_target_gone", kind="chunk", id=chunk_id_str)
+            continue
+        current = uuid.UUID(str(row[0]))
+        if current == winner_id:
+            reverse_plan["chunk_ids"].append(chunk_id)
+        elif current == loser_id:
+            log.info("rollback_merge_already_restored", kind="chunk", id=chunk_id_str)
+        else:
+            conflicts.append({"id": chunk_id_str, "current_holder": str(current), "expected_holder": str(winner_id)})
+
+    return conflicts, reverse_plan
+
+
+async def _reverse_merge_fks(
+    repo: IntegratorActionRepository,
+    action: IntegratorAction,
+    loser_id: uuid.UUID,
+    reverse_plan: dict[str, list[uuid.UUID]],
+) -> None:
+    """Execute bulk UPDATEs per reverse_plan to restore FKs back to loser_id."""
+    from sqlalchemy import text
+
+    ws_id = action.workspace_id
+
+    if reverse_plan["claim_ids"]:
+        ids = [str(i) for i in reverse_plan["claim_ids"]]
+        await repo.session.execute(
+            text("UPDATE l2_claims SET entity_id = :loser_id WHERE id = ANY(:ids) AND workspace_id = :ws_id"),
+            {"loser_id": loser_id, "ids": ids, "ws_id": ws_id},
+        )
+
+    if reverse_plan["relation_source_ids"]:
+        ids = [str(i) for i in reverse_plan["relation_source_ids"]]
+        await repo.session.execute(
+            text("UPDATE l1_relations SET source_entity_id = :loser_id WHERE id = ANY(:ids) AND workspace_id = :ws_id"),
+            {"loser_id": loser_id, "ids": ids, "ws_id": ws_id},
+        )
+
+    if reverse_plan["relation_target_ids"]:
+        ids = [str(i) for i in reverse_plan["relation_target_ids"]]
+        await repo.session.execute(
+            text("UPDATE l1_relations SET target_entity_id = :loser_id WHERE id = ANY(:ids) AND workspace_id = :ws_id"),
+            {"loser_id": loser_id, "ids": ids, "ws_id": ws_id},
+        )
+
+    if reverse_plan["chunk_ids"]:
+        ids = [str(i) for i in reverse_plan["chunk_ids"]]
+        await repo.session.execute(
+            text(
+                "UPDATE vector_chunks SET source_id = :loser_id"
+                " WHERE id = ANY(:ids) AND workspace_id = :ws_id AND source_type = 'entity'"
+            ),
+            {"loser_id": loser_id, "ids": ids, "ws_id": ws_id},
+        )
+
+
 async def _rollback_merge(
     repo: IntegratorActionRepository,
     action: IntegratorAction,
     *,
     force: bool = False,
 ) -> list[str]:
-    """Restore loser entity (is_deleted → False)."""
+    """Full v2 merge rollback with FK reversal; degrades gracefully for v1 actions."""
     loser_id_str = action.inverse.get("loser_id")
     if not loser_id_str and action.targets:
-        loser_id_str = action.targets[0] if isinstance(action.targets[0], str) else str(action.targets[0])
+        first = action.targets[0]
+        loser_id_str = first if isinstance(first, str) else str(first)
 
     if not loser_id_str:
         return []
@@ -244,13 +449,52 @@ async def _rollback_merge(
     except ValueError:
         return []
 
-    from alayaos_core.models.entity import L1Entity
+    # Determine if this action has full v2 inverse payload
+    missing_fields = [f for f in _V2_REQUIRED_INVERSE_FIELDS if f not in action.inverse]
+    is_v2 = action.snapshot_schema_version >= 2 and not missing_fields
 
-    stmt = select(L1Entity).where(L1Entity.id == loser_id).where(L1Entity.workspace_id == action.workspace_id)
-    result = await repo.session.execute(stmt)
-    loser = result.scalar_one_or_none()
-    if loser is not None:
-        loser.is_deleted = False
+    if not is_v2:
+        # Legacy partial path: only restore loser entity
+        reason = "version_lt_2" if action.snapshot_schema_version < 2 else "missing_fields"
+        log.warning(
+            "rollback_merge_legacy_partial",
+            action_id=str(action.id),
+            version=action.snapshot_schema_version,
+            reason=reason,
+            missing_fields=missing_fields,
+        )
+        await _restore_loser(repo, action, loser_id)
+        return []
+
+    # v2 path — determine winner_id from entity_id (the merge target)
+    winner_id = action.entity_id
+    if winner_id is None:
+        # Fall back to legacy partial if no winner_id
+        await _restore_loser(repo, action, loser_id)
+        return []
+
+    conflicts, reverse_plan = await _check_merge_rollback_conflicts(repo, action, loser_id, winner_id, force=force)
+
+    if conflicts and not force:
+        return [f"FK conflict for {c['id']}: holder={c['current_holder']}" for c in conflicts]
+
+    # Execute FK reversal
+    await _reverse_merge_fks(repo, action, loser_id, reverse_plan)
+
+    # Restore the loser entity
+    await _restore_loser(repo, action, loser_id)
+
+    # Log skipped deleted relations (self-ref + dedup-duplicate)
+    deleted_self_ref = action.inverse.get("deleted_self_ref_relation_ids") or []
+    deduplicated = action.inverse.get("deduplicated_relation_ids") or []
+    if deleted_self_ref or deduplicated:
+        log.info(
+            "rollback_merge_skipped_deleted_relations",
+            action_id=str(action.id),
+            deleted_self_ref_relation_ids=deleted_self_ref,
+            deduplicated_relation_ids=deduplicated,
+        )
+
     return []
 
 

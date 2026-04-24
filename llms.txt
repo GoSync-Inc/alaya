@@ -23,7 +23,7 @@ Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `
 
 ### Packages
 
-- **`packages/core/`** — Domain logic: models (18), schemas (17), repositories (16), extraction pipeline (cortex/crystallizer/integrator sub-packages), LLM adapters, worker tasks. Zero framework dependencies.
+- **`packages/core/`** — Domain logic: models (18), schemas (17), repositories (17), extraction pipeline (cortex/crystallizer/integrator sub-packages), LLM adapters, worker tasks. Zero framework dependencies.
 - **`packages/api/`** — FastAPI REST API + MCP server. 18 routers. Depends on core.
 - **`packages/cli-go/`** — Go CLI (Cobra): search, ask, tree, entity, claim, ingest, key, workspace, setup agent.
 - **`packages/connectors/`** — Source connectors (placeholder).

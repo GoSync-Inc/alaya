@@ -83,6 +83,7 @@ Run before every commit:
 
 - `ALAYA_API_DOCS_ENABLED` defaults to disabled in production when unset.
 - `ALAYA_TRUSTED_HOSTS` should be configured to the public hostnames served by ingress/Caddy, unless host validation is enforced upstream.
+- `/health/ready` checks database, migrations, seeds, and Redis; Redis uses bounded async ping and reports `ok`, `down`, or `degraded` in verbose readiness output.
 - `INTEGRATOR_DEDUP_SHORTLIST_K` (default `5`) — max nearest-neighbours per entity in vector-shortlist dedup phase.
 - `INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD` (default `0.9`) — minimum cosine similarity to forward a pair to LLM verification; lower values increase recall at the cost of more LLM calls.
 - `INTEGRATOR_DEDUP_BATCH_SIZE` (default `9`) — entities per LLM batch in dedup v2 composite-signal pass.
@@ -108,6 +109,7 @@ Run before every commit:
 11. **All relation writes are self-reference-rejected** — `RelationRepository._reject_self_reference` enforces this universally in `create()` and `create_batch()`; raises `HierarchyViolationError` (`repositories/errors.py`).
 12. **`part_of` relations are ENTITY_TYPE_TIER_RANK-enforced by default** — `_validate_part_of_tier` prevents downward or lateral containment when `ALAYA_PART_OF_STRICT=strict`; `warn` logs `part_of.tier_violation` and persists, `off` skips tier-rank validation. Callers (writer, panoramic, enrichment) each catch `HierarchyViolationError`, log a named structured event, and continue (best-effort — never abort the batch).
 13. **Merge rollback is schema-versioned.** `IntegratorActionRepository._rollback_merge` branches on `snapshot_schema_version`: v1 restores only `is_deleted=False` (legacy partial); v2 performs full FK reversal, per-ID conflict detection, and winner-metadata restore from `inverse["winner_before"]`.
+14. **Access extraction gate:** `restricted` events are skipped; `private` events require workspace `extract_private`; `channel` events extract like public events but are retrieval tier 1 after S1.
 
 ## Code Conventions
 

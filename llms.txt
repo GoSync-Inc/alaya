@@ -34,6 +34,7 @@ Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `
 2. **Prompt boundary** — System prompt uses `<instructions>`, `<ontology>`, `<data>` XML tags to isolate instructions from data.
 3. **Pydantic validators** — All LLM output validated before persistence: script tag rejection, control char stripping, confidence bounds [0, 1], length limits.
 4. **Job arg safety** — TaskIQ tasks accept only string IDs (`event_id`, `extraction_run_id`, `workspace_id`).
+5. **Access extraction gate** — `restricted` events are skipped; `private` events require workspace `extract_private`; `channel` events extract like public events but are retrieval tier 1 after S1.
 
 ## API Endpoints (45 total)
 
@@ -86,6 +87,8 @@ POST /tree/export         — export subtree as markdown
 GET  /admin/flags
 POST /admin/backfill-embeddings
 ```
+
+`/health/ready` checks database, migrations, seeds, and Redis. Redis readiness uses bounded async ping and is reported as `ok`, `down`, or `degraded` when verbose readiness output is enabled.
 
 ## Data Model
 

@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import uuid
 
+import structlog
 from sqlalchemy import or_, select, text
 
+from alayaos_core.config import get_settings
 from alayaos_core.models.relation import L1Relation
 from alayaos_core.repositories.base import BaseRepository
 from alayaos_core.repositories.errors import HierarchyViolationError
 from alayaos_core.services.workspace import ENTITY_TYPE_TIER_RANK
+
+log = structlog.get_logger()
 
 # ---------------------------------------------------------------------------
 # Module-level helpers
@@ -55,6 +59,10 @@ class RelationRepository(BaseRepository):
         source_rank >= target_rank, raise HierarchyViolationError.
         If either slug is absent from the rank table, silently pass.
         """
+        mode = get_settings().ALAYA_PART_OF_STRICT
+        if mode == "off":
+            return
+
         result = await session.execute(
             _PART_OF_SLUG_QUERY,
             {
@@ -77,9 +85,21 @@ class RelationRepository(BaseRepository):
             return  # non-tiered type — allowed
 
         if source_rank >= target_rank:
-            raise HierarchyViolationError(
-                f"part_of: {source_slug}({source_rank}) cannot be part_of {target_slug}({target_rank})"
-            )
+            message = f"part_of: {source_slug}({source_rank}) cannot be part_of {target_slug}({target_rank})"
+            if mode == "warn":
+                log.warning(
+                    "part_of.tier_violation",
+                    workspace_id=str(workspace_id),
+                    source_entity_id=str(source_entity_id),
+                    target_entity_id=str(target_entity_id),
+                    source_slug=source_slug,
+                    target_slug=target_slug,
+                    source_rank=source_rank,
+                    target_rank=target_rank,
+                    mode="warn",
+                )
+                return
+            raise HierarchyViolationError(message)
 
     async def create(
         self,

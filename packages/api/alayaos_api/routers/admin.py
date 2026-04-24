@@ -4,12 +4,13 @@ import uuid
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from alayaos_api.deps import get_session, require_scope
+from alayaos_api.deps import _error_response, get_session, require_scope
+from alayaos_core.config import FEATURE_FLAG_DEFAULTS, get_settings
 from alayaos_core.models.api_key import APIKey
 from alayaos_core.services.embedding import EmbeddingServiceInterface
 
@@ -37,6 +38,46 @@ def get_embedding_service() -> EmbeddingServiceInterface:
     return FastEmbedService(settings.EMBEDDING_MODEL, settings.EMBEDDING_DIMENSIONS)  # type: ignore[return-value]
 
 
+async def _count_tier_violations_24h(_session: AsyncSession) -> None:
+    return None
+
+
+@router.get("/flags")
+async def get_admin_flags(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    api_key: Annotated[APIKey, Depends(require_scope("admin"))],
+) -> dict:
+    """Return process-level feature flag state for bootstrap administrators."""
+    if not api_key.is_bootstrap:
+        log.warning("admin_flags_denied", key_prefix=api_key.key_prefix, reason="bootstrap_required")
+        raise HTTPException(
+            status_code=403,
+            detail=_error_response(
+                "auth.bootstrap_required",
+                "Bootstrap admin key is required for feature flag state.",
+                hint="Use the bootstrap key for process-level feature flag inspection.",
+            ),
+        )
+
+    settings = get_settings()
+    violations_last_24h = await _count_tier_violations_24h(session)
+    data = {}
+    flags_non_default = 0
+    for name, default in FEATURE_FLAG_DEFAULTS:
+        value = getattr(settings, name)
+        non_default = value != default
+        if non_default:
+            flags_non_default += 1
+        data[name] = {
+            "value": value,
+            "default": default,
+            "non_default": non_default,
+            "violations_last_24h": violations_last_24h,
+            "violations_last_24h_reason": "counter_not_yet_instrumented",
+        }
+    return {"data": data, "meta": {"flags_non_default": flags_non_default}}
+
+
 @router.post("/backfill-embeddings", response_model=BackfillResponse)
 async def backfill_embeddings(
     request: BackfillRequest,
@@ -50,10 +91,6 @@ async def backfill_embeddings(
     their own workspace.  Bootstrap keys may specify any workspace_id or omit it
     to operate across all workspaces.
     """
-    from fastapi import HTTPException
-
-    from alayaos_api.deps import _error_response  # type: ignore[attr-defined]
-
     if not api_key.is_bootstrap:
         # Non-bootstrap: workspace_id is required.
         if request.workspace_id is None:

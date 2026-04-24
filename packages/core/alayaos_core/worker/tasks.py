@@ -10,7 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from taskiq.events import TaskiqEvents
 
-from alayaos_core.config import Settings
+from alayaos_core.config import Settings, get_non_default_feature_flags, get_settings
 from alayaos_core.extraction.integrator.engine import IntegratorEngine
 from alayaos_core.repositories.claim import ClaimRepository
 from alayaos_core.repositories.entity import EntityRepository
@@ -682,6 +682,16 @@ async def job_enrich(extraction_run_id: str, workspace_id: str) -> dict:
         await run_enrich(uuid.UUID(extraction_run_id), session, embedding_service=embedding_service)
 
     return {"extraction_run_id": extraction_run_id, "status": "enriched"}
+
+
+@broker.task(schedule=[{"cron": "0 9 * * *"}])
+async def job_feature_flag_digest() -> dict:
+    """Daily digest for non-default feature flags."""
+    settings = get_settings()
+    flags = get_non_default_feature_flags(settings)
+    for name, value, default in flags:
+        log.warning("feature_flag_active", flag=name, value=value, default=default)
+    return {"flags_non_default": len(flags), "status": "checked"}
 
 
 @broker.task(timeout=300, retry_on_error=True, max_retries=2)

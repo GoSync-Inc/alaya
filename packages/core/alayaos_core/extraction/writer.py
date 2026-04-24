@@ -190,6 +190,10 @@ async def atomic_write(
                     extraction_run_id=run.id,
                 )
                 counters["relations_created"] += 1
+            # NOTE: only HierarchyViolationError is caught here — other failures
+            # (e.g. transient DB errors) must propagate so atomic_write aborts the
+            # run. Panoramic/enrichment paths are best-effort (see engine.py); writer
+            # is deliberately strict to preserve extraction atomicity.
             except HierarchyViolationError as e:
                 log.warning(
                     "writer_part_of_rejected",

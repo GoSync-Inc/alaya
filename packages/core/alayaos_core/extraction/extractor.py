@@ -117,11 +117,6 @@ Predicates:
         result.relations.extend(gleaning_result.relations)
         result.claims.extend(gleaning_result.claims)
 
-        total_usage = LLMUsage(
-            tokens_in=usage.tokens_in + gleaning_usage.tokens_in,
-            tokens_out=usage.tokens_out + gleaning_usage.tokens_out,
-            tokens_cached=usage.tokens_cached + gleaning_usage.tokens_cached,
-            cost_usd=usage.cost_usd + gleaning_usage.cost_usd,
-        )
+        total_usage = LLMUsage.combine(usage, gleaning_usage)
 
         return result, total_usage

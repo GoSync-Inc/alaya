@@ -234,7 +234,7 @@ class IntegratorEngine:
         # Action repo for persisting audit records
         action_repo = IntegratorActionRepository(session)
 
-        _zero_usage = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
+        _zero_usage = LLMUsage.zero()
 
         # Multi-pass convergence loop — each pass runs panoramic + dedup under separate savepoints.
         pass_number = 1
@@ -773,7 +773,7 @@ class IntegratorEngine:
             action_repo: IntegratorActionRepository for audit records.
         """
         effective_run_id = run_id if run_id is not None else uuid.UUID(int=0)
-        _zero = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
+        _zero = LLMUsage.zero()
 
         if len(entities) < 2:
             return 0, [], _zero
@@ -897,7 +897,7 @@ class IntegratorEngine:
         the LLM cost from all per-pair llm_check_pair() calls so the dedup phase's
         IntegratorPhaseUsage correctly reflects fallback-path costs.
         """
-        _zero = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
+        _zero = LLMUsage.zero()
         if len(entities) < 2:
             return [], _zero
 

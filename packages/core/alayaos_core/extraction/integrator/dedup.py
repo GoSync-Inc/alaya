@@ -157,7 +157,7 @@ class EntityDeduplicator:
 
         Returns (pairs, aggregated_usage) where usage accumulates all Tier-3 LLM calls.
         """
-        _zero = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
+        _zero = LLMUsage.zero()
         if len(entities) < 2:
             return [], _zero
 

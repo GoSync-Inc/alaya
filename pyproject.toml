@@ -24,6 +24,7 @@ asyncio_default_fixture_loop_scope = "session"
 # would otherwise hit "Future attached to different loop"
 asyncio_default_test_loop_scope = "session"
 addopts = "-m 'not integration'"
+pythonpath = ["."]
 markers = [
     "integration: requires real PostgreSQL and Redis",
 ]

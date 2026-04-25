@@ -47,7 +47,7 @@ Four sequential runs. Each closes with a merged PR set and a post-merge audit. P
 - S1 — `just bench` one-command reproducible benchmark. Spins docker stack, creates API key, ingests the fixture, waits on the worker, dumps `extraction_runs` + `integrator_runs` summary to `bench_results/`.
 - S2 — Integrator cost/token tracking (`RUN5.4.FU.03` + `RUN5.3` follow-up #1). Populate `integrator_runs.cost_usd` by mirroring the Run 5.3 `recalc_usage` pattern.
 - S3 — Prompt-cache hit ratio metrics on every LLM adapter (`RUN3.11`). Emit `cache_read / total_input` per pipeline stage.
-- S4 (optional) — Pad Cortex prompt over 1024 tokens for Haiku cache eligibility (`RUN5.3.08`).
+- S4 — Pad Cortex prompt over 4096 tokens for Haiku 4.5 cache eligibility (`RUN5.3.08`). **Done:** 15 canonical examples appended via `cortex/prompts.py`; assembled prompt >= 4200 estimator tokens (>= 16800 chars); CI regression test in `test_cortex_prompt_size.py`; S3 cache-miss alarm (`llm.cache_miss_below_threshold`) fires at runtime if the threshold is not met.
 
 **Exit criteria:** `just bench` prints a reproducible report; `integrator_runs.cost_usd > 0` on a fresh bench run; cache metrics appear in structlog output.
 

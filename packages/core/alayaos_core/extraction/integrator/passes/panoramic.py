@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 # Default maximum entity count before applying the scalability cap.
-# Can be overridden via CONSOLIDATOR_PANORAMIC_MAX_ENTITIES config or constructor param.
+# Can be overridden via the PanoramicPass constructor.
 _DEFAULT_MAX_ENTITIES = 500
 
 # Pre-compiled regexes for deterministic garbage detection (before LLM call).

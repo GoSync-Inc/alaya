@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Crystallizer prompt v2: hierarchy guidance, date normalization examples, bilingual (EN/RU) support.
 - Vector shortlist dedup: configurable `INTEGRATOR_DEDUP_SHORTLIST_K`, `INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD`, `INTEGRATOR_DEDUP_BATCH_SIZE`.
-- `CONSOLIDATOR_PANORAMIC_MAX_ENTITIES` cap (default `500`) added for panoramic pass.
+- Panoramic pass entity cap defaults to `500` and can be overridden via constructor.
 
 ### Fixed
 

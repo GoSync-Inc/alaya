@@ -198,6 +198,29 @@ class TestIntegratorRunsRouter:
 
         assert response.status_code == 403
 
+    def test_get_integrator_run_exposes_cache_write_fields(self) -> None:
+        """GET /integrator-runs/{id} must include cache_write_5m_tokens and cache_write_1h_tokens."""
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        run = make_integrator_run()
+        run.cache_write_5m_tokens = 42
+        run.cache_write_1h_tokens = 7
+
+        with patch("alayaos_api.routers.integrator_runs.IntegratorRunRepository") as mock_cls:
+            repo = AsyncMock()
+            repo.get_by_id = AsyncMock(return_value=run)
+            mock_cls.return_value = repo
+
+            client = TestClient(app)
+            response = client.get(f"/api/v1/integrator-runs/{run.id}", headers={"X-Api-Key": RAW_KEY})
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "cache_write_5m_tokens" in data
+        assert "cache_write_1h_tokens" in data
+        assert data["cache_write_5m_tokens"] == 42
+        assert data["cache_write_1h_tokens"] == 7
+
 
 class TestIntegratorActionRollbackRouter:
     def test_rollback_action_success_returns_200(self) -> None:

@@ -21,6 +21,8 @@ class ExtractionRunListRead(BaseModel):
     tokens_in: int
     tokens_out: int
     tokens_cached: int = 0
+    cache_write_5m_tokens: int = 0
+    cache_write_1h_tokens: int = 0
     cost_usd: float
     entities_created: int
     entities_merged: int
@@ -43,6 +45,8 @@ class ExtractionRunListRead(BaseModel):
         "chunks_crystal",
         "chunks_skipped",
         "verification_changes",
+        "cache_write_5m_tokens",
+        "cache_write_1h_tokens",
         mode="before",
     )
     @classmethod

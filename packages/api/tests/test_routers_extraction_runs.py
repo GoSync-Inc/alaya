@@ -133,3 +133,51 @@ class TestExtractionRunsRouter:
 
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "resource.not_found"
+
+    def test_get_extraction_run_exposes_cache_write_fields(self) -> None:
+        """GET /extraction-runs/{id} must include cache_write_5m_tokens and cache_write_1h_tokens."""
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        run = make_run()
+        run.cache_write_5m_tokens = 100
+        run.cache_write_1h_tokens = 50
+
+        with patch("alayaos_api.routers.extraction_runs.ExtractionRunRepository") as mock_cls:
+            repo = AsyncMock()
+            repo.get_by_id = AsyncMock(return_value=run)
+            mock_cls.return_value = repo
+
+            client = TestClient(app)
+            response = client.get(f"/api/v1/extraction-runs/{run.id}", headers={"X-Api-Key": RAW_KEY})
+
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert "cache_write_5m_tokens" in data
+        assert "cache_write_1h_tokens" in data
+        assert data["cache_write_5m_tokens"] == 100
+        assert data["cache_write_1h_tokens"] == 50
+
+    def test_list_extraction_runs_exposes_cache_write_fields(self) -> None:
+        """GET /extraction-runs list must include cache_write_5m_tokens and cache_write_1h_tokens per item."""
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        run = make_run()
+        run.cache_write_5m_tokens = 25
+        run.cache_write_1h_tokens = 10
+
+        with patch("alayaos_api.routers.extraction_runs.ExtractionRunRepository") as mock_cls:
+            repo = AsyncMock()
+            repo.list = AsyncMock(return_value=([run], None, False))
+            mock_cls.return_value = repo
+
+            client = TestClient(app)
+            response = client.get("/api/v1/extraction-runs", headers={"X-Api-Key": RAW_KEY})
+
+        assert response.status_code == 200
+        items = response.json()["data"]
+        assert len(items) == 1
+        item = items[0]
+        assert "cache_write_5m_tokens" in item
+        assert "cache_write_1h_tokens" in item
+        assert item["cache_write_5m_tokens"] == 25
+        assert item["cache_write_1h_tokens"] == 10

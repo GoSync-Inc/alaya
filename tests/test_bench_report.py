@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS pipeline_traces (
     workspace_id TEXT,
     event_id TEXT,
     extraction_run_id TEXT,
+    integrator_run_id TEXT,
     stage TEXT,
     tokens_used INTEGER DEFAULT 0,
     cost_usd REAL DEFAULT 0,
@@ -236,19 +237,21 @@ def _insert_pipeline_trace(
     tokens_cached: int = 0,
     cache_write_5m_tokens: int = 0,
     cache_write_1h_tokens: int = 0,
+    integrator_run_id: str | None = None,
 ):
     conn.execute(
         text(
             "INSERT INTO pipeline_traces"
-            " (id, workspace_id, extraction_run_id, stage, duration_ms, cost_usd, created_at,"
+            " (id, workspace_id, extraction_run_id, integrator_run_id, stage, duration_ms, cost_usd, created_at,"
             "  tokens_in, tokens_cached, cache_write_5m_tokens, cache_write_1h_tokens)"
-            " VALUES (:id, :ws, :run, :stage, :dur, 0.001, :created_at,"
+            " VALUES (:id, :ws, :run, :int_run, :stage, :dur, 0.001, :created_at,"
             "         :tokens_in, :tokens_cached, :cache_write_5m, :cache_write_1h)"
         ),
         {
             "id": trace_id,
             "ws": ws_id,
             "run": run_id,
+            "int_run": integrator_run_id,
             "stage": stage,
             "dur": duration_ms,
             "created_at": _ts(offset),
@@ -1103,3 +1106,65 @@ def test_cache_warm_check_flag_in_help():
         timeout=10,
     )
     assert "--cache-warm-check" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Test: integrator_run_id in pipeline_traces SELECT (F2 regression)
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_traces_includes_integrator_run_id():
+    """pipeline_traces rows must expose integrator_run_id in manifest data.
+
+    Regression for the missing integrator_run_id in _get_pipeline_traces SELECT:
+    integrator-scoped traces (event_id=NULL, extraction_run_id=NULL) require
+    integrator_run_id to be the only useful parent-scope identifier.
+    """
+    engine = _make_engine()
+    ws_id = _uid()
+    run_id = _uid()
+    int_run_id = _uid()
+    trace_id = _uid()
+
+    with engine.connect() as conn:
+        _insert_extraction_run(conn, ws_id, run_id)
+        _insert_integrator_run(conn, ws_id, int_run_id)
+        _insert_pipeline_trace(
+            conn,
+            ws_id,
+            trace_id,
+            run_id,
+            "integrator:dedup",
+            300,
+            offset=40,
+            integrator_run_id=int_run_id,
+        )
+        conn.commit()
+
+        data, _ = format_summary(conn, uuid.UUID(ws_id), ANCHOR_DT)
+
+    assert len(data["pipeline_traces"]) == 1
+    trace = data["pipeline_traces"][0]
+    assert "integrator_run_id" in trace, "integrator_run_id missing from pipeline_traces row"
+    assert trace["integrator_run_id"] == int_run_id
+
+
+def test_pipeline_traces_integrator_run_id_null_when_not_set():
+    """integrator_run_id must be None/null in traces without an integrator parent."""
+    engine = _make_engine()
+    ws_id = _uid()
+    run_id = _uid()
+    trace_id = _uid()
+
+    with engine.connect() as conn:
+        _insert_extraction_run(conn, ws_id, run_id)
+        # No integrator_run_id supplied → defaults to NULL
+        _insert_pipeline_trace(conn, ws_id, trace_id, run_id, "cortex", 100, offset=30)
+        conn.commit()
+
+        data, _ = format_summary(conn, uuid.UUID(ws_id), ANCHOR_DT)
+
+    assert len(data["pipeline_traces"]) == 1
+    trace = data["pipeline_traces"][0]
+    assert "integrator_run_id" in trace
+    assert trace["integrator_run_id"] is None

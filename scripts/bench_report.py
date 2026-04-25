@@ -102,7 +102,7 @@ def _get_pipeline_traces(conn: Connection, workspace_id: uuid.UUID, started_at: 
     rows = _query(
         conn,
         """
-        SELECT id, workspace_id, event_id, extraction_run_id, stage,
+        SELECT id, workspace_id, event_id, extraction_run_id, integrator_run_id, stage,
                tokens_used, cost_usd, duration_ms, created_at,
                tokens_in, tokens_out, tokens_cached,
                cache_write_5m_tokens, cache_write_1h_tokens

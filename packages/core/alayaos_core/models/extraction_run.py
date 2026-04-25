@@ -54,3 +54,6 @@ class ExtractionRun(Base, TimestampMixin):
     cortex_cost_usd: Mapped[float] = mapped_column(Numeric(12, 6), nullable=False, server_default="0")
     crystallizer_cost_usd: Mapped[float] = mapped_column(Numeric(12, 6), nullable=False, server_default="0")
     verification_changes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Granular cache-write columns (migration 009); tokens_in/out/cached already exist from 003+004
+    cache_write_5m_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    cache_write_1h_tokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

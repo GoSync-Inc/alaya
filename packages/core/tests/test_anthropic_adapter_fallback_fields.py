@@ -8,7 +8,6 @@ import pytest
 from pydantic import BaseModel
 
 import alayaos_core.llm.observability as observability_mod
-from alayaos_core.llm import anthropic as anthropic_mod
 from alayaos_core.llm.anthropic import AnthropicAdapter
 
 

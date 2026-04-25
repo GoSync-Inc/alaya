@@ -299,3 +299,25 @@ async def test_ask_service_passes_stage() -> None:
     for s in stages:
         assert s != "unknown", "ask() passed stage='unknown'"
         assert s, "ask() passed empty stage"
+
+
+@pytest.mark.asyncio
+async def test_dedup_fallback_llm_check_passes_stage() -> None:
+    """EntityDeduplicator.llm_check_pair (fallback path) must pass stage='integrator:dedup'."""
+    from alayaos_core.extraction.integrator.dedup import EntityDeduplicator
+    from alayaos_core.extraction.integrator.schemas import EntityWithContext
+
+    llm, stages = _stage_capturing_llm()
+    deduplicator = EntityDeduplicator(llm=llm, threshold=0.85, ambiguous_low=0.70)
+
+    entity_a = EntityWithContext(id=uuid.uuid4(), name="Alice Johnson", entity_type="person")
+    entity_b = EntityWithContext(id=uuid.uuid4(), name="Alice Jonson", entity_type="person")
+
+    with contextlib.suppress(Exception):
+        await deduplicator.llm_check_pair(entity_a, entity_b)
+
+    assert len(stages) >= 1, "EntityDeduplicator.llm_check_pair made no LLM calls"
+    for s in stages:
+        assert s == "integrator:dedup", (
+            f"EntityDeduplicator.llm_check_pair passed stage={s!r}; expected 'integrator:dedup'"
+        )

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 import structlog.testing
 from fastapi.testclient import TestClient
@@ -14,17 +16,24 @@ def test_startup_warns_when_part_of_strict_is_non_default(monkeypatch) -> None:
     monkeypatch.setenv("ALAYA_PART_OF_STRICT", "warn")
     config.get_settings.cache_clear()
 
-    app = create_app()
-    with structlog.testing.capture_logs() as logs, TestClient(app):
+    async def fake_validate_pgvector_extension(engine) -> None:
         pass
 
-    assert {
-        "event": "feature_flag_active",
-        "flag": "ALAYA_PART_OF_STRICT",
-        "value": "warn",
-        "default": "strict",
-        "log_level": "warning",
-    } in logs
+    monkeypatch.setattr(
+        "alayaos_api.main._validate_pgvector_extension",
+        fake_validate_pgvector_extension,
+    )
+
+    app = create_app()
+    with patch("alayaos_api.main.log.warning") as warning, TestClient(app):
+        pass
+
+    warning.assert_any_call(
+        "feature_flag_active",
+        flag="ALAYA_PART_OF_STRICT",
+        value="warn",
+        default="strict",
+    )
 
     config.get_settings.cache_clear()
 

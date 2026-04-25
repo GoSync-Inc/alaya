@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS integrator_runs (
 CREATE TABLE IF NOT EXISTS integrator_actions (
     id TEXT PRIMARY KEY,
     workspace_id TEXT,
-    integrator_run_id TEXT,
+    run_id TEXT,
     action_type TEXT,
     created_at TEXT
 );
@@ -226,7 +226,7 @@ def _insert_integrator_action(
 ):
     conn.execute(
         text(
-            "INSERT INTO integrator_actions (id, workspace_id, integrator_run_id, action_type, created_at)"
+            "INSERT INTO integrator_actions (id, workspace_id, run_id, action_type, created_at)"
             " VALUES (:id, :ws, :run, :atype, :created_at)"
         ),
         {"id": action_id, "ws": ws_id, "run": run_id, "atype": action_type, "created_at": _ts(offset)},

@@ -220,7 +220,7 @@ def _dedup_actions(conn: Connection, workspace_id: uuid.UUID, started_at: str) -
         conn,
         """
         SELECT COUNT(*) FROM integrator_actions ia
-        JOIN integrator_runs ir ON ir.id = ia.integrator_run_id
+        JOIN integrator_runs ir ON ir.id = ia.run_id
         WHERE ia.workspace_id = :wid
           AND ir.started_at >= :started_at
           AND ia.action_type = 'merge'

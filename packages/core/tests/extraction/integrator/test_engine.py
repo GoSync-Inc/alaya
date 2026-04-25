@@ -10,7 +10,7 @@ from alayaos_core.llm.interface import LLMUsage
 
 
 def _zero_usage() -> LLMUsage:
-    return LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
+    return LLMUsage.zero()
 
 
 def _make_redis_mock(dirty_ids: list[str] | None = None):

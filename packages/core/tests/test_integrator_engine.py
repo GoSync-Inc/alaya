@@ -25,7 +25,7 @@ from alayaos_core.llm.interface import LLMUsage
 
 def _zero_usage() -> LLMUsage:
     """Return a zero-cost LLMUsage for test mocks."""
-    return LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
+    return LLMUsage.zero()
 
 
 def _make_session() -> AsyncMock:

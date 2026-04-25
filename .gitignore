@@ -65,3 +65,7 @@ Thumbs.db
 # Superflow runtime (events log, local config)
 .superflow/
 .superset/
+
+# Bench results (local-only; not committed)
+bench_results/*
+!bench_results/.gitkeep

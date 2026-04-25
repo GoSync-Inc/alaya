@@ -151,7 +151,6 @@ Chunks: GET (event_id, processing_stage, is_crystal filters), GET/{id}
 Pipeline Traces: GET /events/{id}/trace
 Integrator Runs: GET, GET/{id}, POST /trigger, GET /{id}/trace — per-integrator-run pipeline trace list (granular token columns, integrator_run_id set, event_id=None)
 Integrator Actions: GET /integrator-actions, POST /integrator-actions/{id}/rollback
-Admin: GET /admin/flags, POST /admin/backfill-embeddings
 Search: POST /search — hybrid 3-channel RRF (vector + FTS + entity name)
 Ask: POST /ask — LLM Q&A with citation validation
 Tree: GET /tree, GET /tree/{path}, POST /tree/export

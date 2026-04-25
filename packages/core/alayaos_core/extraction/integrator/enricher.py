@@ -71,6 +71,7 @@ class EntityEnricher:
                 system_prompt=_SYSTEM_PROMPT,
                 response_model=EnrichmentResult,
                 max_tokens=2048,
+                stage="integrator:enricher",
             )
             return result
         except Exception:

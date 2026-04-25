@@ -56,6 +56,7 @@ class CortexClassifier:
             truncated,
             _CLASSIFICATION_SYSTEM_PROMPT,
             DomainScores,
+            stage="cortex:classify",
         )
         return scores, usage
 
@@ -69,6 +70,7 @@ class CortexClassifier:
             user_text,
             _CLASSIFICATION_SYSTEM_PROMPT,
             DomainScores,
+            stage="cortex:verify",
         )
         changed = verified != initial_scores
         return verified, changed, usage

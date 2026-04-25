@@ -233,6 +233,7 @@ async def _llm_resolve_entity(llm, extracted: ExtractedEntity, existing) -> bool
         system_prompt="You are an entity resolution assistant. Decide if two entity mentions refer to the same real-world entity.",
         response_model=EntityMatchResult,
         max_tokens=256,
+        stage="writer:resolve",
     )
     return result.is_same_entity
 

@@ -202,7 +202,6 @@ Expected scores:
   knowledge: 0.92 — checklist, how-to, best practices
   engineering: 0.60 — dev environment, GitHub, AWS
   people: 0.40 — onboarding, 1:1s, team lead
-  process: 0.75 — structured checklist workflow
   project: 0.10 — setup tasks
   decision: 0.0
   strategic: 0.0
@@ -371,7 +370,6 @@ Expected scores:
   knowledge: 0.88 — runbook, process documentation
   engineering: 0.75 — on-call, incident management, technical escalation
   risk: 0.70 — P0 incident is highest risk level
-  process: 0.80 — detailed step-by-step workflow
   people: 0.30 — roles assigned
   project: 0.10 — incident as a mini-project
   decision: 0.15 — escalation decision tree

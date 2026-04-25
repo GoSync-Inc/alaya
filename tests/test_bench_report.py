@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
     created_at TEXT
 );
 
-CREATE TABLE IF NOT EXISTS predicates (
+CREATE TABLE IF NOT EXISTS predicate_definitions (
     id TEXT,
     workspace_id TEXT,
     slug TEXT,
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS entity_types (
     PRIMARY KEY (workspace_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS entities (
+CREATE TABLE IF NOT EXISTS l1_entities (
     id TEXT,
     workspace_id TEXT,
     entity_type_id TEXT,
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS extraction_runs (
     completed_at TEXT
 );
 
-CREATE TABLE IF NOT EXISTS claims (
+CREATE TABLE IF NOT EXISTS l2_claims (
     id TEXT PRIMARY KEY,
     workspace_id TEXT,
     predicate_id TEXT,
@@ -180,7 +180,7 @@ def _insert_extraction_run(conn, ws_id: str, run_id: str, status: str = "complet
 def _insert_claim(conn, ws_id: str, claim_id: str, predicate_id: str, entity_id: str, run_id: str, offset: int = 10):
     conn.execute(
         text(
-            "INSERT INTO claims (id, workspace_id, predicate_id, entity_id, extraction_run_id, value, created_at)"
+            "INSERT INTO l2_claims (id, workspace_id, predicate_id, entity_id, extraction_run_id, value, created_at)"
             " VALUES (:id, :ws, :pred, :entity, :run, 'v', :created_at)"
         ),
         {
@@ -196,7 +196,7 @@ def _insert_claim(conn, ws_id: str, claim_id: str, predicate_id: str, entity_id:
 
 def _insert_predicate(conn, ws_id: str, pred_id: str, slug: str):
     conn.execute(
-        text("INSERT INTO predicates (id, workspace_id, slug) VALUES (:id, :ws, :slug)"),
+        text("INSERT INTO predicate_definitions (id, workspace_id, slug) VALUES (:id, :ws, :slug)"),
         {"id": pred_id, "ws": ws_id, "slug": slug},
     )
 
@@ -204,7 +204,7 @@ def _insert_predicate(conn, ws_id: str, pred_id: str, slug: str):
 def _insert_entity(conn, ws_id: str, entity_id: str, offset: int = 0):
     conn.execute(
         text(
-            "INSERT INTO entities (id, workspace_id, name, is_deleted, created_at)"
+            "INSERT INTO l1_entities (id, workspace_id, name, is_deleted, created_at)"
             " VALUES (:id, :ws, 'E', 0, :created_at)"
         ),
         {"id": entity_id, "ws": ws_id, "created_at": _ts(offset)},

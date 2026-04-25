@@ -145,7 +145,7 @@ def _description_rate(conn: Connection, workspace_id: uuid.UUID, started_at: str
     total = _scalar(
         conn,
         """
-        SELECT COUNT(*) FROM claims c
+        SELECT COUNT(*) FROM l2_claims c
         JOIN extraction_runs er ON er.id = c.extraction_run_id
         WHERE c.workspace_id = :wid
         """,
@@ -157,8 +157,8 @@ def _description_rate(conn: Connection, workspace_id: uuid.UUID, started_at: str
     desc_count = _scalar(
         conn,
         f"""
-        SELECT COUNT(*) FROM claims c
-        JOIN predicates p ON p.id = c.predicate_id AND p.workspace_id = c.workspace_id
+        SELECT COUNT(*) FROM l2_claims c
+        JOIN predicate_definitions p ON p.id = c.predicate_id AND p.workspace_id = c.workspace_id
         JOIN extraction_runs er ON er.id = c.extraction_run_id
         WHERE c.workspace_id = :wid
           AND p.slug IN ({slugs_list})
@@ -173,7 +173,7 @@ def _claims_per_entity(conn: Connection, workspace_id: uuid.UUID, started_at: st
     claims_total = _scalar(
         conn,
         """
-        SELECT COUNT(*) FROM claims c
+        SELECT COUNT(*) FROM l2_claims c
         JOIN extraction_runs er ON er.id = c.extraction_run_id
         WHERE c.workspace_id = :wid
         """,
@@ -182,7 +182,7 @@ def _claims_per_entity(conn: Connection, workspace_id: uuid.UUID, started_at: st
     entities_total = _scalar(
         conn,
         """
-        SELECT COUNT(*) FROM entities
+        SELECT COUNT(*) FROM l1_entities
         WHERE workspace_id = :wid
           AND created_at >= :started_at
           AND is_deleted = false
@@ -202,7 +202,7 @@ def _claims_per_event_stddev(conn: Connection, workspace_id: uuid.UUID, started_
         """
         SELECT er.id AS run_id, COUNT(c.id) AS claim_count
         FROM extraction_runs er
-        LEFT JOIN claims c ON c.extraction_run_id = er.id
+        LEFT JOIN l2_claims c ON c.extraction_run_id = er.id
         WHERE er.workspace_id = :wid
         GROUP BY er.id
         """,

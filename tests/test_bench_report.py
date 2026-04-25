@@ -6,7 +6,7 @@ Covers:
   - Markdown shape (sections present)
   - Quality proxy formulas (description_rate, claims_per_entity,
     claims_per_event_stddev, dedup_actions, run_failure_count)
-  - Scoping: workspace_id filter and created_at >= started_at filter
+  - Scoping: workspace_id filter and started_at >= started_at filter (per-table timestamp)
   - Secrets policy: no ak_... substring in any output bytes (format_summary + _build_manifest)
   - Empty-workspace edge case (spec #11): result="empty_workspace", exit 0 semantic
 """
@@ -72,7 +72,12 @@ CREATE TABLE IF NOT EXISTS extraction_runs (
     cost_usd REAL DEFAULT 0,
     cortex_cost_usd REAL DEFAULT 0,
     crystallizer_cost_usd REAL DEFAULT 0,
-    created_at TEXT,
+    entities_created INTEGER DEFAULT 0,
+    entities_merged INTEGER DEFAULT 0,
+    relations_created INTEGER DEFAULT 0,
+    claims_created INTEGER DEFAULT 0,
+    claims_superseded INTEGER DEFAULT 0,
+    started_at TEXT,
     completed_at TEXT
 );
 
@@ -97,7 +102,10 @@ CREATE TABLE IF NOT EXISTS integrator_runs (
     entities_deduplicated INTEGER DEFAULT 0,
     entities_merged INTEGER DEFAULT 0,
     entities_enriched INTEGER DEFAULT 0,
-    created_at TEXT,
+    relations_created INTEGER DEFAULT 0,
+    claims_updated INTEGER DEFAULT 0,
+    noise_removed INTEGER DEFAULT 0,
+    started_at TEXT,
     completed_at TEXT
 );
 
@@ -162,10 +170,10 @@ BEFORE_DT = ANCHOR_DT - timedelta(hours=1)  # before the bench window
 def _insert_extraction_run(conn, ws_id: str, run_id: str, status: str = "completed", offset: int = 0):
     conn.execute(
         text(
-            "INSERT INTO extraction_runs (id, workspace_id, status, cost_usd, created_at, completed_at)"
-            " VALUES (:id, :ws, :status, 0.001, :created_at, :completed_at)"
+            "INSERT INTO extraction_runs (id, workspace_id, status, cost_usd, started_at, completed_at)"
+            " VALUES (:id, :ws, :status, 0.001, :started_at, :completed_at)"
         ),
-        {"id": run_id, "ws": ws_id, "status": status, "created_at": _ts(offset), "completed_at": _ts(offset + 60)},
+        {"id": run_id, "ws": ws_id, "status": status, "started_at": _ts(offset), "completed_at": _ts(offset + 60)},
     )
 
 
@@ -206,10 +214,10 @@ def _insert_entity(conn, ws_id: str, entity_id: str, offset: int = 0):
 def _insert_integrator_run(conn, ws_id: str, run_id: str, status: str = "completed", offset: int = 120):
     conn.execute(
         text(
-            "INSERT INTO integrator_runs (id, workspace_id, status, cost_usd, created_at)"
-            " VALUES (:id, :ws, :status, 0.005, :created_at)"
+            "INSERT INTO integrator_runs (id, workspace_id, status, cost_usd, started_at)"
+            " VALUES (:id, :ws, :status, 0.005, :started_at)"
         ),
-        {"id": run_id, "ws": ws_id, "status": status, "created_at": _ts(offset)},
+        {"id": run_id, "ws": ws_id, "status": status, "started_at": _ts(offset)},
     )
 
 
@@ -562,10 +570,10 @@ def test_started_at_filter_excludes_old_runs():
     new_run_id = _uid()
 
     with engine.connect() as conn:
-        # old run: created 1 hour before ANCHOR_DT
+        # old run: started 1 hour before ANCHOR_DT
         conn.execute(
             text(
-                "INSERT INTO extraction_runs (id, workspace_id, status, cost_usd, created_at, completed_at)"
+                "INSERT INTO extraction_runs (id, workspace_id, status, cost_usd, started_at, completed_at)"
                 " VALUES (:id, :ws, 'failed', 0.001, :ts, :ts)"
             ),
             {
@@ -577,7 +585,7 @@ def test_started_at_filter_excludes_old_runs():
         # new run: at ANCHOR_DT + 1 second (inside window)
         conn.execute(
             text(
-                "INSERT INTO extraction_runs (id, workspace_id, status, cost_usd, created_at, completed_at)"
+                "INSERT INTO extraction_runs (id, workspace_id, status, cost_usd, started_at, completed_at)"
                 " VALUES (:id, :ws, 'completed', 0.001, :ts, :ts)"
             ),
             {

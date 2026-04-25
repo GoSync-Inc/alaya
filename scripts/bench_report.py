@@ -59,7 +59,7 @@ def _scalar(conn: Connection, sql: str, **params: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Data queries (all scoped to workspace + created_at >= started_at)
+# Data queries (all scoped to workspace + per-table timestamp >= started_at)
 # ---------------------------------------------------------------------------
 
 
@@ -68,11 +68,12 @@ def _get_extraction_runs(conn: Connection, workspace_id: uuid.UUID, started_at: 
         conn,
         """
         SELECT id, workspace_id, status, tokens_in, tokens_out, tokens_cached,
-               cost_usd, cortex_cost_usd, crystallizer_cost_usd, created_at, completed_at
+               cost_usd, entities_created, entities_merged, relations_created,
+               claims_created, claims_superseded, started_at, completed_at
         FROM extraction_runs
         WHERE workspace_id = :wid
-          AND created_at >= :started_at
-        ORDER BY created_at
+          AND started_at >= :started_at
+        ORDER BY started_at
         """,
         wid=str(workspace_id),
         started_at=started_at,
@@ -85,12 +86,13 @@ def _get_integrator_runs(conn: Connection, workspace_id: uuid.UUID, started_at: 
         conn,
         """
         SELECT id, workspace_id, status, tokens_used, cost_usd, duration_ms,
-               entities_scanned, entities_deduplicated, entities_merged,
-               entities_enriched, created_at, completed_at
+               entities_scanned, entities_deduplicated, entities_enriched,
+               relations_created, claims_updated, noise_removed,
+               started_at, completed_at
         FROM integrator_runs
         WHERE workspace_id = :wid
-          AND created_at >= :started_at
-        ORDER BY created_at
+          AND started_at >= :started_at
+        ORDER BY started_at
         """,
         wid=str(workspace_id),
         started_at=started_at,
@@ -144,7 +146,7 @@ def _description_rate(conn: Connection, workspace_id: uuid.UUID, started_at: str
         SELECT COUNT(*) FROM claims c
         JOIN extraction_runs er ON er.id = c.extraction_run_id
         WHERE c.workspace_id = :wid
-          AND er.created_at >= :started_at
+          AND er.started_at >= :started_at
         """,
         wid=str(workspace_id),
         started_at=started_at,
@@ -159,7 +161,7 @@ def _description_rate(conn: Connection, workspace_id: uuid.UUID, started_at: str
         JOIN predicates p ON p.id = c.predicate_id AND p.workspace_id = c.workspace_id
         JOIN extraction_runs er ON er.id = c.extraction_run_id
         WHERE c.workspace_id = :wid
-          AND er.created_at >= :started_at
+          AND er.started_at >= :started_at
           AND p.slug IN ({slugs_list})
         """,
         wid=str(workspace_id),
@@ -176,7 +178,7 @@ def _claims_per_entity(conn: Connection, workspace_id: uuid.UUID, started_at: st
         SELECT COUNT(*) FROM claims c
         JOIN extraction_runs er ON er.id = c.extraction_run_id
         WHERE c.workspace_id = :wid
-          AND er.created_at >= :started_at
+          AND er.started_at >= :started_at
         """,
         wid=str(workspace_id),
         started_at=started_at,
@@ -206,7 +208,7 @@ def _claims_per_event_stddev(conn: Connection, workspace_id: uuid.UUID, started_
         FROM extraction_runs er
         LEFT JOIN claims c ON c.extraction_run_id = er.id
         WHERE er.workspace_id = :wid
-          AND er.created_at >= :started_at
+          AND er.started_at >= :started_at
         GROUP BY er.id
         """,
         wid=str(workspace_id),
@@ -226,7 +228,7 @@ def _dedup_actions(conn: Connection, workspace_id: uuid.UUID, started_at: str) -
         SELECT COUNT(*) FROM integrator_actions ia
         JOIN integrator_runs ir ON ir.id = ia.integrator_run_id
         WHERE ia.workspace_id = :wid
-          AND ir.created_at >= :started_at
+          AND ir.started_at >= :started_at
           AND ia.action_type = 'merge'
         """,
         wid=str(workspace_id),
@@ -242,7 +244,7 @@ def _run_failure_count(conn: Connection, workspace_id: uuid.UUID, started_at: st
         """
         SELECT COUNT(*) FROM extraction_runs
         WHERE workspace_id = :wid
-          AND created_at >= :started_at
+          AND started_at >= :started_at
           AND status = 'failed'
         """,
         wid=str(workspace_id),

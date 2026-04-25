@@ -16,6 +16,7 @@ from alayaos_core.repositories.claim import ClaimRepository
 from alayaos_core.repositories.entity import EntityRepository
 from alayaos_core.repositories.extraction_run import ExtractionRunRepository
 from alayaos_core.repositories.integrator_run import IntegratorRunRepository
+from alayaos_core.repositories.pipeline_trace import PipelineTraceRepository
 from alayaos_core.repositories.relation import RelationRepository
 from alayaos_core.repositories.workspace import WorkspaceRepository
 from alayaos_core.services.entity_cache import EntityCacheService
@@ -407,7 +408,11 @@ async def job_cortex(event_id: str, extraction_run_id: str, workspace_id: str) -
                     decision="classified" if is_crystal else "skipped",
                     reason=f"primary={primary}, crystal={is_crystal}",
                     details={"scores": scores.model_dump(), "changed": changed},
-                    tokens_used=usage.tokens_in + usage.tokens_out,
+                    tokens_in=usage.tokens_in,
+                    tokens_out=usage.tokens_out,
+                    tokens_cached=usage.tokens_cached,
+                    cache_write_5m_tokens=usage.cache_write_5m_tokens,
+                    cache_write_1h_tokens=usage.cache_write_1h_tokens,
                     cost_usd=usage.cost_usd,
                     extraction_run_id=run.id,
                 )
@@ -586,12 +591,6 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
                 await chunk_repo.update_processing_stage(chunk.id, "extracted")
 
                 # Write pipeline trace
-                total_tokens = (
-                    usage_extract.tokens_in
-                    + usage_extract.tokens_out
-                    + usage_verify.tokens_in
-                    + usage_verify.tokens_out
-                )
                 total_cost = usage_extract.cost_usd + usage_verify.cost_usd
                 await trace_repo.create(
                     workspace_id=uuid.UUID(workspace_id),
@@ -605,7 +604,11 @@ async def job_crystallize(chunk_id: str, extraction_run_id: str, workspace_id: s
                         "claims": len(final_result.claims),
                         "verification_changed": verification_changed,
                     },
-                    tokens_used=total_tokens,
+                    tokens_in=usage_extract.tokens_in + usage_verify.tokens_in,
+                    tokens_out=usage_extract.tokens_out + usage_verify.tokens_out,
+                    tokens_cached=usage_extract.tokens_cached + usage_verify.tokens_cached,
+                    cache_write_5m_tokens=usage_extract.cache_write_5m_tokens + usage_verify.cache_write_5m_tokens,
+                    cache_write_1h_tokens=usage_extract.cache_write_1h_tokens + usage_verify.cache_write_1h_tokens,
                     cost_usd=total_cost,
                     extraction_run_id=run.id,
                 )
@@ -757,7 +760,7 @@ async def job_integrate(workspace_id: str, integrator_run_id: str | None = None)
             await run_repo.update_status(
                 integrator_run.id,
                 result.status,
-                error_message=result.reason if result.status == "failed" else None,
+                error_message=result.error_message if result.status == "failed" else None,
             )
             await run_repo.update_counters(
                 integrator_run.id,
@@ -773,6 +776,23 @@ async def job_integrate(workspace_id: str, integrator_run_id: str | None = None)
                 pass_count=result.pass_count,
                 convergence_reason=result.convergence_reason,
             )
+
+            # Write per-phase pipeline traces and recalc extraction run usage
+            trace_repo = PipelineTraceRepository(session, ws_uuid)
+            for phase in result.phase_usages:
+                await trace_repo.create(
+                    stage=phase.stage,
+                    integrator_run_id=run_uuid,
+                    tokens_in=phase.usage.tokens_in,
+                    tokens_out=phase.usage.tokens_out,
+                    tokens_cached=phase.usage.tokens_cached,
+                    cache_write_5m_tokens=phase.usage.cache_write_5m_tokens,
+                    cache_write_1h_tokens=phase.usage.cache_write_1h_tokens,
+                    cost_usd=phase.usage.cost_usd,
+                    duration_ms=phase.duration_ms,
+                    details=phase.details,
+                )
+            await run_repo.recalc_usage(run_uuid)
     except Exception as exc:
         if run_uuid is not None:
             with contextlib.suppress(Exception):

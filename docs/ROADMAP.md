@@ -39,26 +39,6 @@ Four sequential runs. Each closes with a merged PR set and a post-merge audit. P
 
 **Outcome:** retrieval ACL is enforced beyond `should_extract()`; `channel`/`private`/`restricted` events still extract and gate at retrieval; write-time date normalization is covered by focused `pytest`; Redis and channel hygiene are ready for Run 6.3 benchmarks.
 
-### Run 6.3 — Observability & Benchmark Automation ✅ FINAL 2026-04-25
-
-**Goal:** make quality improvements evidence-driven. Today quality targets from Run 5.4 are all unverified — we do not know what works.
-
-**Sprints (4, all merged):**
-- S1 — `just bench` one-command reproducible benchmark. Spins docker stack, creates API key, ingests the fixture, waits on the worker, dumps `extraction_runs` + `integrator_runs` summary to `bench_results/`.
-- S2 — Integrator cost/token tracking. Granular token columns (`tokens_in`, `tokens_out`, `tokens_cached`, `cache_write_5m/1h_tokens`) added to `pipeline_traces` via migration 009; `integrator_run_id` FK added; `GET /integrator-runs/{id}/trace` endpoint. Closed `RUN5.4.FU.03` and `RUN5.3 follow-up #1`.
-- S3 — Prompt-cache hit ratio metrics on every LLM adapter. `llm.call_completed` emits all granular token fields; `LLMUsage` carries `cache_write_5m/1h_tokens`; `bench_report` computes `cache_hit_ratio_per_stage`. Closed `RUN3.11`.
-- S4 — Pad Cortex prompt over 4096 tokens for Haiku 4.5 cache eligibility. 15 canonical examples appended via `cortex/prompts.py`; assembled prompt >= 4200 estimator tokens (>= 16800 chars); CI regression test in `test_cortex_prompt_size.py`; cache-miss alarm (`llm.cache_miss_below_threshold`) fires at runtime if threshold not met. Closed `RUN5.3.08`.
-
-**Holistic fix pass (post-merge):** `LLMUsage.combine()` / `zero()` factory methods added; cortex and extractor combiners propagated `cache_write` fields; `bench_report` SELECT includes `integrator_run_id`; `just logs-llm` field corrected to `tokens_cached`; dead stub removed from `anthropic.py`.
-
-**Closed backlog tags in Run 6.3:**
-- `RUN5.4.FU.03` — closed in S2 (integrator cost/token tracking)
-- `RUN5.3 follow-up #1` — closed in S2 (integrator cost/token tracking)
-- `RUN3.11` — closed in S3 (cache hit ratio metrics)
-- `RUN5.3.08` — closed in S4 (Cortex prompt padding)
-
-**Exit criteria:** `just bench` prints a reproducible report; `integrator_runs.cost_usd > 0` on a fresh bench run; cache metrics appear in structlog output.
-
 ### Run 6.4 — Extraction Quality (evidence-driven)
 
 **Goal:** improve graph shape using the metrics from 6.3. Order of work is determined by bench output, not pre-planned.
@@ -94,6 +74,9 @@ See the merged PR history on GitHub and `docs/backlog/BACKLOG.md` for item-level
 - Run 5.2 — Security Hardening
 - Run 5.3 — Pipeline Reliability
 - Run 5.4 — Knowledge Graph Consolidation
+- Run 6.1 — Data Integrity (PRs #108–#110, merged 2026-04-25)
+- Run 6.2 — Access & Normalization (PRs #111–#114, merged 2026-04-25)
+- Run 6.3 — Observability & Benchmark Automation (PRs #115–#120, merged 2026-04-25/26; follow-ups merged 2026-04-26)
 
 ## How to use this document
 

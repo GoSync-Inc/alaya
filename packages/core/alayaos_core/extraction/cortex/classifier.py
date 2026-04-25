@@ -3,10 +3,12 @@
 import tiktoken
 
 from alayaos_core.extraction.cortex.chunker import RawChunk
+from alayaos_core.extraction.cortex.prompts import CANONICAL_EXAMPLES_BLOCK
 from alayaos_core.extraction.cortex.schemas import Domain, DomainScores
 from alayaos_core.llm.interface import LLMServiceInterface, LLMUsage
 
-_CLASSIFICATION_SYSTEM_PROMPT = """\
+_CLASSIFICATION_SYSTEM_PROMPT = (
+    """\
 You are a workplace communication classifier. Analyze the text and score each domain from 0.0 to 1.0 based on relevance:
 
 - project: Project management, tasks, milestones, sprints, deadlines
@@ -20,6 +22,8 @@ You are a workplace communication classifier. Analyze the text and score each do
 - smalltalk: Casual chat, greetings, jokes, off-topic
 
 Return scores for ALL domains. Multiple domains can score high simultaneously."""
+    + CANONICAL_EXAMPLES_BLOCK
+)
 
 
 def _combine_usage(u1: LLMUsage, u2: LLMUsage) -> LLMUsage:

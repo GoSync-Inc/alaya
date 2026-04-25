@@ -5,9 +5,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 
 from alayaos_core.models.integrator_run import IntegratorRun
+from alayaos_core.models.pipeline_trace import PipelineTrace
 from alayaos_core.repositories.base import BaseRepository
 
 
@@ -131,3 +132,44 @@ class IntegratorRunRepository(BaseRepository):
 
         await self.session.flush()
         return len(runs)
+
+    async def recalc_usage(self, run_id: uuid.UUID) -> None:
+        """Re-sum granular token columns from pipeline_traces into the integrator_runs row.
+
+        Guard: if no pipeline_traces exist for this run_id the UPDATE is skipped entirely.
+        This preserves any values already on the row from a skipped path.
+
+        tokens_used = tokens_in + tokens_out (matches PipelineTrace.create auto-compute policy).
+        Idempotent under concurrent terminal transitions (pure SUM, no incremental counters).
+        """
+        # Check whether any pipeline_traces exist before overwriting run-level counters.
+        exists_stmt = select(PipelineTrace.id).where(PipelineTrace.integrator_run_id == run_id).limit(1)
+        result = await self.session.execute(exists_stmt)
+        if result.scalar_one_or_none() is None:
+            return
+
+        def _sum(col):
+            return select(func.coalesce(func.sum(col), 0)).where(PipelineTrace.integrator_run_id == run_id).scalar_subquery()
+
+        stmt = (
+            update(IntegratorRun)
+            .where(IntegratorRun.id == run_id)
+            .values(
+                tokens_in=_sum(PipelineTrace.tokens_in),
+                tokens_out=_sum(PipelineTrace.tokens_out),
+                tokens_cached=_sum(PipelineTrace.tokens_cached),
+                cache_write_5m_tokens=_sum(PipelineTrace.cache_write_5m_tokens),
+                cache_write_1h_tokens=_sum(PipelineTrace.cache_write_1h_tokens),
+                cost_usd=_sum(PipelineTrace.cost_usd),
+                # tokens_used = tokens_in + tokens_out (back-compat scalar)
+                tokens_used=(
+                    select(
+                        func.coalesce(func.sum(PipelineTrace.tokens_in), 0)
+                        + func.coalesce(func.sum(PipelineTrace.tokens_out), 0)
+                    )
+                    .where(PipelineTrace.integrator_run_id == run_id)
+                    .scalar_subquery()
+                ),
+            )
+        )
+        await self.session.execute(stmt)

@@ -34,6 +34,7 @@ class FakeLLMAdapter:
         *,
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        stage: str = "unknown",
     ) -> tuple[T, LLMUsage]:
         h = self.content_hash(text)
 
@@ -50,7 +51,16 @@ class FakeLLMAdapter:
             data = self._default_response(response_model)
 
         result = response_model.model_validate(data)
-        usage = LLMUsage(tokens_in=100, tokens_out=50, tokens_cached=0, cost_usd=0.0)
+        # Fake adapter: model="fake"; cache_write_* = 0 (MODEL_CACHE_MINIMUM lacks "fake",
+        # so S3 cache_miss_below_threshold alarm is silenced for fake-mode tests).
+        usage = LLMUsage(
+            tokens_in=100,
+            tokens_out=50,
+            tokens_cached=0,
+            cost_usd=0.0,
+            cache_write_5m_tokens=0,
+            cache_write_1h_tokens=0,
+        )
         return result, usage
 
     # Model-specific overrides for realistic fake responses

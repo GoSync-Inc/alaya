@@ -31,6 +31,7 @@ class FallbackLLMAdapter:
         *,
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        stage: str = "unknown",
     ) -> tuple[T, LLMUsage]:
         providers = [self._primary, *self._fallbacks]
         last_error: Exception | None = None
@@ -43,6 +44,7 @@ class FallbackLLMAdapter:
                     response_model=response_model,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    stage=stage,
                 )
                 if i > 0:
                     log.info("llm_fallback_used", provider_index=i, provider=type(provider).__name__)

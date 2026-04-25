@@ -103,7 +103,9 @@ def _get_pipeline_traces(conn: Connection, workspace_id: uuid.UUID, started_at: 
         conn,
         """
         SELECT id, workspace_id, event_id, extraction_run_id, stage,
-               tokens_used, cost_usd, duration_ms, created_at
+               tokens_used, cost_usd, duration_ms, created_at,
+               tokens_in, tokens_out, tokens_cached,
+               cache_write_5m_tokens, cache_write_1h_tokens
         FROM pipeline_traces
         WHERE workspace_id = :wid
           AND created_at >= :started_at
@@ -250,6 +252,48 @@ def _run_failure_count(conn: Connection, workspace_id: uuid.UUID, started_at: st
 
 
 # ---------------------------------------------------------------------------
+# Cache hit ratio computation from pipeline_traces
+# ---------------------------------------------------------------------------
+
+
+def _compute_cache_hit_ratio(traces: list[dict[str, Any]]) -> dict[str, float | None]:
+    """Compute cache hit ratio per stage from pipeline traces granular columns.
+
+    cache_hit_ratio = tokens_cached / total_input
+    total_input = tokens_in + tokens_cached + cache_write_5m_tokens + cache_write_1h_tokens
+
+    Returns dict[stage] -> ratio (float 0.0-1.0) or None if no data for stage.
+    Stages with total_input == 0 (no granular data) return None.
+    """
+    by_stage: dict[str, dict[str, int]] = {}
+    for t in traces:
+        stage = t.get("stage") or "unknown"
+        # Granular columns — may be missing in traces created before migration 009
+        tokens_in = t.get("tokens_in") or 0
+        tokens_cached = t.get("tokens_cached") or 0
+        cache_write_5m = t.get("cache_write_5m_tokens") or 0
+        cache_write_1h = t.get("cache_write_1h_tokens") or 0
+
+        if stage not in by_stage:
+            by_stage[stage] = {
+                "tokens_cached": 0,
+                "total_input": 0,
+            }
+        by_stage[stage]["tokens_cached"] += tokens_cached
+        by_stage[stage]["total_input"] += tokens_in + tokens_cached + cache_write_5m + cache_write_1h
+
+    result: dict[str, float | None] = {}
+    for stage, agg in by_stage.items():
+        total_input = agg["total_input"]
+        if total_input == 0:
+            result[stage] = None
+        else:
+            ratio = agg["tokens_cached"] / total_input
+            result[stage] = round(ratio, 4)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Latency computation from pipeline_traces
 # ---------------------------------------------------------------------------
 
@@ -303,6 +347,14 @@ def _total_cost(extraction_runs: list[dict[str, Any]], integrator_runs: list[dic
 # ---------------------------------------------------------------------------
 
 
+def _format_cache_hit_ratio(ratio: float | None) -> str:
+    """Format a cache hit ratio for display: 2 significant figures, or 'n/a'."""
+    if ratio is None:
+        return "n/a"
+    # 2 significant figures: e.g. 0.3333 → "0.33", 0.1 → "0.10", 1.0 → "1.0"
+    return f"{ratio:.2f}"
+
+
 def _format_summary_md(
     workspace_id: uuid.UUID,
     started_at: datetime,
@@ -311,6 +363,7 @@ def _format_summary_md(
     pipeline_traces: list[dict[str, Any]],
     quality_proxies: dict[str, Any],
     latency_by_stage: dict[str, dict[str, Any]],
+    cache_hit_ratio_per_stage: dict[str, float | None],
     is_empty: bool,
 ) -> str:
     lines: list[str] = []
@@ -341,9 +394,7 @@ def _format_summary_md(
         lines.append("| — | n/a | n/a | 0 |")
     lines.append("")
 
-    # Tokens (per-stage totals from traces)
-    # S1: only tokens_used is available in pipeline_traces. tokens_in/out/cached and
-    # cache_hit_ratio will be added in S3 after migration 009 adds those columns.
+    # Tokens (per-stage totals from traces with granular cache_hit_ratio)
     lines.append("## Token Usage (per stage, from pipeline_traces)")
     lines.append("")
     lines.append("| Stage | tokens_used | cache_hit_ratio |")
@@ -354,7 +405,8 @@ def _format_summary_md(
         stage_tokens[stage] = stage_tokens.get(stage, 0) + (t.get("tokens_used") or 0)
     if stage_tokens:
         for stage, tok in sorted(stage_tokens.items()):
-            lines.append(f"| {stage} | {tok} | n/a |")
+            ratio_str = _format_cache_hit_ratio(cache_hit_ratio_per_stage.get(stage))
+            lines.append(f"| {stage} | {tok} | {ratio_str} |")
     else:
         lines.append("| — | 0 | n/a |")
     lines.append("")
@@ -446,6 +498,7 @@ def format_summary(
             "extraction_runs": [],
             "integrator_runs": [],
             "pipeline_traces": [],
+            "cache_hit_ratio_per_stage": {},
         }
         summary_md = _format_summary_md(
             workspace_id=workspace_id,
@@ -455,6 +508,7 @@ def format_summary(
             pipeline_traces=[],
             quality_proxies=manifest_data["quality_proxies"],
             latency_by_stage={},
+            cache_hit_ratio_per_stage={},
             is_empty=True,
         )
         return manifest_data, summary_md
@@ -469,12 +523,14 @@ def format_summary(
     }
 
     latency_by_stage = _compute_latency(pipeline_traces)
+    cache_hit_ratio_per_stage = _compute_cache_hit_ratio(pipeline_traces)
 
     manifest_data = {
         "quality_proxies": quality_proxies,
         "extraction_runs": extraction_runs,
         "integrator_runs": integrator_runs,
         "pipeline_traces": pipeline_traces,
+        "cache_hit_ratio_per_stage": cache_hit_ratio_per_stage,
     }
 
     summary_md = _format_summary_md(
@@ -485,6 +541,7 @@ def format_summary(
         pipeline_traces=pipeline_traces,
         quality_proxies=quality_proxies,
         latency_by_stage=latency_by_stage,
+        cache_hit_ratio_per_stage=cache_hit_ratio_per_stage,
         is_empty=False,
     )
 

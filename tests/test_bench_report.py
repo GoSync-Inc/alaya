@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, text
 
-from scripts.bench import FIXTURES_DIR, _build_manifest
+from scripts.bench import EXIT_CACHE_WARM_FAIL, EXIT_SUCCESS, FIXTURES_DIR, _build_manifest, phase_cache_warm_check
 from scripts.bench_report import (
     PROXY_DESCRIPTION_PREDICATE_SLUGS,
     format_summary,
@@ -118,7 +118,12 @@ CREATE TABLE IF NOT EXISTS pipeline_traces (
     tokens_used INTEGER DEFAULT 0,
     cost_usd REAL DEFAULT 0,
     duration_ms INTEGER DEFAULT 0,
-    created_at TEXT
+    created_at TEXT,
+    tokens_in INTEGER DEFAULT 0,
+    tokens_out INTEGER DEFAULT 0,
+    tokens_cached INTEGER DEFAULT 0,
+    cache_write_5m_tokens INTEGER DEFAULT 0,
+    cache_write_1h_tokens INTEGER DEFAULT 0
 );
 """
 
@@ -220,12 +225,25 @@ def _insert_integrator_action(
 
 
 def _insert_pipeline_trace(
-    conn, ws_id: str, trace_id: str, run_id: str, stage: str, duration_ms: int, offset: int = 30
+    conn,
+    ws_id: str,
+    trace_id: str,
+    run_id: str,
+    stage: str,
+    duration_ms: int,
+    offset: int = 30,
+    tokens_in: int = 0,
+    tokens_cached: int = 0,
+    cache_write_5m_tokens: int = 0,
+    cache_write_1h_tokens: int = 0,
 ):
     conn.execute(
         text(
-            "INSERT INTO pipeline_traces (id, workspace_id, extraction_run_id, stage, duration_ms, cost_usd, created_at)"
-            " VALUES (:id, :ws, :run, :stage, :dur, 0.001, :created_at)"
+            "INSERT INTO pipeline_traces"
+            " (id, workspace_id, extraction_run_id, stage, duration_ms, cost_usd, created_at,"
+            "  tokens_in, tokens_cached, cache_write_5m_tokens, cache_write_1h_tokens)"
+            " VALUES (:id, :ws, :run, :stage, :dur, 0.001, :created_at,"
+            "         :tokens_in, :tokens_cached, :cache_write_5m, :cache_write_1h)"
         ),
         {
             "id": trace_id,
@@ -234,6 +252,10 @@ def _insert_pipeline_trace(
             "stage": stage,
             "dur": duration_ms,
             "created_at": _ts(offset),
+            "tokens_in": tokens_in,
+            "tokens_cached": tokens_cached,
+            "cache_write_5m": cache_write_5m_tokens,
+            "cache_write_1h": cache_write_1h_tokens,
         },
     )
 
@@ -811,3 +833,273 @@ def test_build_manifest_env_summary_masked(monkeypatch):
     manifest_bytes = json.dumps(manifest).encode()
     assert b"sk-ant-api03" not in manifest_bytes
     assert b"DO_NOT_LEAK" not in manifest_bytes
+
+
+# ---------------------------------------------------------------------------
+# Test: cache_hit_ratio_per_stage (S3)
+# ---------------------------------------------------------------------------
+
+
+def test_cache_hit_ratio_per_stage_computed_from_granular_columns():
+    """cache_hit_ratio_per_stage = tokens_cached / total_input, aggregated per stage."""
+    engine = _make_engine()
+    ws_id = _uid()
+    run_id = _uid()
+
+    with engine.connect() as conn:
+        _insert_extraction_run(conn, ws_id, run_id)
+        # cortex trace: tokens_in=1000, tokens_cached=500 → ratio = 500/1500 ≈ 0.3333
+        _insert_pipeline_trace(
+            conn,
+            ws_id,
+            _uid(),
+            run_id,
+            "cortex",
+            100,
+            offset=30,
+            tokens_in=1000,
+            tokens_cached=500,
+        )
+        conn.commit()
+
+        data, _md = format_summary(conn, uuid.UUID(ws_id), ANCHOR_DT)
+
+    ratios = data["cache_hit_ratio_per_stage"]
+    assert "cortex" in ratios
+    assert ratios["cortex"] == pytest.approx(500 / 1500, abs=0.001)
+
+
+def test_cache_hit_ratio_per_stage_na_when_no_granular_data():
+    """Stages with total_input == 0 (no granular data) return None in the manifest."""
+    engine = _make_engine()
+    ws_id = _uid()
+    run_id = _uid()
+
+    with engine.connect() as conn:
+        _insert_extraction_run(conn, ws_id, run_id)
+        # trace with all-zero granular columns (legacy pre-migration-009 row)
+        _insert_pipeline_trace(
+            conn,
+            ws_id,
+            _uid(),
+            run_id,
+            "crystallizer",
+            200,
+            offset=35,
+            tokens_in=0,
+            tokens_cached=0,
+        )
+        conn.commit()
+
+        data, _md = format_summary(conn, uuid.UUID(ws_id), ANCHOR_DT)
+
+    ratios = data["cache_hit_ratio_per_stage"]
+    assert "crystallizer" in ratios
+    assert ratios["crystallizer"] is None
+
+
+def test_cache_hit_ratio_per_stage_in_markdown():
+    """cache_hit_ratio column in summary.md shows computed value, not 'n/a' when data exists."""
+    engine = _make_engine()
+    ws_id = _uid()
+    run_id = _uid()
+
+    with engine.connect() as conn:
+        _insert_extraction_run(conn, ws_id, run_id)
+        # 2000 total_input, 1000 cached → 0.50
+        _insert_pipeline_trace(
+            conn,
+            ws_id,
+            _uid(),
+            run_id,
+            "cortex",
+            100,
+            offset=30,
+            tokens_in=1000,
+            tokens_cached=1000,
+        )
+        conn.commit()
+
+        _data, md = format_summary(conn, uuid.UUID(ws_id), ANCHOR_DT)
+
+    # Should contain "0.50" (2 sig figs) in the token usage table
+    assert "0.50" in md
+
+
+def test_cache_hit_ratio_per_stage_na_in_markdown_for_empty_stages():
+    """Stages without granular data show 'n/a' in the token usage table."""
+    engine = _make_engine()
+    ws_id = _uid()
+    run_id = _uid()
+
+    with engine.connect() as conn:
+        _insert_extraction_run(conn, ws_id, run_id)
+        _insert_pipeline_trace(
+            conn,
+            ws_id,
+            _uid(),
+            run_id,
+            "crystallizer",
+            200,
+            offset=35,
+            tokens_in=0,
+            tokens_cached=0,
+        )
+        conn.commit()
+
+        _data, md = format_summary(conn, uuid.UUID(ws_id), ANCHOR_DT)
+
+    assert "n/a" in md
+
+
+def test_cache_hit_ratio_per_stage_empty_when_no_traces():
+    """Empty workspace returns empty cache_hit_ratio_per_stage dict."""
+    engine = _make_engine()
+    ws_id = _uid()
+
+    with engine.connect() as conn:
+        data, _md = format_summary(conn, uuid.UUID(ws_id), ANCHOR_DT)
+
+    assert data["cache_hit_ratio_per_stage"] == {}
+
+
+def test_cache_hit_ratio_per_stage_aggregates_multiple_traces():
+    """Multiple traces for the same stage are aggregated before computing the ratio."""
+    engine = _make_engine()
+    ws_id = _uid()
+    run_id = _uid()
+
+    with engine.connect() as conn:
+        _insert_extraction_run(conn, ws_id, run_id)
+        # Trace 1: tokens_in=500, tokens_cached=100 → contributes 600 total_input
+        _insert_pipeline_trace(conn, ws_id, _uid(), run_id, "cortex", 100, offset=30, tokens_in=500, tokens_cached=100)
+        # Trace 2: tokens_in=500, tokens_cached=300 → contributes 800 total_input
+        _insert_pipeline_trace(conn, ws_id, _uid(), run_id, "cortex", 120, offset=31, tokens_in=500, tokens_cached=300)
+        conn.commit()
+
+        data, _ = format_summary(conn, uuid.UUID(ws_id), ANCHOR_DT)
+
+    # Aggregated: tokens_cached=400, total_input=1400 → ratio=400/1400≈0.2857
+    ratios = data["cache_hit_ratio_per_stage"]
+    assert "cortex" in ratios
+    assert ratios["cortex"] == pytest.approx(400 / 1400, abs=0.001)
+
+
+# ---------------------------------------------------------------------------
+# Test: --cache-warm-check exit code behavior
+# ---------------------------------------------------------------------------
+
+
+def _make_bench_args(**kwargs):
+    """Build a minimal argparse.Namespace for bench tests."""
+    import argparse
+
+    defaults = {
+        "fixture": "small",
+        "keep": False,
+        "reuse": False,
+        "timeout_seconds": 600,
+        "cache_warm_check": True,
+    }
+    defaults.update(kwargs)
+    return argparse.Namespace(**defaults)
+
+
+def test_cache_warm_check_exit_7_when_ratio_below_threshold(monkeypatch):
+    """phase_cache_warm_check returns EXIT_CACHE_WARM_FAIL (7) when cortex ratio < 0.5."""
+    args = _make_bench_args()
+
+    # Mock _get_cortex_cache_hit_ratio to return a ratio below threshold
+    import scripts.bench as bench_module
+
+    monkeypatch.setattr(bench_module, "_get_cortex_cache_hit_ratio", lambda ws, ts: 0.20)
+
+    rc = phase_cache_warm_check(
+        args,
+        ts_run1_started=ANCHOR_DT,
+        ts_run1_completed=ANCHOR_DT + timedelta(seconds=120),
+        ts_run2_started=ANCHOR_DT + timedelta(seconds=130),
+        ts_run2_completed=ANCHOR_DT + timedelta(seconds=250),
+        workspace_id=_uid(),
+    )
+
+    assert rc == EXIT_CACHE_WARM_FAIL
+
+
+def test_cache_warm_check_exit_0_when_ratio_above_threshold(monkeypatch):
+    """phase_cache_warm_check returns EXIT_SUCCESS (0) when cortex ratio > 0.5."""
+    args = _make_bench_args()
+
+    import scripts.bench as bench_module
+
+    monkeypatch.setattr(bench_module, "_get_cortex_cache_hit_ratio", lambda ws, ts: 0.75)
+
+    rc = phase_cache_warm_check(
+        args,
+        ts_run1_started=ANCHOR_DT,
+        ts_run1_completed=ANCHOR_DT + timedelta(seconds=120),
+        ts_run2_started=ANCHOR_DT + timedelta(seconds=130),
+        ts_run2_completed=ANCHOR_DT + timedelta(seconds=250),
+        workspace_id=_uid(),
+    )
+
+    assert rc == EXIT_SUCCESS
+
+
+def test_cache_warm_check_exit_7_when_ratio_exactly_threshold(monkeypatch):
+    """Ratio exactly equal to threshold (0.5) must NOT pass — must be strictly greater than."""
+    args = _make_bench_args()
+
+    import scripts.bench as bench_module
+
+    monkeypatch.setattr(bench_module, "_get_cortex_cache_hit_ratio", lambda ws, ts: 0.5)
+
+    rc = phase_cache_warm_check(
+        args,
+        ts_run1_started=ANCHOR_DT,
+        ts_run1_completed=ANCHOR_DT + timedelta(seconds=120),
+        ts_run2_started=ANCHOR_DT + timedelta(seconds=130),
+        ts_run2_completed=ANCHOR_DT + timedelta(seconds=250),
+        workspace_id=_uid(),
+    )
+
+    assert rc == EXIT_CACHE_WARM_FAIL
+
+
+def test_cache_warm_check_exit_7_when_ratio_none(monkeypatch):
+    """When ratio is None (no cortex traces), treat as 0.0 → exit 7."""
+    args = _make_bench_args()
+
+    import scripts.bench as bench_module
+
+    monkeypatch.setattr(bench_module, "_get_cortex_cache_hit_ratio", lambda ws, ts: None)
+
+    rc = phase_cache_warm_check(
+        args,
+        ts_run1_started=ANCHOR_DT,
+        ts_run1_completed=ANCHOR_DT + timedelta(seconds=120),
+        ts_run2_started=ANCHOR_DT + timedelta(seconds=130),
+        ts_run2_completed=ANCHOR_DT + timedelta(seconds=250),
+        workspace_id=_uid(),
+    )
+
+    assert rc == EXIT_CACHE_WARM_FAIL
+
+
+def test_cache_warm_check_exit_code_7_value():
+    """EXIT_CACHE_WARM_FAIL must equal 7."""
+    assert EXIT_CACHE_WARM_FAIL == 7
+
+
+def test_cache_warm_check_flag_in_help():
+    """--cache-warm-check flag must be visible in bench.py --help."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [sys.executable, "scripts/bench.py", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert "--cache-warm-check" in result.stdout

@@ -272,3 +272,88 @@ class TestIntegratorActionRollbackRouter:
         body = response.json()
         assert "error" in body
         assert body["error"]["code"] == "action.rollback_conflict"
+
+
+class TestIntegratorRunTraceEndpoint:
+    """Tests for GET /integrator-runs/{id}/trace."""
+
+    def _make_trace(self, run_id: uuid.UUID):
+        from alayaos_core.models.pipeline_trace import PipelineTrace
+
+        trace = PipelineTrace(
+            id=uuid.uuid4(),
+            workspace_id=WS_ID,
+            event_id=None,
+            integrator_run_id=run_id,
+            extraction_run_id=None,
+            stage="integrator:panoramic",
+            decision="",
+            reason=None,
+            details={},
+            tokens_used=15,
+            tokens_in=10,
+            tokens_out=5,
+            tokens_cached=0,
+            cache_write_5m_tokens=0,
+            cache_write_1h_tokens=0,
+            cost_usd=0.001,
+            duration_ms=120,
+        )
+        trace.created_at = datetime.now(UTC)
+        return trace
+
+    def test_get_integrator_run_trace_returns_200(self) -> None:
+        """GET /integrator-runs/{id}/trace returns traces list with granular token fields."""
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        run = make_integrator_run()
+        trace = self._make_trace(run.id)
+
+        with (
+            patch("alayaos_api.routers.integrator_runs.IntegratorRunRepository") as mock_run_cls,
+            patch("alayaos_api.routers.integrator_runs.PipelineTraceRepository") as mock_trace_cls,
+        ):
+            run_repo = AsyncMock()
+            run_repo.get_by_id = AsyncMock(return_value=run)
+            mock_run_cls.return_value = run_repo
+
+            trace_repo = AsyncMock()
+            trace_repo.list_by_integrator_run = AsyncMock(return_value=[trace])
+            mock_trace_cls.return_value = trace_repo
+
+            client = TestClient(app)
+            response = client.get(
+                f"/api/v1/integrator-runs/{run.id}/trace",
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert "data" in body
+        items = body["data"]
+        assert len(items) == 1
+        item = items[0]
+        assert item["stage"] == "integrator:panoramic"
+        assert item["tokens_in"] == 10
+        assert item["tokens_out"] == 5
+        assert item["integrator_run_id"] == str(run.id)
+
+    def test_get_integrator_run_trace_returns_404_when_run_not_found(self) -> None:
+        """GET /integrator-runs/{id}/trace returns 404 when run does not exist."""
+        api_key = make_api_key()
+        app = make_app_with_mock_session(api_key)
+        run_id = uuid.uuid4()
+
+        with patch("alayaos_api.routers.integrator_runs.IntegratorRunRepository") as mock_run_cls:
+            run_repo = AsyncMock()
+            run_repo.get_by_id = AsyncMock(return_value=None)
+            mock_run_cls.return_value = run_repo
+
+            client = TestClient(app)
+            response = client.get(
+                f"/api/v1/integrator-runs/{run_id}/trace",
+                headers={"X-Api-Key": RAW_KEY},
+            )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "resource.not_found"

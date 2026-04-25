@@ -223,7 +223,7 @@ async def test_entity_id_validation_rejects_unknown_uuids():
 
 @pytest.mark.asyncio
 async def test_scalability_cap_logs_warning():
-    """When entity count > CONSOLIDATOR_PANORAMIC_MAX_ENTITIES, a structlog warning is emitted."""
+    """When entity count exceeds the constructor cap, a structlog warning is emitted."""
     import structlog.testing
 
     from alayaos_core.extraction.integrator.passes.panoramic import PanoramicPass

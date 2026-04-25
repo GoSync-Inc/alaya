@@ -6,6 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from alayaos_core.extraction.integrator.schemas import IntegratorRunResult
+from alayaos_core.llm.interface import LLMUsage
+
+
+def _zero_usage() -> LLMUsage:
+    return LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
 
 
 def _make_redis_mock(dirty_ids: list[str] | None = None):
@@ -279,7 +284,10 @@ async def test_engine_result_has_counters():
 @pytest.mark.asyncio
 async def test_engine_dedup_called():
     """Engine calls shortlist dedup when entities are found."""
+    from unittest.mock import patch
+
     from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicResult
 
     ws_id = uuid.uuid4()
     entity_id = uuid.uuid4()
@@ -318,11 +326,18 @@ async def test_engine_dedup_called():
         settings=_make_settings(),
     )
     # Inject dedup v2 mock (Sprint 5: engine now uses _dedup_v2, not _shortlist_dedup)
-    dedup_v2_mock = AsyncMock(return_value=(0, []))
+    dedup_v2_mock = AsyncMock(return_value=(0, [], _zero_usage()))
     engine._dedup_v2 = dedup_v2_mock
 
     session = _make_engine_session()
-    await engine.run(ws_id, session)
+    # Panoramic phase now propagates exceptions (I2 fix); patch it to succeed so
+    # this test can verify dedup is called without needing a real async LLM.
+    with patch(
+        "alayaos_core.extraction.integrator.engine.PanoramicPass.run",
+        new_callable=AsyncMock,
+        return_value=PanoramicResult(),
+    ):
+        await engine.run(ws_id, session)
 
     dedup_v2_mock.assert_called_once()
 
@@ -330,7 +345,10 @@ async def test_engine_dedup_called():
 @pytest.mark.asyncio
 async def test_engine_enricher_called():
     """Engine calls enricher when entities are found."""
+    from unittest.mock import patch
+
     from alayaos_core.extraction.integrator.engine import IntegratorEngine
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicResult
     from alayaos_core.extraction.integrator.schemas import EnrichmentResult
 
     ws_id = uuid.uuid4()
@@ -361,7 +379,7 @@ async def test_engine_enricher_called():
     entity_cache.warm = AsyncMock()
 
     enricher_mock = AsyncMock()
-    enricher_mock.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    enricher_mock.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     engine = IntegratorEngine(
         llm=MagicMock(),
@@ -375,7 +393,14 @@ async def test_engine_enricher_called():
     engine._enricher = enricher_mock
 
     session = _make_engine_session()
-    await engine.run(ws_id, session)
+    # Panoramic phase now propagates exceptions (I2 fix); patch it to succeed so
+    # this test can verify enricher is called without needing a real async LLM.
+    with patch(
+        "alayaos_core.extraction.integrator.engine.PanoramicPass.run",
+        new_callable=AsyncMock,
+        return_value=PanoramicResult(),
+    ):
+        await engine.run(ws_id, session)
 
     enricher_mock.enrich_batch.assert_called_once()
 

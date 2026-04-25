@@ -5,6 +5,7 @@ from __future__ import annotations
 import structlog
 
 from alayaos_core.extraction.integrator.schemas import EnrichmentResult, EntityWithContext
+from alayaos_core.llm.interface import LLMUsage
 
 log = structlog.get_logger()
 
@@ -49,31 +50,60 @@ class EntityEnricher:
         self.llm = llm
         self.batch_size = batch_size
 
-    async def enrich_batch(self, entities: list[EntityWithContext]) -> EnrichmentResult:
-        """LLM-powered batch enrichment. Returns enrichment actions."""
+    async def enrich_batch(self, entities: list[EntityWithContext]) -> tuple[EnrichmentResult, LLMUsage]:
+        """LLM-powered batch enrichment. Returns (enrichment_result, aggregated_llm_usage).
+
+        Exceptions from llm.extract() propagate to the caller (engine's begin_nested savepoint).
+        """
         result = EnrichmentResult()
+        agg_tokens_in = 0
+        agg_tokens_out = 0
+        agg_tokens_cached = 0
+        agg_cache_write_5m = 0
+        agg_cache_write_1h = 0
+        agg_cost_usd = 0.0
         if not entities:
-            return result
+            return result, LLMUsage(
+                tokens_in=0,
+                tokens_out=0,
+                tokens_cached=0,
+                cache_write_5m_tokens=0,
+                cache_write_1h_tokens=0,
+                cost_usd=0.0,
+            )
 
         for i in range(0, len(entities), self.batch_size):
             batch = entities[i : i + self.batch_size]
-            batch_result = await self._enrich_single_batch(batch)
+            batch_result, batch_usage = await self._enrich_single_batch(batch)
             result.actions.extend(batch_result.actions)
+            # Accumulate token usage (TTL buckets summed independently)
+            agg_tokens_in += batch_usage.tokens_in
+            agg_tokens_out += batch_usage.tokens_out
+            agg_tokens_cached += batch_usage.tokens_cached
+            agg_cache_write_5m += batch_usage.cache_write_5m_tokens
+            agg_cache_write_1h += batch_usage.cache_write_1h_tokens
+            agg_cost_usd += batch_usage.cost_usd
 
-        return result
+        return result, LLMUsage(
+            tokens_in=agg_tokens_in,
+            tokens_out=agg_tokens_out,
+            tokens_cached=agg_tokens_cached,
+            cache_write_5m_tokens=agg_cache_write_5m,
+            cache_write_1h_tokens=agg_cache_write_1h,
+            cost_usd=agg_cost_usd,
+        )
 
-    async def _enrich_single_batch(self, batch: list[EntityWithContext]) -> EnrichmentResult:
-        """Call LLM for a single batch of entities."""
+    async def _enrich_single_batch(self, batch: list[EntityWithContext]) -> tuple[EnrichmentResult, LLMUsage]:
+        """Call LLM for a single batch of entities.
+
+        Exceptions propagate to the caller (engine's begin_nested savepoint per charter Pattern A).
+        """
         prompt = _build_enrichment_prompt(batch)
-        try:
-            result, _usage = await self.llm.extract(
-                text=prompt,
-                system_prompt=_SYSTEM_PROMPT,
-                response_model=EnrichmentResult,
-                max_tokens=2048,
-                stage="integrator:enricher",
-            )
-            return result
-        except Exception:
-            log.warning("enricher_llm_call_failed", batch_size=len(batch))
-            return EnrichmentResult()
+        result, usage = await self.llm.extract(
+            text=prompt,
+            system_prompt=_SYSTEM_PROMPT,
+            response_model=EnrichmentResult,
+            max_tokens=2048,
+            stage="integrator:enricher",
+        )
+        return result, usage

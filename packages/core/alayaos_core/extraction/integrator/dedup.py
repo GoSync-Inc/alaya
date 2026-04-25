@@ -22,6 +22,7 @@ import structlog
 
 from alayaos_core.extraction.integrator.schemas import DuplicatePair, EntityMatchResult, EntityWithContext
 from alayaos_core.extraction.resolver import transliterate_name
+from alayaos_core.llm.interface import LLMUsage
 
 log = structlog.get_logger()
 
@@ -488,28 +489,42 @@ class DeduplicatorV2:
         entity_repo,
         session,
         action_repo,
-    ) -> tuple[int, list[str]]:
+    ) -> tuple[int, list[str], LLMUsage]:
         """Call LLM for each batch, then apply MergeGroups.
 
-        Returns (total_merged, merge_signatures) where merge_signatures is a list of
-        strings like "merge:<winner_id>:[<loser_ids>]" for use in cycle detection hashing.
+        Returns (total_merged, merge_signatures, aggregated_usage) where:
+        - merge_signatures are used for cycle detection hashing
+        - aggregated_usage is the sum of LLM usage across all batch calls
+
+        Exceptions from llm.extract() propagate to the caller (engine's begin_nested savepoint).
         """
         from alayaos_core.extraction.integrator.schemas import DedupResult
 
         total_merged = 0
         merge_signatures: list[str] = []
+        agg_tokens_in = 0
+        agg_tokens_out = 0
+        agg_tokens_cached = 0
+        agg_cache_write_5m = 0
+        agg_cache_write_1h = 0
+        agg_cost_usd = 0.0
         for batch in batches:
             prompt = _build_dedup_prompt(batch, entity_type)
-            try:
-                dedup_result, _ = await self.llm.extract(
-                    text=prompt,
-                    system_prompt=_DEDUP_SYSTEM_PROMPT,
-                    response_model=DedupResult,
-                    max_tokens=1024,
-                )
-            except Exception:
-                log.warning("dedup_v2_llm_failed", entity_type=entity_type, batch_size=len(batch))
-                continue
+            # Exceptions propagate to the engine's begin_nested savepoint (Pattern A per charter).
+            dedup_result, batch_usage = await self.llm.extract(
+                text=prompt,
+                system_prompt=_DEDUP_SYSTEM_PROMPT,
+                response_model=DedupResult,
+                max_tokens=1024,
+                stage="integrator:dedup",
+            )
+            # Accumulate token usage across batches (TTL buckets summed independently)
+            agg_tokens_in += batch_usage.tokens_in
+            agg_tokens_out += batch_usage.tokens_out
+            agg_tokens_cached += batch_usage.tokens_cached
+            agg_cache_write_5m += batch_usage.cache_write_5m_tokens
+            agg_cache_write_1h += batch_usage.cache_write_1h_tokens
+            agg_cost_usd += batch_usage.cost_usd
 
             if not dedup_result.groups:
                 continue
@@ -545,7 +560,15 @@ class DeduplicatorV2:
                     sig = f"merge:{group.winner_id}:{sorted(str(lid) for lid in valid_loser_ids)}"
                     merge_signatures.append(sig)
 
-        return total_merged, merge_signatures
+        aggregated_usage = LLMUsage(
+            tokens_in=agg_tokens_in,
+            tokens_out=agg_tokens_out,
+            tokens_cached=agg_tokens_cached,
+            cache_write_5m_tokens=agg_cache_write_5m,
+            cache_write_1h_tokens=agg_cache_write_1h,
+            cost_usd=agg_cost_usd,
+        )
+        return total_merged, merge_signatures, aggregated_usage
 
     async def _apply_merge_group(
         self,

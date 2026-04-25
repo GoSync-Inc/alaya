@@ -99,6 +99,57 @@ async def test_dedup_phase_exception_preserves_panoramic_phase_usage() -> None:
 
 
 @pytest.mark.asyncio
+async def test_panoramic_llm_exception_sets_failed_status() -> None:
+    """When the LLM raises inside the panoramic phase, the engine catches it and sets status='failed'.
+
+    Verifies I2: panoramic.run() no longer swallows LLM exceptions — they propagate to
+    the engine's begin_nested savepoint handler which sets result.status='failed'.
+    """
+    from unittest.mock import patch
+
+    ws_id = uuid.uuid4()
+    run_id = uuid.uuid4()
+
+    entity_repo = AsyncMock()
+    entity_repo.list_recent = AsyncMock(return_value=[])
+
+    claim_repo = AsyncMock()
+    relation_repo = AsyncMock()
+
+    entity_cache = AsyncMock()
+    entity_cache.warm = AsyncMock()
+
+    session = _make_session()
+    redis = _make_redis(ws_id)
+    settings = _make_settings()
+
+    # Simulate panoramic phase raising a RuntimeError (e.g., Anthropic API down)
+    async def _failing_panoramic_run(*args, **kwargs):
+        raise RuntimeError("Anthropic API unavailable")
+
+    engine = IntegratorEngine(
+        llm=FakeLLMAdapter(),
+        entity_repo=entity_repo,
+        claim_repo=claim_repo,
+        relation_repo=relation_repo,
+        entity_cache=entity_cache,
+        redis=redis,
+        settings=settings,
+    )
+
+    with patch(
+        "alayaos_core.extraction.integrator.engine.PanoramicPass.run",
+        side_effect=RuntimeError("Anthropic API unavailable"),
+    ):
+        result = await engine.run(ws_id, session, run_id=run_id)
+
+    assert isinstance(result, IntegratorRunResult)
+    assert result.status == "failed", f"Expected 'failed', got: {result.status}"
+    assert result.error_message is not None
+    assert "Anthropic API unavailable" in result.error_message
+
+
+@pytest.mark.asyncio
 async def test_engine_never_raises_on_panoramic_exception() -> None:
     """Engine catches panoramic phase exception and returns failed IntegratorRunResult."""
     ws_id = uuid.uuid4()

@@ -16,10 +16,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from alayaos_core.extraction.integrator.schemas import IntegratorRunResult
+from alayaos_core.llm.interface import LLMUsage
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _zero_usage() -> LLMUsage:
+    """Return a zero-cost LLMUsage for test mocks."""
+    return LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
 
 
 def _make_session() -> AsyncMock:
@@ -120,7 +126,7 @@ async def test_stable_graph_single_pass():
 
     engine = _make_engine()
     engine._enricher = AsyncMock()
-    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    engine._enricher.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
@@ -133,7 +139,7 @@ async def test_stable_graph_single_pass():
         mock_panoramic_pass.return_value = pano_instance
 
         # Patch _dedup_v2 to return 0
-        engine._dedup_v2 = AsyncMock(return_value=(0, []))
+        engine._dedup_v2 = AsyncMock(return_value=(0, [], _zero_usage()))
 
         result = await engine._run_locked(ws_id, run_id, session)
 
@@ -155,7 +161,7 @@ async def test_multi_pass_convergence():
 
     engine = _make_engine()
     engine._enricher = AsyncMock()
-    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    engine._enricher.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     entity_id = uuid.uuid4()
     # Pass 1 returns 1 action; pass 2 returns 0 actions
@@ -194,7 +200,7 @@ async def test_multi_pass_convergence():
         pano_instance.run = AsyncMock(side_effect=pano_run)
         mock_panoramic_pass.return_value = pano_instance
 
-        engine._dedup_v2 = AsyncMock(return_value=(0, []))
+        engine._dedup_v2 = AsyncMock(return_value=(0, [], _zero_usage()))
         engine._apply_panoramic_actions = AsyncMock(side_effect=apply_panoramic_actions_side_effect)
 
         result = await engine._run_locked(ws_id, run_id, session)
@@ -217,7 +223,7 @@ async def test_cycle_detection():
 
     engine = _make_engine()
     engine._enricher = AsyncMock()
-    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    engine._enricher.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     entity_id = uuid.uuid4()
     repeated_action = PanoramicAction(
@@ -238,7 +244,7 @@ async def test_cycle_detection():
         pano_instance.run = AsyncMock(return_value=same_result)
         mock_panoramic_pass.return_value = pano_instance
 
-        engine._dedup_v2 = AsyncMock(return_value=(0, []))
+        engine._dedup_v2 = AsyncMock(return_value=(0, [], _zero_usage()))
         engine._apply_panoramic_actions = AsyncMock(return_value=1)
 
         result = await engine._run_locked(ws_id, run_id, session)
@@ -262,7 +268,7 @@ async def test_max_passes_cap():
 
     engine = _make_engine()
     engine._enricher = AsyncMock()
-    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    engine._enricher.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     call_count = 0
 
@@ -292,7 +298,7 @@ async def test_max_passes_cap():
         pano_instance.run = AsyncMock(side_effect=pano_run)
         mock_panoramic_pass.return_value = pano_instance
 
-        engine._dedup_v2 = AsyncMock(return_value=(1, []))
+        engine._dedup_v2 = AsyncMock(return_value=(1, [], _zero_usage()))
         engine._apply_panoramic_actions = AsyncMock(return_value=1)
 
         result = await engine._run_locked(ws_id, run_id, session)
@@ -315,7 +321,7 @@ async def test_cost_aggregation():
 
     engine = _make_engine()
     engine._enricher = AsyncMock()
-    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    engine._enricher.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
@@ -328,7 +334,7 @@ async def test_cost_aggregation():
         pano_instance.last_cost_usd = 0.05
         mock_panoramic_pass.return_value = pano_instance
 
-        engine._dedup_v2 = AsyncMock(return_value=(0, []))
+        engine._dedup_v2 = AsyncMock(return_value=(0, [], _zero_usage()))
 
         result = await engine._run_locked(ws_id, run_id, session)
 
@@ -420,7 +426,7 @@ async def test_dedup_v2_receives_real_run_id():
 
     engine = _make_engine(entity_repo=entity_repo)
     engine._enricher = AsyncMock()
-    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    engine._enricher.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     real_run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
@@ -519,7 +525,7 @@ async def test_entities_reloaded_between_passes():
         settings=settings,
     )
     engine._enricher = AsyncMock()
-    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    engine._enricher.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     pass_entities_seen: list[list[uuid.UUID]] = []
 
@@ -550,7 +556,7 @@ async def test_entities_reloaded_between_passes():
         pano_instance = AsyncMock()
         pano_instance.run = AsyncMock(side_effect=pano_run)
         mock_pp.return_value = pano_instance
-        engine._dedup_v2 = AsyncMock(return_value=(0, []))
+        engine._dedup_v2 = AsyncMock(return_value=(0, [], _zero_usage()))
         engine._apply_panoramic_actions = AsyncMock(side_effect=lambda actions, *a, **kw: len(actions))
 
         result = await engine._run_locked(ws_id, run_id, session)
@@ -577,7 +583,7 @@ async def test_flush_not_commit_in_loop():
 
     engine = _make_engine()
     engine._enricher = AsyncMock()
-    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    engine._enricher.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
@@ -587,7 +593,7 @@ async def test_flush_not_commit_in_loop():
         pano_instance = AsyncMock()
         pano_instance.run = AsyncMock(return_value=PanoramicResult(actions=[]))
         mock_pp.return_value = pano_instance
-        engine._dedup_v2 = AsyncMock(return_value=(0, []))
+        engine._dedup_v2 = AsyncMock(return_value=(0, [], _zero_usage()))
 
         await engine._run_locked(ws_id, run_id, session)
 
@@ -629,7 +635,7 @@ async def test_cycle_detection_includes_dedup_count():
 
     engine = _make_engine(entity_repo=entity_repo)
     engine._enricher = AsyncMock()
-    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    engine._enricher.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     # Same panoramic action every pass — would trigger cycle_detected if hash ignores dedup
     repeated_action = PanoramicAction(
@@ -741,7 +747,7 @@ async def test_cycle_detection_uses_dedup_entity_ids():
 
     engine = _make_engine(entity_repo=entity_repo)
     engine._enricher = AsyncMock()
-    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    engine._enricher.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
@@ -784,7 +790,7 @@ async def test_noise_removed_counts_only_remove_noise_actions():
 
     engine = _make_engine()
     engine._enricher = AsyncMock()
-    engine._enricher.enrich_batch = AsyncMock(return_value=EnrichmentResult())
+    engine._enricher.enrich_batch = AsyncMock(return_value=(EnrichmentResult(), _zero_usage()))
 
     # 1 remove_noise + 1 rewrite — rewrite is NOT a noise action
     pass1_actions = [
@@ -818,7 +824,7 @@ async def test_noise_removed_counts_only_remove_noise_actions():
         pano_instance = AsyncMock()
         pano_instance.run = AsyncMock(side_effect=[pass1_result, PanoramicResult(actions=[])])
         mock_pp.return_value = pano_instance
-        engine._dedup_v2 = AsyncMock(return_value=(0, []))
+        engine._dedup_v2 = AsyncMock(return_value=(0, [], _zero_usage()))
         engine._apply_panoramic_actions = fake_apply
 
         result = await engine._run_locked(ws_id, run_id, session)
@@ -973,7 +979,7 @@ async def test_enrichment_sees_post_convergence_entities():
 
     async def fake_enrich_batch(entities):
         enricher_calls.append([e.id for e in entities])
-        return EnrichmentResult()
+        return EnrichmentResult(), _zero_usage()
 
     engine._enricher = MagicMock()
     engine._enricher.enrich_batch = fake_enrich_batch
@@ -987,7 +993,7 @@ async def test_enrichment_sees_post_convergence_entities():
         # Single-pass run: panoramic emits 0 actions → convergence on pass 1
         pano_instance.run = AsyncMock(return_value=PanoramicResult(actions=[]))
         mock_pp.return_value = pano_instance
-        engine._dedup_v2 = AsyncMock(return_value=(0, []))
+        engine._dedup_v2 = AsyncMock(return_value=(0, [], _zero_usage()))
 
         result = await engine._run_locked(ws_id, run_id, session)
 

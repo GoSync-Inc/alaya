@@ -30,7 +30,7 @@ def enricher(fake_llm):
 
 @pytest.mark.asyncio
 async def test_empty_batch_returns_empty_result(enricher):
-    result = await enricher.enrich_batch([])
+    result, _usage = await enricher.enrich_batch([])
     assert isinstance(result, EnrichmentResult)
     assert result.actions == []
 
@@ -38,7 +38,7 @@ async def test_empty_batch_returns_empty_result(enricher):
 @pytest.mark.asyncio
 async def test_enrich_batch_returns_enrichment_result(enricher):
     entities = [_make_entity("Alice"), _make_entity("ProjectX", entity_type="project")]
-    result = await enricher.enrich_batch(entities)
+    result, _usage = await enricher.enrich_batch(entities)
     assert isinstance(result, EnrichmentResult)
     assert isinstance(result.actions, list)
 
@@ -72,7 +72,7 @@ async def test_actions_are_enrichment_action_instances(enricher):
             ]
         },
     )
-    result = await enricher_with_action.enrich_batch(prompt_entities)
+    result, _usage = await enricher_with_action.enrich_batch(prompt_entities)
     assert isinstance(result, EnrichmentResult)
     for action in result.actions:
         assert isinstance(action, EnrichmentAction)
@@ -125,7 +125,7 @@ async def test_noise_entities_flagged():
         },
     )
 
-    result = await enricher.enrich_batch([entity])
+    result, _usage = await enricher.enrich_batch([entity])
     assert any(a.action == "remove_noise" for a in result.actions)
 
 
@@ -155,5 +155,5 @@ async def test_relations_suggested():
             ]
         },
     )
-    result = await enricher.enrich_batch([task_entity, project_entity])
+    result, _usage = await enricher.enrich_batch([task_entity, project_entity])
     assert any(a.action == "add_relation" for a in result.actions)

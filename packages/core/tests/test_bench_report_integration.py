@@ -110,11 +110,11 @@ def test_format_summary_against_real_postgres_schema(migrated_container: Postgre
             text(
                 """
                 INSERT INTO pipeline_traces
-                    (id, workspace_id, extraction_run_id, stage, tokens_used,
+                    (id, workspace_id, extraction_run_id, stage, decision, tokens_used,
                      tokens_in, tokens_out, tokens_cached,
                      cache_write_5m_tokens, cache_write_1h_tokens,
                      cost_usd, duration_ms, created_at)
-                VALUES (:id, :ws, :run_id, 'cortex:classify', 50,
+                VALUES (:id, :ws, :run_id, 'cortex:classify', 'classified', 50,
                         40, 10, 20, 5, 0,
                         0.001, 150, :created_at)
                 """
@@ -131,11 +131,11 @@ def test_format_summary_against_real_postgres_schema(migrated_container: Postgre
             text(
                 """
                 INSERT INTO pipeline_traces
-                    (id, workspace_id, integrator_run_id, stage, tokens_used,
+                    (id, workspace_id, integrator_run_id, stage, decision, tokens_used,
                      tokens_in, tokens_out, tokens_cached,
                      cache_write_5m_tokens, cache_write_1h_tokens,
                      cost_usd, duration_ms, created_at)
-                VALUES (:id, :ws, :int_run_id, 'integrator:dedup', 70,
+                VALUES (:id, :ws, :int_run_id, 'integrator:dedup', 'dedup_applied', 70,
                         60, 10, 15, 3, 1,
                         0.001, 200, :created_at)
                 """

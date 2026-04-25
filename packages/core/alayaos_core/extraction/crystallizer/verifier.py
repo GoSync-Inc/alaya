@@ -34,6 +34,6 @@ class CrystallizerVerifier:
             "- Incorrect confidence scores\n\n"
             "Return the corrected extraction."
         )
-        verified, usage = await self.llm.extract(user_text, system_prompt, ExtractionResult)
+        verified, usage = await self.llm.extract(user_text, system_prompt, ExtractionResult, stage="crystallizer:verify")
         changed = verified != initial_result
         return verified, changed, usage

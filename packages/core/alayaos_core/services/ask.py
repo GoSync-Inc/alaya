@@ -127,6 +127,7 @@ async def ask(
         system_prompt=system_prompt,
         response_model=AskResponseModel,
         max_tokens=settings.ASK_MAX_OUTPUT_TOKENS,
+        stage="ask:answer",
     )
 
     # Collect valid IDs from included evidence only (excluding budget-cut units)

@@ -82,6 +82,7 @@ Predicates:
             text=user_message,
             system_prompt=system_prompt,
             response_model=ExtractionResult,
+            stage="extractor:extract",
         )
 
         return result, usage
@@ -108,6 +109,7 @@ Predicates:
             text=gleaning_text,
             system_prompt=system_prompt,
             response_model=ExtractionResult,
+            stage="extractor:gleaning",
         )
 
         # Merge results

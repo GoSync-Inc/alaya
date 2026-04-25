@@ -211,6 +211,7 @@ class TreeService:
             system_prompt=system_prompt,
             response_model=TreeBriefing,
             max_tokens=1024,
+            stage="tree:briefing",
         )
         return briefing
 

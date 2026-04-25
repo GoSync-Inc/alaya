@@ -781,6 +781,7 @@ async def job_integrate(workspace_id: str, integrator_run_id: str | None = None)
             trace_repo = PipelineTraceRepository(session, ws_uuid)
             for phase in result.phase_usages:
                 await trace_repo.create(
+                    workspace_id=ws_uuid,
                     stage=phase.stage,
                     integrator_run_id=run_uuid,
                     tokens_in=phase.usage.tokens_in,

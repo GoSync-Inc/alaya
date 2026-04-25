@@ -65,6 +65,9 @@ docker compose up -d             # Start all services
 docker compose up postgres redis # Start only DB + cache
 just check                       # Lint + format + typecheck + tests
 just smoke                       # Docker smoke test
+just bench [ARGS]                # Run bench harness against a live stack (scripts/bench.py); supports --fixture, --keep, --reuse, --timeout-seconds
+just logs-llm                    # Stream LLM call events from worker logs (requires jq)
+just bench-clean                 # Remove bench result directories (preserves .gitkeep)
 taskiq worker alayaos_core.worker.tasks:broker  # Start pipeline worker (job_extract, job_write, job_cortex, job_crystallize, job_enrich, job_integrate, job_feature_flag_digest, job_check_integrator); on task exception, run transitions to `failed` via ExtractionRunRepository.mark_failed (idempotent for terminal states); at every terminal transition (completed or failed) ExtractionRunRepository.recalc_usage aggregates tokens_in/cost_usd from pipeline_traces — skipped when no traces exist (legacy non-Cortex path writes these fields directly)
 ```
 
@@ -90,6 +93,7 @@ Run before every commit:
 - `ASK_RATE_LIMIT_PER_MINUTE` (default `10`) / `ASK_RATE_LIMIT_PER_HOUR` (default `100`) — rate limits for `/ask` and `/search`; enforced fail-closed (503 when Redis is unavailable).
 - `ALAYA_PART_OF_STRICT` (default `strict`, values `strict|warn|off`) — controls `part_of` tier-rank validation only; non-default values emit `feature_flag_active` at API startup and in `job_feature_flag_digest`. Self-reference remains always rejected.
 - `SECRET_KEY` — must be set to a strong random value in production; defaults to `"change-me-in-production"` which is insecure.
+- `BENCH_TIMEOUT_SECONDS` (default `600`) — global wall-clock budget for `just bench`; bench-only, no effect on the production stack.
 - pgvector `>= 0.8.0` is required. Migration 008, API lifespan startup, Docker init, and CI all fail fast if the installed extension is older.
 - Run 6.2 restricted/private-event backfill command: `uv run python -m alayaos_core.scripts.backfill_restricted_extraction --workspace-id <uuid> --dry-run`, then rerun with `--apply` after reviewing the count.
 
@@ -172,5 +176,7 @@ Provider-specific features preserved — no lowest common denominator.
 ## Scripts
 
 - `scripts/audit_part_of_hierarchy.py` — read-only preflight audit: `--workspace-id <uuid> [--sample-size N]`; exit 0 = clean, exit 1 = violations found with sample rows.
+- `scripts/bench.py` — bench harness: spins up a stack, ingests fixtures (small/medium/large), measures extraction latency, LLM cost, entity/claim counts; outputs JSON reports to `bench_results/`.
+- `scripts/bench_report.py` — reads bench result JSON and renders a Markdown comparison table across runs.
 
 <!-- updated-by-superflow:2026-04-25 -->

@@ -63,7 +63,7 @@ def _scalar(conn: Connection, sql: str, **params: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _get_extraction_runs(conn: Connection, workspace_id: uuid.UUID, started_at: datetime) -> list[dict[str, Any]]:
+def _get_extraction_runs(conn: Connection, workspace_id: uuid.UUID, started_at: str) -> list[dict[str, Any]]:
     rows = _query(
         conn,
         """
@@ -80,7 +80,7 @@ def _get_extraction_runs(conn: Connection, workspace_id: uuid.UUID, started_at: 
     return [_serialize_row(r) for r in rows]
 
 
-def _get_integrator_runs(conn: Connection, workspace_id: uuid.UUID, started_at: datetime) -> list[dict[str, Any]]:
+def _get_integrator_runs(conn: Connection, workspace_id: uuid.UUID, started_at: str) -> list[dict[str, Any]]:
     rows = _query(
         conn,
         """
@@ -98,7 +98,7 @@ def _get_integrator_runs(conn: Connection, workspace_id: uuid.UUID, started_at: 
     return [_serialize_row(r) for r in rows]
 
 
-def _get_pipeline_traces(conn: Connection, workspace_id: uuid.UUID, started_at: datetime) -> list[dict[str, Any]]:
+def _get_pipeline_traces(conn: Connection, workspace_id: uuid.UUID, started_at: str) -> list[dict[str, Any]]:
     rows = _query(
         conn,
         """
@@ -133,7 +133,7 @@ def _serialize_row(row: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _description_rate(conn: Connection, workspace_id: uuid.UUID, started_at: datetime) -> float | None:
+def _description_rate(conn: Connection, workspace_id: uuid.UUID, started_at: str) -> float | None:
     """Fraction of claims that have a description predicate."""
     slugs_list = ", ".join(f"'{s}'" for s in PROXY_DESCRIPTION_PREDICATE_SLUGS)
     total = _scalar(
@@ -166,7 +166,7 @@ def _description_rate(conn: Connection, workspace_id: uuid.UUID, started_at: dat
     return round((desc_count or 0) / total, 4)
 
 
-def _claims_per_entity(conn: Connection, workspace_id: uuid.UUID, started_at: datetime) -> float | None:
+def _claims_per_entity(conn: Connection, workspace_id: uuid.UUID, started_at: str) -> float | None:
     """Average claims per entity (richness proxy)."""
     claims_total = _scalar(
         conn,
@@ -195,7 +195,7 @@ def _claims_per_entity(conn: Connection, workspace_id: uuid.UUID, started_at: da
     return round((claims_total or 0) / entities_total, 4)
 
 
-def _claims_per_event_stddev(conn: Connection, workspace_id: uuid.UUID, started_at: datetime) -> float | None:
+def _claims_per_event_stddev(conn: Connection, workspace_id: uuid.UUID, started_at: str) -> float | None:
     """Population std-dev of claims per event (uniformity proxy)."""
     rows = _query(
         conn,
@@ -216,7 +216,7 @@ def _claims_per_event_stddev(conn: Connection, workspace_id: uuid.UUID, started_
     return round(statistics.pstdev(counts), 4)
 
 
-def _dedup_actions(conn: Connection, workspace_id: uuid.UUID, started_at: datetime) -> int:
+def _dedup_actions(conn: Connection, workspace_id: uuid.UUID, started_at: str) -> int:
     """Count of merge integrator_actions scoped to bench workspace + window."""
     val = _scalar(
         conn,
@@ -233,7 +233,7 @@ def _dedup_actions(conn: Connection, workspace_id: uuid.UUID, started_at: dateti
     return int(val or 0)
 
 
-def _run_failure_count(conn: Connection, workspace_id: uuid.UUID, started_at: datetime) -> int:
+def _run_failure_count(conn: Connection, workspace_id: uuid.UUID, started_at: str) -> int:
     """Count of failed extraction runs in bench workspace + window."""
     val = _scalar(
         conn,
@@ -429,9 +429,13 @@ def format_summary(
     returns result="empty_workspace", empty JSON lists, and a summary noting
     "no events processed".
     """
-    extraction_runs = _get_extraction_runs(conn, workspace_id, started_at)
-    integrator_runs = _get_integrator_runs(conn, workspace_id, started_at)
-    pipeline_traces = _get_pipeline_traces(conn, workspace_id, started_at)
+    # Convert to ISO-8601 string to ensure consistent TEXT comparison with SQLite
+    # (PostgreSQL also handles ISO strings natively for timestamptz comparisons).
+    started_at_str = started_at.isoformat()
+
+    extraction_runs = _get_extraction_runs(conn, workspace_id, started_at_str)
+    integrator_runs = _get_integrator_runs(conn, workspace_id, started_at_str)
+    pipeline_traces = _get_pipeline_traces(conn, workspace_id, started_at_str)
 
     is_empty = len(extraction_runs) == 0
 
@@ -463,11 +467,11 @@ def format_summary(
 
     # Compute quality proxies
     quality_proxies: dict[str, Any] = {
-        "description_rate": _description_rate(conn, workspace_id, started_at),
-        "claims_per_entity": _claims_per_entity(conn, workspace_id, started_at),
-        "claims_per_event_stddev": _claims_per_event_stddev(conn, workspace_id, started_at),
-        "dedup_actions": _dedup_actions(conn, workspace_id, started_at),
-        "run_failure_count": _run_failure_count(conn, workspace_id, started_at),
+        "description_rate": _description_rate(conn, workspace_id, started_at_str),
+        "claims_per_entity": _claims_per_entity(conn, workspace_id, started_at_str),
+        "claims_per_event_stddev": _claims_per_event_stddev(conn, workspace_id, started_at_str),
+        "dedup_actions": _dedup_actions(conn, workspace_id, started_at_str),
+        "run_failure_count": _run_failure_count(conn, workspace_id, started_at_str),
     }
 
     latency_by_stage = _compute_latency(pipeline_traces)

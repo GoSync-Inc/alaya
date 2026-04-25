@@ -110,6 +110,11 @@ async def test_phase_traces_written_with_integrator_run_id() -> None:
         assert call_kwargs.get("tokens_in") == phase.usage.tokens_in
         assert call_kwargs.get("tokens_out") == phase.usage.tokens_out
         assert call_kwargs.get("stage") == phase.stage
+        # C1: workspace_id must be passed so the repository can attach it to the trace
+        assert call_kwargs.get("workspace_id") == ws_id, (
+            f"Phase {i}: workspace_id not passed to PipelineTraceRepository.create; "
+            f"got kwargs: {list(call_kwargs.keys())}"
+        )
 
 
 @pytest.mark.asyncio

@@ -550,7 +550,7 @@ async def test_find_duplicates_fallback_does_not_cross_entity_types():
     alice_person = _make_entity("Alice", entity_type="person")
     alice_project = _make_entity("Alice", entity_type="project")
 
-    pairs = await deduplicator.find_duplicates([alice_person, alice_project])
+    pairs, _usage = await deduplicator.find_duplicates([alice_person, alice_project])
 
     assert pairs == [], (
         f"Cross-type merge detected: find_duplicates returned {pairs} for "
@@ -1502,3 +1502,97 @@ async def test_llm_check_pair_returns_usage():
     is_same, usage = result
     assert is_same is False
     assert usage.tokens_in == 7
+
+
+# ---------------------------------------------------------------------------
+# Round-3 fix: find_duplicates returns LLMUsage; engine fallback propagates it
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_find_duplicates_returns_usage():
+    """find_duplicates must return (pairs, LLMUsage) and propagate Tier-3 LLM usage."""
+    from alayaos_core.extraction.integrator.dedup import EntityDeduplicator
+    from alayaos_core.extraction.integrator.schemas import EntityMatchResult
+    from alayaos_core.llm.interface import LLMUsage
+
+    sentinel_usage = LLMUsage(tokens_in=42, tokens_out=24, tokens_cached=0, cost_usd=0.001)
+
+    class _FakeLLM:
+        async def extract(self, text, system_prompt, response_model, **kwargs):
+            return EntityMatchResult(is_same_entity=True, reasoning="same"), sentinel_usage
+
+    # threshold=1.0 so no pair passes Tier 1/2; ambiguous_low=0.0 so everything hits Tier 3
+    deduplicator = EntityDeduplicator(llm=_FakeLLM(), threshold=1.0, ambiguous_low=0.0)
+    entity_a = _make_entity("Alicia", entity_type="person")
+    entity_b = _make_entity("Alisia", entity_type="person")
+
+    result = await deduplicator.find_duplicates([entity_a, entity_b])
+    assert isinstance(result, tuple), f"find_duplicates must return tuple, got {type(result)}"
+    pairs, usage = result
+    assert len(pairs) == 1, f"Expected one pair from Tier-3 LLM match, got {pairs}"
+    assert usage.tokens_in == 42, f"Expected tokens_in=42, got {usage.tokens_in}"
+    assert usage.tokens_out == 24, f"Expected tokens_out=24, got {usage.tokens_out}"
+
+
+@pytest.mark.asyncio
+async def test_shortlist_dedup_embed_fallback_propagates_tier3_usage():
+    """_shortlist_dedup embed-failure fallback must propagate Tier-3 LLMUsage from find_duplicates."""
+    from unittest.mock import AsyncMock
+
+    from alayaos_core.extraction.integrator.dedup import EntityDeduplicator
+    from alayaos_core.extraction.integrator.schemas import EntityMatchResult
+    from alayaos_core.llm.interface import LLMUsage
+
+    sentinel_usage = LLMUsage(tokens_in=77, tokens_out=33, tokens_cached=0, cost_usd=0.002)
+
+    class _FakeLLM:
+        async def extract(self, text, system_prompt, response_model, **kwargs):
+            return EntityMatchResult(is_same_entity=True, reasoning="same"), sentinel_usage
+
+    # threshold=1.0, ambiguous_low=0.0 → every ambiguous pair hits Tier 3
+    deduplicator = EntityDeduplicator(llm=_FakeLLM(), threshold=1.0, ambiguous_low=0.0)
+
+    # Embedding service that always raises so _shortlist_dedup falls back to find_duplicates
+    class _FailEmbed:
+        async def embed_texts(self, texts):
+            raise RuntimeError("embed failure")
+
+    # Build a minimal engine with the failing embedder
+    from unittest.mock import MagicMock
+
+    from alayaos_core.extraction.integrator.engine import IntegratorEngine
+
+    settings = MagicMock()
+    settings.INTEGRATOR_BATCH_SIZE = 5
+    settings.INTEGRATOR_WINDOW_HOURS = 48
+    settings.INTEGRATOR_DEDUP_THRESHOLD = 1.0
+    settings.INTEGRATOR_DEDUP_AMBIGUOUS_LOW = 0.0
+    settings.INTEGRATOR_DEDUP_SHORTLIST_K = 5
+    settings.INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD = 0.9
+
+    entity_repo = AsyncMock()
+    claim_repo = AsyncMock()
+    relation_repo = AsyncMock()
+    entity_cache = AsyncMock()
+    redis_mock = AsyncMock()
+
+    engine = IntegratorEngine(
+        llm=_FakeLLM(),
+        entity_repo=entity_repo,
+        claim_repo=claim_repo,
+        relation_repo=relation_repo,
+        entity_cache=entity_cache,
+        redis=redis_mock,
+        settings=settings,
+    )
+    engine._deduplicator = deduplicator  # type: ignore[attr-defined]
+    engine._embedding_service = _FailEmbed()  # type: ignore[attr-defined]
+
+    entity_a = _make_entity("Alicia", entity_type="person")
+    entity_b = _make_entity("Alisia", entity_type="person")
+
+    _pairs, usage = await engine._shortlist_dedup([entity_a, entity_b])  # type: ignore[attr-defined]
+    assert usage.tokens_in == 77, (
+        f"Fallback path must propagate Tier-3 usage; expected tokens_in=77, got {usage.tokens_in}"
+    )

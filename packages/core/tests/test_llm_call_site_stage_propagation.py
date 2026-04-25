@@ -117,6 +117,76 @@ async def test_panoramic_pass_passes_stage() -> None:
 
 
 @pytest.mark.asyncio
+async def test_panoramic_pass_passes_stage_with_entities() -> None:
+    """PanoramicPass.run() must pass stage='integrator:panoramic' when entities are present."""
+    from alayaos_core.extraction.integrator.passes.panoramic import PanoramicPass
+    from alayaos_core.extraction.integrator.schemas import EntityWithContext
+
+    llm, stages = _stage_capturing_llm()
+    session = AsyncMock()
+    pass_ = PanoramicPass(llm_service=llm, session=session)
+
+    entity = EntityWithContext(id=uuid.uuid4(), name="Alice Johnson", entity_type="person")
+    ws_id = uuid.uuid4()
+    with contextlib.suppress(Exception):
+        await pass_.run(
+            workspace_id=ws_id,
+            entities=[entity],
+            entity_types=[],
+            claims_by_entity={entity.id: []},
+            relations_by_entity={entity.id: []},
+        )
+
+    # With at least one entity, PanoramicPass MUST call LLM
+    assert len(stages) >= 1, "PanoramicPass made no LLM calls despite having entities"
+    for s in stages:
+        assert s == "integrator:panoramic", f"PanoramicPass passed stage={s!r}; expected 'integrator:panoramic'"
+
+
+@pytest.mark.asyncio
+async def test_dedup_v2_execute_batches_passes_stage() -> None:
+    """DeduplicatorV2.execute_batches() must pass stage='integrator:dedup' to llm.extract()."""
+    from alayaos_core.extraction.integrator.dedup import DeduplicatorV2
+    from alayaos_core.extraction.integrator.schemas import EntityWithContext
+
+    llm, stages = _stage_capturing_llm()
+    dedup = DeduplicatorV2(llm=llm, batch_size=9)
+
+    entity_a = EntityWithContext(id=uuid.uuid4(), name="Alice", entity_type="person")
+    entity_b = EntityWithContext(id=uuid.uuid4(), name="Alicia", entity_type="person")
+    batch = [entity_a, entity_b]
+
+    session = AsyncMock()
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = []
+    session.execute = AsyncMock(return_value=mock_result)
+
+    action_repo = AsyncMock()
+    action_repo.create = AsyncMock(return_value=MagicMock())
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.update = AsyncMock()
+
+    with contextlib.suppress(Exception):
+        await dedup.execute_batches(
+            batches=[batch],
+            entity_type="person",
+            workspace_id=uuid.uuid4(),
+            run_id=uuid.uuid4(),
+            entity_repo=entity_repo,
+            session=session,
+            action_repo=action_repo,
+        )
+
+    # execute_batches calls LLM for each batch
+    assert len(stages) >= 1, "DeduplicatorV2.execute_batches made no LLM calls"
+    for s in stages:
+        assert s == "integrator:dedup", (
+            f"DeduplicatorV2.execute_batches passed stage={s!r}; expected 'integrator:dedup'"
+        )
+
+
+@pytest.mark.asyncio
 async def test_integrator_dedup_passes_stage() -> None:
     """DeduplicatorV2 must pass stage= to llm.extract() when verifying pairs."""
     from alayaos_core.extraction.integrator.dedup import DeduplicatorV2

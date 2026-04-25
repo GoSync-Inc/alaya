@@ -110,7 +110,8 @@ async def get_integrator_run_trace(
         raise _not_found(str(run_id))
     trace_repo = PipelineTraceRepository(session, api_key.workspace_id)
     traces = await trace_repo.list_by_integrator_run(run_id)
-    return {"data": [PipelineTraceRead.model_validate(t) for t in traces]}
+    items = [PipelineTraceRead.model_validate(t) for t in traces]
+    return {"data": items, "meta": {"count": len(items)}}
 
 
 @router.post("/integrator-runs/trigger", status_code=202)

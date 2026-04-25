@@ -177,6 +177,6 @@ Provider-specific features preserved — no lowest common denominator.
 
 - `scripts/audit_part_of_hierarchy.py` — read-only preflight audit: `--workspace-id <uuid> [--sample-size N]`; exit 0 = clean, exit 1 = violations found with sample rows.
 - `scripts/bench.py` — bench harness: spins up a stack, ingests fixtures (small/medium/large), measures extraction latency, LLM cost, entity/claim counts; outputs JSON reports to `bench_results/`.
-- `scripts/bench_report.py` — reads bench result JSON and renders a Markdown comparison table across runs.
+- `scripts/bench_report.py` — DB query module called by `bench.py` during the report phase; queries `extraction_runs`, `integrator_runs`, and `pipeline_traces` for the bench workspace and returns a single-run Markdown summary (latency, cost, quality proxies) plus the JSON-serialisable manifest data.
 
 <!-- updated-by-superflow:2026-04-25 -->

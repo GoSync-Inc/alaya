@@ -21,6 +21,8 @@ Event → Cortex (chunk + classify) → Crystallizer (LLM extract per chunk) →
 
 Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `job_write`, `job_cortex`, `job_crystallize`, `job_enrich`, `job_integrate`, `job_feature_flag_digest` (daily), `job_check_integrator` (periodic). All task parameters are string IDs — raw text never passed via job queue.
 
+`just bench` runs the end-to-end bench harness (`scripts/bench.py`) against a live stack; outputs JSON results to `bench_results/`. `just logs-llm` streams structured LLM call events from worker logs. `just bench-clean` removes result directories.
+
 ### Packages
 
 - **`packages/core/`** — Domain logic: models (19), schemas (17), repositories (17), extraction pipeline (cortex/crystallizer/integrator sub-packages), LLM adapters, worker tasks. Zero framework dependencies.

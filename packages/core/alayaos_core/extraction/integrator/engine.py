@@ -145,6 +145,18 @@ class IntegratorEngine:
         try:
             effective_run_id = run_id if run_id is not None else uuid.uuid4()
             return await self._run_locked(workspace_id, effective_run_id, session)
+        except Exception as exc:
+            # run() must never propagate — return failed result so callers can always
+            # persist the outcome without their own try/except.
+            log.error(
+                "integrator_run_unexpected_error",
+                workspace_id=str(workspace_id),
+                error=str(exc),
+            )
+            return IntegratorRunResult(
+                status="failed",
+                error_message=f"{type(exc).__name__}: {exc}",
+            )
         finally:
             await release_workspace_lock(self.redis, lock_key, token)
 

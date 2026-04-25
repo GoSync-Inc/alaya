@@ -27,15 +27,15 @@ def deduplicator(fake_llm):
 
 @pytest.mark.asyncio
 async def test_empty_input_returns_no_pairs(deduplicator):
-    result = await deduplicator.find_duplicates([])
-    assert result == []
+    pairs, _usage = await deduplicator.find_duplicates([])
+    assert pairs == []
 
 
 @pytest.mark.asyncio
 async def test_single_entity_returns_no_pairs(deduplicator):
     entities = [_make_entity("Alice")]
-    result = await deduplicator.find_duplicates(entities)
-    assert result == []
+    pairs, _usage = await deduplicator.find_duplicates(entities)
+    assert pairs == []
 
 
 @pytest.mark.asyncio
@@ -43,17 +43,17 @@ async def test_exact_match_detected_as_fuzzy(deduplicator):
     """Two entities with identical names → fuzzy match."""
     e1 = _make_entity("Alice")
     e2 = _make_entity("Alice")
-    result = await deduplicator.find_duplicates([e1, e2])
-    assert len(result) == 1
-    assert result[0].score >= 0.85
-    assert result[0].method == "fuzzy"
+    pairs, _usage = await deduplicator.find_duplicates([e1, e2])
+    assert len(pairs) == 1
+    assert pairs[0].score >= 0.85
+    assert pairs[0].method == "fuzzy"
 
 
 @pytest.mark.asyncio
 async def test_very_different_names_no_match(deduplicator):
     entities = [_make_entity("Alice"), _make_entity("Quantum Physics")]
-    result = await deduplicator.find_duplicates(entities)
-    assert result == []
+    pairs, _usage = await deduplicator.find_duplicates(entities)
+    assert pairs == []
 
 
 @pytest.mark.asyncio
@@ -62,8 +62,8 @@ async def test_short_names_skipped(deduplicator):
     e1 = _make_entity("Al")
     e2 = _make_entity("Al")
     # Short names: 2 chars — should be skipped
-    result = await deduplicator.find_duplicates([e1, e2])
-    assert result == []
+    pairs, _usage = await deduplicator.find_duplicates([e1, e2])
+    assert pairs == []
 
 
 @pytest.mark.asyncio
@@ -76,9 +76,9 @@ async def test_transliteration_fallback_cyrillic_latin():
     # "Aleksey" and "Алексей" should match via transliteration
     e1 = _make_entity("Aleksey")
     e2 = _make_entity("Алексей")
-    result = await dedup.find_duplicates([e1, e2])
+    pairs, _usage = await dedup.find_duplicates([e1, e2])
     # At least one pair found via transliteration or fuzzy
-    assert len(result) >= 1
+    assert len(pairs) >= 1
 
 
 @pytest.mark.asyncio
@@ -104,14 +104,14 @@ async def test_llm_fallback_for_ambiguous_band():
         "Respond with is_same_entity (true/false) and brief reasoning."
     )
     llm.add_response(h, {"is_same_entity": True, "reasoning": "same person"})
-    result = await dedup.find_duplicates([e1, e2])
+    pairs, _usage = await dedup.find_duplicates([e1, e2])
     # Either matched via fuzzy/transliteration or LLM — we just care that the result is correct
-    assert isinstance(result, list)
+    assert isinstance(pairs, list)
 
 
 @pytest.mark.asyncio
 async def test_no_self_pairs(deduplicator):
     """An entity should never be paired with itself."""
     e1 = _make_entity("Alice Johnson")
-    result = await deduplicator.find_duplicates([e1])
-    assert all(p.entity_a_id != p.entity_b_id for p in result)
+    pairs, _usage = await deduplicator.find_duplicates([e1])
+    assert all(p.entity_a_id != p.entity_b_id for p in pairs)

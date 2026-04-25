@@ -923,8 +923,9 @@ class IntegratorEngine:
                 entity_count=len(entities),
                 msg="falling back to rapidfuzz dedup",
             )
-            # Graceful fallback to the existing rapidfuzz-based deduplicator (no LLM usage)
-            return await self._deduplicator.find_duplicates(entities), _zero
+            # Graceful fallback to the existing rapidfuzz-based deduplicator; propagate any Tier-3 usage.
+            fallback_pairs, fallback_usage = await self._deduplicator.find_duplicates(entities)
+            return fallback_pairs, fallback_usage
 
         if len(vectors) != len(entities):
             log.warning(
@@ -933,7 +934,8 @@ class IntegratorEngine:
                 vector_count=len(vectors),
                 msg="falling back to rapidfuzz dedup",
             )
-            return await self._deduplicator.find_duplicates(entities), _zero
+            fallback_pairs2, fallback_usage2 = await self._deduplicator.find_duplicates(entities)
+            return fallback_pairs2, fallback_usage2
         embeddings: dict[uuid.UUID, list[float]] = {e.id: v for e, v in zip(entities, vectors, strict=True)}
 
         # 2. Build shortlist of candidate pairs via cosine similarity

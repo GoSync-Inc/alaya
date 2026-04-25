@@ -152,15 +152,19 @@ class EntityDeduplicator:
         self.threshold = threshold
         self.ambiguous_low = ambiguous_low
 
-    async def find_duplicates(self, entities: list[EntityWithContext]) -> list[DuplicatePair]:
-        """Find duplicate entity pairs using 3-tier matching."""
+    async def find_duplicates(self, entities: list[EntityWithContext]) -> tuple[list[DuplicatePair], LLMUsage]:
+        """Find duplicate entity pairs using 3-tier matching.
+
+        Returns (pairs, aggregated_usage) where usage accumulates all Tier-3 LLM calls.
+        """
+        _zero = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
         if len(entities) < 2:
-            return []
+            return [], _zero
 
         # Filter entities with names too short to be reliable
         scoreable = [e for e in entities if len(e.name) >= _MIN_NAME_LENGTH]
         if len(scoreable) < 2:
-            return []
+            return [], _zero
 
         from rapidfuzz import fuzz, process
         from rapidfuzz.distance import JaroWinkler
@@ -173,6 +177,12 @@ class EntityDeduplicator:
 
         pairs: list[DuplicatePair] = []
         seen: set[frozenset] = set()
+        agg_tokens_in = 0
+        agg_tokens_out = 0
+        agg_tokens_cached = 0
+        agg_cache_write_5m = 0
+        agg_cache_write_1h = 0
+        agg_cost_usd = 0.0
 
         for group in by_type.values():
             if len(group) < 2:
@@ -246,7 +256,13 @@ class EntityDeduplicator:
                     elif best_score >= self.ambiguous_low:
                         # Tier 3: LLM fallback for ambiguous band
                         seen.add(pair_key)  # mark as seen regardless of LLM result
-                        is_same, _ = await self._llm_check(entity, candidate)
+                        is_same, pair_usage = await self._llm_check(entity, candidate)
+                        agg_tokens_in += pair_usage.tokens_in
+                        agg_tokens_out += pair_usage.tokens_out
+                        agg_tokens_cached += pair_usage.tokens_cached
+                        agg_cache_write_5m += pair_usage.cache_write_5m_tokens
+                        agg_cache_write_1h += pair_usage.cache_write_1h_tokens
+                        agg_cost_usd += pair_usage.cost_usd
                         if is_same:
                             pairs.append(
                                 DuplicatePair(
@@ -259,7 +275,15 @@ class EntityDeduplicator:
                                 )
                             )
 
-        return pairs
+        aggregated = LLMUsage(
+            tokens_in=agg_tokens_in,
+            tokens_out=agg_tokens_out,
+            tokens_cached=agg_tokens_cached,
+            cache_write_5m_tokens=agg_cache_write_5m,
+            cache_write_1h_tokens=agg_cache_write_1h,
+            cost_usd=agg_cost_usd,
+        )
+        return pairs, aggregated
 
     async def llm_check_pair(self, entity_a: EntityWithContext, entity_b: EntityWithContext) -> tuple[bool, LLMUsage]:
         """Public API: ask LLM whether two entities represent the same real-world entity.

@@ -31,13 +31,18 @@ async def test_recalc_usage_failed_run_reflects_phase_a_cost() -> None:
     trace_exists_result.scalar_one_or_none.return_value = uuid.uuid4()
     update_result = MagicMock()
 
-    mock_session.execute.side_effect = [trace_exists_result, update_result]
+    # The get_by_id SELECT after update (for log_run_aggregated emission)
+    get_by_id_result = MagicMock()
+    get_by_id_result.scalar_one_or_none.return_value = None  # no run → emit skipped
+
+    mock_session.execute.side_effect = [trace_exists_result, update_result, get_by_id_result]
 
     # Should not raise even for a "failed" run
     await repo.recalc_usage(run_id)
 
     # UPDATE was issued — recalc_usage is symmetric for completed and failed runs
-    assert mock_session.execute.call_count == 2
+    # 3 calls: exists check, update, get_by_id (for observability emit)
+    assert mock_session.execute.call_count == 3
 
 
 @pytest.mark.asyncio

@@ -371,14 +371,18 @@ async def test_recalc_usage_sums_traces():
     exists_result = MagicMock()
     exists_result.scalar_one_or_none.return_value = uuid.uuid4()  # trace exists
     update_result = MagicMock()
+    # Third call: get_by_id SELECT after update (for log_run_aggregated emission)
+    get_by_id_result = MagicMock()
+    get_by_id_result.scalar_one_or_none.return_value = None  # no run → emit skipped
 
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[exists_result, update_result])
+    session.execute = AsyncMock(side_effect=[exists_result, update_result, get_by_id_result])
 
     repo = ExtractionRunRepository(session, ws_id)
     await repo.recalc_usage(run_id=run_id)
 
-    assert session.execute.await_count == 2
+    # 3 calls: exists check, update, get_by_id (for observability emit)
+    assert session.execute.await_count == 3
     # Second call must be the UPDATE
     update_call_args = session.execute.call_args_list[1]
     stmt = update_call_args.args[0]

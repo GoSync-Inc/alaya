@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
 
+from alayaos_core.llm.observability import log_run_aggregated
 from alayaos_core.models.integrator_run import IntegratorRun
 from alayaos_core.models.pipeline_trace import PipelineTrace
 from alayaos_core.repositories.base import BaseRepository
@@ -177,3 +178,19 @@ class IntegratorRunRepository(BaseRepository):
             )
         )
         await self.session.execute(stmt)
+
+        # Emit llm.run_aggregated after successful recalc (observability-only).
+        run = await self.get_by_id(run_id)
+        if run is not None:
+            log_run_aggregated(
+                scope="integrator",
+                run_id=run.id,
+                workspace_id=run.workspace_id,
+                tokens_in=run.tokens_in,
+                tokens_out=run.tokens_out,
+                tokens_cached=run.tokens_cached,
+                cache_write_5m_tokens=run.cache_write_5m_tokens,
+                cache_write_1h_tokens=run.cache_write_1h_tokens,
+                cost_usd=float(run.cost_usd),
+                tokens_used=run.tokens_used,
+            )

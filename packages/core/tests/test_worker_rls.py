@@ -107,6 +107,7 @@ async def test_job_extract_calls_rls_context():
 @pytest.mark.asyncio
 async def test_job_write_calls_rls_context():
     """job_write must call _set_workspace_context with correct workspace_id."""
+    from alayaos_core.repositories.extraction_run import ExtractionRunRepository
     from alayaos_core.worker import tasks as worker_tasks
 
     workspace_id = "44444444-4444-4444-4444-444444444444"
@@ -126,6 +127,7 @@ async def test_job_write_calls_rls_context():
         with (
             patch("alayaos_core.worker.tasks._session_factory", return_value=mock_factory),
             patch("alayaos_core.extraction.pipeline.run_write", new_callable=AsyncMock, return_value=None),
+            patch.object(ExtractionRunRepository, "recalc_usage", new_callable=AsyncMock),
             patch(
                 "alayaos_core.worker.tasks.Settings",
                 MagicMock(return_value=MagicMock(ANTHROPIC_API_KEY=MagicMock(get_secret_value=lambda: ""))),

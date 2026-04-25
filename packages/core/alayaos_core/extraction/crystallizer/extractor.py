@@ -61,7 +61,9 @@ class CrystallizerExtractor:
         # 2. Build system prompt
         system_prompt = self._build_prompt(entity_types, predicates, snapshot, chunk)
         # 3. LLM extract
-        result, usage = await self.llm.extract(chunk.text, system_prompt, ExtractionResult, stage="crystallizer:extract")
+        result, usage = await self.llm.extract(
+            chunk.text, system_prompt, ExtractionResult, stage="crystallizer:extract"
+        )
         # 4. Validate: reject garbage entities
         result = self._validate(result)
         return result, usage

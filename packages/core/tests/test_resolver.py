@@ -270,7 +270,9 @@ def _make_llm_with_response(is_same: bool) -> FakeLLMAdapter:
     llm = FakeLLMAdapter()
     original_extract = llm.extract
 
-    async def patched_extract(text, system_prompt, response_model, *, max_tokens=4096, temperature=0.0, stage="unknown"):
+    async def patched_extract(
+        text, system_prompt, response_model, *, max_tokens=4096, temperature=0.0, stage="unknown"
+    ):
         if response_model is EntityMatchResult:
             usage = LLMUsage(tokens_in=10, tokens_out=5, tokens_cached=0, cost_usd=0.0)
             return EntityMatchResult(is_same_entity=is_same, reasoning="test"), usage

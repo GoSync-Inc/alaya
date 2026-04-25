@@ -35,10 +35,7 @@ class PipelineTraceRepository(BaseRepository):
         integrator_run_id: uuid.UUID | None = None,
     ) -> PipelineTrace:
         # tokens_used policy: auto-compute = tokens_in + tokens_out unless caller overrides.
-        if tokens_used is _SENTINEL:
-            computed_tokens_used = tokens_in + tokens_out
-        else:
-            computed_tokens_used = int(tokens_used)  # type: ignore[arg-type]
+        computed_tokens_used = tokens_in + tokens_out if tokens_used is _SENTINEL else int(tokens_used)  # type: ignore[arg-type]
 
         trace = PipelineTrace(
             workspace_id=workspace_id,

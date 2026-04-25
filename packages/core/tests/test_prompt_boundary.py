@@ -55,7 +55,9 @@ async def test_system_prompt_has_data_tag_in_user_message() -> None:
     captured_texts: list[str] = []
 
     class CapturingAdapter:
-        async def extract(self, text, system_prompt, response_model, *, max_tokens=4096, temperature=0.0, stage="unknown"):
+        async def extract(
+            self, text, system_prompt, response_model, *, max_tokens=4096, temperature=0.0, stage="unknown"
+        ):
             captured_texts.append(text)
             from alayaos_core.llm.interface import LLMUsage
 
@@ -86,7 +88,9 @@ async def test_prior_entities_header_in_user_message() -> None:
     captured_texts: list[str] = []
 
     class CapturingAdapter:
-        async def extract(self, text, system_prompt, response_model, *, max_tokens=4096, temperature=0.0, stage="unknown"):
+        async def extract(
+            self, text, system_prompt, response_model, *, max_tokens=4096, temperature=0.0, stage="unknown"
+        ):
             captured_texts.append(text)
             from alayaos_core.llm.interface import LLMUsage
 

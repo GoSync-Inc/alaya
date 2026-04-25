@@ -98,15 +98,12 @@ async def test_phase_traces_written_with_integrator_run_id() -> None:
 
     # One trace per phase_usage
     assert mock_trace_repo.create.await_count == len(engine_result.phase_usages), (
-        f"Expected {len(engine_result.phase_usages)} trace.create calls, "
-        f"got {mock_trace_repo.create.await_count}"
+        f"Expected {len(engine_result.phase_usages)} trace.create calls, got {mock_trace_repo.create.await_count}"
     )
 
     for i, phase in enumerate(engine_result.phase_usages):
         call_kwargs = mock_trace_repo.create.call_args_list[i].kwargs
-        assert call_kwargs.get("integrator_run_id") == run_id, (
-            f"Phase {i}: integrator_run_id not set in trace kwargs"
-        )
+        assert call_kwargs.get("integrator_run_id") == run_id, f"Phase {i}: integrator_run_id not set in trace kwargs"
         # event_id must NOT be passed (or must be None/absent — integrator traces are not event-scoped)
         event_id_val = call_kwargs.get("event_id")
         assert event_id_val is None, f"Phase {i}: event_id should be None for integrator traces, got {event_id_val!r}"
@@ -182,9 +179,7 @@ async def test_phase_traces_recalc_usage_called_after_writes() -> None:
     recalc_index = call_order.index("recalc_usage")
     trace_indices = [i for i, v in enumerate(call_order) if v == "trace.create"]
     assert trace_indices, "No trace.create calls recorded"
-    assert all(i < recalc_index for i in trace_indices), (
-        "recalc_usage called before some trace writes"
-    )
+    assert all(i < recalc_index for i in trace_indices), "recalc_usage called before some trace writes"
 
 
 @pytest.mark.asyncio

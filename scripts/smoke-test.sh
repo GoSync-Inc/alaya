@@ -4,6 +4,9 @@ set -euo pipefail
 SMOKE_TIMEOUT="${SMOKE_TIMEOUT:-180}"
 API_URL="http://localhost:8000"
 
+export ALAYA_DATABASE_URL="${SMOKE_DATABASE_URL:-postgresql+asyncpg://alaya:alaya@postgres:5432/alaya}"
+export ALAYA_REDIS_URL="${SMOKE_REDIS_URL:-redis://redis:6379/0}"
+
 echo "=== Alaya Smoke Test ==="
 
 # Clean start — remove old volumes so seed.py prints the bootstrap key

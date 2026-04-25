@@ -15,7 +15,7 @@
 ## Operator Actions Required
 
 - pgvector >=0.8 required. Migration 008 and API startup fail fast when the installed extension is older.
-- Pin new databases with `CREATE EXTENSION IF NOT EXISTS vector VERSION '0.8.0';`.
+- Initialize new databases with `CREATE EXTENSION IF NOT EXISTS vector;`; the migration and API startup guards enforce the >=0.8 requirement.
 - Follow the deploy runbook in the Run 6.2 spec: drain workers before migration, or run the restricted/private-event backfill after a rolling deploy.
 - Run `uv run python -m alayaos_core.scripts.backfill_restricted_extraction --workspace-id <workspace> --dry-run` first, then rerun with `--apply` after reviewing the count.
 - The backfill selection uses `FOR UPDATE SKIP LOCKED` and skips events with pending/running extraction runs to reduce duplicate enqueue during concurrent operator invocations. Duplicate enqueue can still occur if two operators select the same skipped event before either process creates the new extraction run; rerun the dry-run and check worker/idempotency logs if multiple backfills run at once.

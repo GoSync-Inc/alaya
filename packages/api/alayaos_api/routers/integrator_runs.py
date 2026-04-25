@@ -17,8 +17,10 @@ from alayaos_core.models.api_key import APIKey
 from alayaos_core.repositories.base import BaseRepository
 from alayaos_core.repositories.integrator_action import IntegratorActionRepository
 from alayaos_core.repositories.integrator_run import IntegratorRunRepository
+from alayaos_core.repositories.pipeline_trace import PipelineTraceRepository
 from alayaos_core.schemas.integrator_action import IntegratorActionRead, IntegratorActionRollbackResponse
 from alayaos_core.schemas.integrator_run import IntegratorRunRead
+from alayaos_core.schemas.pipeline_trace import PipelineTraceRead
 
 router = APIRouter()
 
@@ -93,6 +95,22 @@ async def get_integrator_run(
     if run is None:
         raise _not_found(str(run_id))
     return data_response(IntegratorRunRead.model_validate(run))
+
+
+@router.get("/integrator-runs/{run_id}/trace")
+async def get_integrator_run_trace(
+    run_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_workspace_session)],
+    api_key: Annotated[APIKey, Depends(require_scope("read"))],
+):
+    """List all pipeline traces for an integrator run."""
+    run_repo = IntegratorRunRepository(session, api_key.workspace_id)
+    run = await run_repo.get_by_id(run_id)
+    if run is None:
+        raise _not_found(str(run_id))
+    trace_repo = PipelineTraceRepository(session, api_key.workspace_id)
+    traces = await trace_repo.list_by_integrator_run(run_id)
+    return {"data": [PipelineTraceRead.model_validate(t) for t in traces]}
 
 
 @router.post("/integrator-runs/trigger", status_code=202)

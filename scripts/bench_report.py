@@ -26,6 +26,7 @@ import math
 import statistics
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import Connection, text
@@ -122,13 +123,19 @@ def _get_pipeline_traces(conn: Connection, workspace_id: uuid.UUID, started_at: 
 
 
 def _serialize_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Convert non-JSON-serialisable types (UUID, datetime) to strings."""
+    """Convert non-JSON-serialisable types (UUID, datetime, Decimal) to native JSON types.
+
+    Postgres NUMERIC columns (cost_usd) come back as Decimal; convert to float for
+    manifest.json serialisation.
+    """
     out: dict[str, Any] = {}
     for k, v in row.items():
         if isinstance(v, uuid.UUID):
             out[k] = str(v)
         elif isinstance(v, datetime):
             out[k] = v.isoformat()
+        elif isinstance(v, Decimal):
+            out[k] = float(v)
         else:
             out[k] = v
     return out

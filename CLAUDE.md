@@ -168,18 +168,27 @@ Tree: GET /tree, GET /tree/{path}, POST /tree/export
 ## LLM Architecture (Run 2+)
 
 Model-agnostic: `LLMServiceInterface` with provider adapters.
-- `AnthropicAdapter`: Production provider (Haiku for classification, Sonnet for extraction/integration); coerces JSON-string values for top-level `list[...]` / `list[...] | None` fields before Pydantic validation (`_coerce_list_strings` in `llm/anthropic.py`); populates granular token classes (`tokens_in`, `tokens_out`, `tokens_cached`, `cache_write_5m_tokens`, `cache_write_1h_tokens`) from Anthropic usage objects; uses `llm/pricing.py` single source for model cost math.
-- `FakeLLMAdapter`: Deterministic test responses with domain-specific overrides
+- `AnthropicAdapter`: Production provider (Haiku for classification, Sonnet for extraction/integration); coerces JSON-string values for top-level `list[...]` / `list[...] | None` fields before Pydantic validation (`_coerce_list_strings` in `llm/anthropic.py`); populates granular token classes (`tokens_in`, `tokens_out`, `tokens_cached`, `cache_write_5m_tokens`, `cache_write_1h_tokens`) from Anthropic usage objects; uses `llm/pricing.py` single source for model cost math; emits `llm.call_completed` after every API call.
+- `FakeLLMAdapter`: Deterministic test responses with domain-specific overrides; emits `llm.call_completed` with `model="fake"`, `latency_ms=0`.
 - `LLMServiceInterface.extract()` accepts `stage: str = "unknown"` kwarg for pipeline trace labeling. Every call site must pass a meaningful stage string (e.g. `"cortex:classify"`, `"crystallizer:extract"`, `"integrator:enricher"`, `"ask:answer"`, `"tree:briefing"`).
 - `LLMUsage` has `total_input` and `cache_hit_ratio` properties.
 Config: per-stage model selection via `CORTEX_CLASSIFIER_MODEL`, `CRYSTALLIZER_MODEL`, `INTEGRATOR_MODEL`.
 Provider-specific features preserved — no lowest common denominator.
 `IntegratorEngine.run()` never raises — always returns `IntegratorRunResult` (status: `completed`/`failed`/`skipped`). Phase failures are caught per savepoint; partial `phase_usages` from completed phases are preserved in the result. `job_integrate` writes one `PipelineTrace` per `IntegratorPhaseUsage` (with `integrator_run_id` set, `event_id=None`) then calls `recalc_usage()`. `GET /integrator-runs/{id}/trace` exposes these traces with granular token columns.
 
+## LLM Observability Events (structlog only — no Prometheus/OpenTelemetry)
+
+All events emitted by `packages/core/alayaos_core/llm/observability.py` via `structlog.get_logger("alayaos.llm")`:
+
+- `llm.call_completed` — after every LLM API call. Fields: `model`, `stage`, `latency_ms`, `tokens_in`, `tokens_out`, `tokens_cached`, `cache_write_5m_tokens`, `cache_write_1h_tokens`, `total_input`, `cache_hit_ratio`, `cost_usd`. Emitted by `AnthropicAdapter` and `FakeLLMAdapter`; flows naturally from `FallbackLLMAdapter` through the inner adapter.
+- `llm.run_aggregated` — after `recalc_usage()` at terminal extraction/integrator run. Fields: `scope` ("extraction"|"integrator"), `run_id`, `workspace_id`, `tokens_in`, `tokens_out`, `tokens_cached`, `cache_write_5m_tokens`, `cache_write_1h_tokens`, `cost_usd`, `tokens_used`, `total_input`, `cache_hit_ratio`, optional `stage_breakdown`. Emitted by `ExtractionRunRepository.recalc_usage` and `IntegratorRunRepository.recalc_usage`.
+- `llm.cache_miss_below_threshold` — warning emitted when `total_input < MODEL_CACHE_MINIMUM[model]` (prompt too small to benefit from caching). Fields: `model`, `stage`, `total_input`, `minimum`. Silenced for the fake adapter (no `"fake"` key in `MODEL_CACHE_MINIMUM`).
+- `llm.cache_breakdown_unavailable` — warning emitted once per process per model when the Anthropic `cache_creation` nested object is absent. Uses module-level `_cache_breakdown_warned: set[str]` guard in `observability.py`; reset in tests via `monkeypatch.setattr(observability, "_cache_breakdown_warned", set())`.
+
 ## Scripts
 
 - `scripts/audit_part_of_hierarchy.py` — read-only preflight audit: `--workspace-id <uuid> [--sample-size N]`; exit 0 = clean, exit 1 = violations found with sample rows.
-- `scripts/bench.py` — bench harness: spins up a stack, ingests fixtures (small/medium/large), measures extraction latency, LLM cost, entity/claim counts; outputs JSON reports to `bench_results/`.
-- `scripts/bench_report.py` — DB query module called by `bench.py` during the report phase; queries `extraction_runs`, `integrator_runs`, and `pipeline_traces` for the bench workspace and returns a single-run Markdown summary (latency, cost, quality proxies) plus the JSON-serialisable manifest data.
+- `scripts/bench.py` — bench harness: spins up a stack, ingests fixtures (small/medium/large), measures extraction latency, LLM cost, entity/claim counts; outputs JSON reports to `bench_results/`. Flags: `--fixture`, `--keep`, `--reuse`, `--timeout-seconds`, `--cache-warm-check` (runs bench twice: warm-up + measurement; asserts cortex `cache_hit_ratio > 0.5`; exits 7 on failure — `EXIT_CACHE_WARM_FAIL = 7`).
+- `scripts/bench_report.py` — DB query module called by `bench.py` during the report phase; queries `extraction_runs`, `integrator_runs`, and `pipeline_traces` (including granular token columns) for the bench workspace; returns a single-run Markdown summary (latency, cost, quality proxies, `cache_hit_ratio` per stage) plus the JSON-serialisable manifest data with `cache_hit_ratio_per_stage` block.
 
 <!-- updated-by-superflow:2026-04-25 -->

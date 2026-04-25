@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from anthropic.types import ToolParam
     from pydantic import BaseModel
 
+
 def _is_list_annotation(annotation: object) -> bool:
     """Return True if *annotation* represents a list type (including Optional[list[...]])."""
     origin = typing.get_origin(annotation)

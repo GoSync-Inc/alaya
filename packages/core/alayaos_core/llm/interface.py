@@ -18,7 +18,7 @@ class LLMUsage(BaseModel):
     cache_write_1h_tokens: int = 0  # = usage.cache_creation.ephemeral_1h_input_tokens
 
     @classmethod
-    def zero(cls) -> "LLMUsage":
+    def zero(cls) -> LLMUsage:
         """Return an all-zero LLMUsage instance."""
         return cls(
             tokens_in=0,
@@ -30,7 +30,7 @@ class LLMUsage(BaseModel):
         )
 
     @classmethod
-    def combine(cls, *usages: "LLMUsage") -> "LLMUsage":
+    def combine(cls, *usages: LLMUsage) -> LLMUsage:
         """Sum all fields across one or more LLMUsage instances.
 
         All six token classes (tokens_in, tokens_out, tokens_cached,

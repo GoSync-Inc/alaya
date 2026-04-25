@@ -112,6 +112,17 @@ Tenant isolation via PostgreSQL RLS (`SET LOCAL app.workspace_id`). Composite FK
 - Structured output extraction using provider-native tool-call / JSON mode.
 - `FakeLLMAdapter` for deterministic testing.
 
+## LLM Observability (structlog only — no Prometheus/OpenTelemetry)
+
+`packages/core/alayaos_core/llm/observability.py` — observability module with 4 structured log events via `structlog.get_logger("alayaos.llm")`:
+
+- `llm.call_completed` — after every LLM API call. Fields: `model`, `stage`, `latency_ms`, `tokens_in`, `tokens_out`, `tokens_cached`, `cache_write_5m_tokens`, `cache_write_1h_tokens`, `total_input`, `cache_hit_ratio`, `cost_usd`. Both `AnthropicAdapter` (measures wall-clock latency) and `FakeLLMAdapter` (`model="fake"`, `latency_ms=0`) emit this event. `FallbackLLMAdapter` does NOT emit it directly — observability flows from the inner adapter.
+- `llm.run_aggregated` — after `recalc_usage()` at a terminal extraction or integrator run. Fields: `scope` ("extraction"|"integrator"), `run_id`, `workspace_id`, `tokens_in`, `tokens_out`, `tokens_cached`, `cache_write_5m_tokens`, `cache_write_1h_tokens`, `cost_usd`, `tokens_used`, `total_input`, `cache_hit_ratio`, optional `stage_breakdown`. Emitted by `ExtractionRunRepository.recalc_usage` and `IntegratorRunRepository.recalc_usage` (only when traces exist — the no-traces guard skips both the UPDATE and the emit).
+- `llm.cache_miss_below_threshold` — WARNING when `total_input < MODEL_CACHE_MINIMUM[model]`. Fields: `model`, `stage`, `total_input`, `minimum`. Silenced for `model="fake"` (no key in `MODEL_CACHE_MINIMUM`). Diagnostic signal that prompt context is too small to benefit from prompt caching.
+- `llm.cache_breakdown_unavailable` — WARNING emitted once per process per model when the Anthropic `cache_creation` nested object is absent from the API response (older SDK or unexpected shape). Uses module-level `_cache_breakdown_warned: set[str]` guard; reset in tests via `monkeypatch.setattr(observability, "_cache_breakdown_warned", set())`.
+
+`MODEL_CACHE_MINIMUM` in `llm/pricing.py` defines per-model minimum input token thresholds (Anthropic prompt-cache eligibility); `"fake"` is intentionally absent to silence alarms in test mode.
+
 ## Search & Q&A
 
 - **Hybrid search** (`POST /search`): 3-channel Reciprocal Rank Fusion — vector (pgvector HNSW cosine), FTS (websearch_to_tsquery), entity name (pg_trgm similarity). Evidence-first response with source attribution.

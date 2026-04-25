@@ -9,6 +9,7 @@ import os
 
 import pytest
 
+from alayaos_core.config import Settings
 from alayaos_core.extraction.cortex.classifier import _CLASSIFICATION_SYSTEM_PROMPT
 
 
@@ -22,7 +23,7 @@ def test_classifier_prompt_anthropic_token_count() -> None:
 
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     response = client.messages.count_tokens(
-        model="claude-haiku-4-5",
+        model=Settings().CORTEX_CLASSIFIER_MODEL,
         system=_CLASSIFICATION_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": "hello"}],
     )

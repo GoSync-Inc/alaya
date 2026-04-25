@@ -88,8 +88,8 @@ async def test_should_extract_restricted_extracts_and_logs_sensitive_event() -> 
 
 
 @pytest.mark.asyncio
-async def test_should_extract_private_extracts_and_logs_sensitive_event() -> None:
-    """Private events extract; retrieval ACL handles visibility later."""
+async def test_should_extract_private_without_optin_skips() -> None:
+    """Private events remain gated by workspace opt-in."""
     from alayaos_core.extraction.pipeline import should_extract
 
     session = MagicMock()
@@ -98,15 +98,23 @@ async def test_should_extract_private_extracts_and_logs_sensitive_event() -> Non
     run_repo.update_status = AsyncMock()
 
     event = _make_event(access_level="private")
-    with patch("alayaos_core.extraction.pipeline.log.info") as mock_info:
+    workspace = MagicMock()
+    workspace.settings = {"extract_private": False}
+
+    mock_ws_repo = AsyncMock()
+    mock_ws_repo.get_by_id = AsyncMock(return_value=workspace)
+
+    with (
+        patch("alayaos_core.extraction.pipeline.WorkspaceRepository", return_value=mock_ws_repo),
+        patch("alayaos_core.extraction.pipeline.log.info") as mock_info,
+    ):
         result = await should_extract(event, run, run_repo, session)
 
-    assert result is True
-    run_repo.update_status.assert_not_called()
+    assert result is False
+    run_repo.update_status.assert_awaited_once_with(run.id, "skipped", error_message="private without opt-in")
     mock_info.assert_called_once_with(
-        "extraction.sensitive_event_extracting",
+        "skipping_private_no_optin",
         event_id=str(event.id),
-        access_level="private",
     )
 
 

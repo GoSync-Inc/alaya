@@ -27,12 +27,7 @@ Return scores for ALL domains. Multiple domains can score high simultaneously.""
 
 
 def _combine_usage(u1: LLMUsage, u2: LLMUsage) -> LLMUsage:
-    return LLMUsage(
-        tokens_in=u1.tokens_in + u2.tokens_in,
-        tokens_out=u1.tokens_out + u2.tokens_out,
-        tokens_cached=u1.tokens_cached + u2.tokens_cached,
-        cost_usd=u1.cost_usd + u2.cost_usd,
-    )
+    return LLMUsage.combine(u1, u2)
 
 
 class CortexClassifier:

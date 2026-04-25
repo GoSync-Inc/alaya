@@ -79,6 +79,7 @@ GET  /events/{id}/trace   — pipeline execution trace
 GET  /integrator-runs
 GET  /integrator-runs/{id}
 POST /integrator-runs/trigger
+GET  /integrator-runs/{id}/trace — per-integrator-run pipeline traces (granular token columns; event_id=None)
 GET  /integrator-actions
 POST /integrator-actions/{id}/rollback
 POST /search              — hybrid 3-channel RRF search
@@ -94,12 +95,12 @@ POST /admin/backfill-embeddings
 
 ## Data Model
 
-23 tables across 4 layers (Alembic migrations 001-008):
+23 tables across 4 layers (Alembic migrations 001-009):
 
 - **L0 Events** — Raw ingested events with source metadata. `l0_chunks` stores chunked text segments per event.
 - **L1 Entities** — Resolved named entities (person, project, team, etc.). 13 seeded entity types, 21 seeded predicates per workspace.
 - **L2 Claims + Relations** — Structured facts with confidence scores and `extraction_run_id` provenance.
-- **Extraction Runs** — Tracks each pipeline execution: status (`pending` → `extracting` → `cortex_complete` → `completed` | `failed`), token usage, cost, timestamps. On task exception, `job_cortex`/`job_crystallize`/`job_write` call `ExtractionRunRepository.mark_failed` in a fresh transaction; idempotent for terminal states. At every terminal transition (completed or failed) `ExtractionRunRepository.recalc_usage` SUMs `tokens_in`/`cost_usd` from `pipeline_traces` into the run row; the update is skipped when no traces exist, preserving values written directly by the legacy non-Cortex path. `pipeline_traces` captures per-step execution details; `integrator_runs` tracks knowledge graph integration runs.
+- **Extraction Runs** — Tracks each pipeline execution: status (`pending` → `extracting` → `cortex_complete` → `completed` | `failed`), token usage, cost, timestamps. On task exception, `job_cortex`/`job_crystallize`/`job_write` call `ExtractionRunRepository.mark_failed` in a fresh transaction; idempotent for terminal states. At every terminal transition (completed or failed) `ExtractionRunRepository.recalc_usage` SUMs `tokens_in`/`cost_usd` from `pipeline_traces` into the run row; the update is skipped when no traces exist, preserving values written directly by the legacy non-Cortex path. `pipeline_traces` captures per-step execution details with granular token columns (`tokens_in`, `tokens_out`, `tokens_cached`, `cache_write_5m_tokens`, `cache_write_1h_tokens`) and optional `integrator_run_id` FK (migration 009). Integrator-scoped traces have `event_id=NULL`. `integrator_runs` tracks knowledge graph integration runs; each run's per-phase cost is captured via `IntegratorPhaseUsage` objects written as `pipeline_traces` by `job_integrate`.
 
 Tenant isolation via PostgreSQL RLS (`SET LOCAL app.workspace_id`). Composite FK `(workspace_id, id)` prevents cross-workspace references. All relation writes enforce self-reference rejection. `part_of` relations enforce ENTITY_TYPE_TIER_RANK ordering by default (`ALAYA_PART_OF_STRICT=strict` in `repositories/relation.py`); `warn` logs `part_of.tier_violation` and persists, while `off` skips tier-rank validation.
 
@@ -107,6 +108,9 @@ Tenant isolation via PostgreSQL RLS (`SET LOCAL app.workspace_id`). Composite FK
 
 - **Model-agnostic** via `LLMServiceInterface`. Anthropic Claude is primary; OpenAI/Ollama/vllm planned.
 - Per-stage model config: `CORTEX_CLASSIFIER_MODEL`, `CRYSTALLIZER_MODEL`, `INTEGRATOR_MODEL`
+- `LLMServiceInterface.extract()` accepts `stage: str = "unknown"` kwarg; every call site passes a meaningful label (e.g. `"cortex:classify"`, `"crystallizer:extract"`, `"integrator:enricher"`, `"ask:answer"`, `"tree:briefing"`) which is stored on the pipeline trace.
+- `LLMUsage` fields: `tokens_in`, `tokens_out`, `tokens_cached`, `cache_write_5m_tokens`, `cache_write_1h_tokens`, `cost_usd`. Costs computed via `llm/pricing.py` (single source, `ModelPrice.cost_usd(usage)`).
+- `IntegratorEngine.run()` never raises — always returns `IntegratorRunResult(status: completed|failed|skipped)`. Phase failures are caught per SAVEPOINT; partial `phase_usages` from completed phases are preserved.
 - Structured output extraction using provider-native tool-call / JSON mode.
 - `FakeLLMAdapter` for deterministic testing.
 

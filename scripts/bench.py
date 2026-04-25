@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid as uuid_mod
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -162,8 +163,13 @@ def phase_preflight() -> int:
 
 
 def phase_preflight_reuse() -> int:
-    """Lighter preflight for --reuse (skip port checks, services are already up)."""
-    _log("Phase 1: preflight (reuse mode — skipping port checks)")
+    """Lighter preflight for --reuse.
+
+    Checks docker daemon and ANTHROPIC_API_KEY, then does a 1-second TCP probe to the
+    API port (8000). If the port is not reachable, the stack is not running and the bench
+    will hang waiting for health — fail fast instead.
+    """
+    _log("Phase 1: preflight (reuse mode)")
 
     result = subprocess.run(["docker", "info"], capture_output=True, text=True, timeout=10)
     if result.returncode != 0:
@@ -173,6 +179,13 @@ def phase_preflight_reuse() -> int:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         _log("FAIL: ANTHROPIC_API_KEY is not set.")
         return EXIT_PREFLIGHT
+
+    # Fast-fail if the API port is not reachable — avoids long health-wait timeouts.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1.0)
+        if s.connect_ex(("127.0.0.1", 8000)) != 0:
+            _log("FAIL: --reuse requires the stack to be running. Run 'just up' first.")
+            return EXIT_PREFLIGHT
 
     _log("Preflight OK (reuse)")
     return EXIT_SUCCESS
@@ -216,6 +229,12 @@ def phase_wait(deadline: float) -> int:
 def phase_bootstrap(deadline: float) -> tuple[int, str, str]:
     """Create a workspace and API key. Returns (exit_code, workspace_id, key_tempfile_path).
 
+    The workspace is created via the HTTP API (requires bootstrap key).
+    The bench API key is created directly via the core service layer using an async DB
+    session scoped to the bench workspace — this ensures the key is bound to the correct
+    workspace (the HTTP POST /api-keys endpoint ignores body.workspace_id and always uses
+    the authenticated key's workspace, which is the bootstrap workspace, not the bench one).
+
     The API key is written to a temp file (mode 0600) and NEVER echoed.
     """
     _log("Phase 4: bootstrap workspace + API key")
@@ -232,7 +251,7 @@ def phase_bootstrap(deadline: float) -> tuple[int, str, str]:
     bootstrap_key = match.group(0)
 
     with httpx.Client(timeout=30.0) as client:
-        # Create workspace
+        # Create workspace via HTTP API (requires bootstrap key)
         r = client.post(
             f"{API_URL}/workspaces",
             headers={"X-Api-Key": bootstrap_key, "Content-Type": "application/json"},
@@ -245,26 +264,65 @@ def phase_bootstrap(deadline: float) -> tuple[int, str, str]:
         workspace_id = r.json()["data"]["id"]
         _log(f"Workspace created: {workspace_id[:8]}…")
 
-        # Create API key for the workspace
-        r = client.post(
-            f"{API_URL}/api-keys",
-            headers={"X-Api-Key": bootstrap_key, "Content-Type": "application/json"},
-            json={"workspace_id": workspace_id, "name": "bench-key", "scopes": ["write"]},
-        )
-        if r.status_code not in (200, 201):
-            _log(f"FAIL: api-key create returned {r.status_code}: {r.text[:200]}")
-            return EXIT_PREFLIGHT, workspace_id, ""
+    # Create the bench API key directly via the core service — NOT via HTTP.
+    # The POST /api-keys endpoint ignores body.workspace_id and binds the key to the
+    # authenticated key's workspace (bootstrap workspace), causing all bench ingest to
+    # land in the wrong workspace and report queries to return 0 rows.
+    # Scope includes 'admin' so the bench key can trigger integrator runs (POST /integrator-runs/trigger).
+    import asyncio
 
-        raw_key = r.json()["data"]["key"]
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.orm import sessionmaker
 
-        # Write key to temp file with restricted permissions — never echo it
-        fd, key_path = tempfile.mkstemp(prefix="alaya-bench-", dir=os.environ.get("TMPDIR", "/tmp"))
-        os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)
-        with os.fdopen(fd, "w") as f:
-            f.write(raw_key)
+    db_url = os.environ.get(
+        "ALAYA_DATABASE_URL",
+        "postgresql+asyncpg://alaya:alaya@localhost:5432/alaya",
+    )
 
-        _log("API key written to temp file (not echoed)")
-        return EXIT_SUCCESS, workspace_id, key_path
+    async def _create_key() -> str:
+        from sqlalchemy import text as _text
+
+        from alayaos_core.services.api_key import create_api_key
+
+        engine = create_async_engine(db_url, future=True)
+        async_session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        try:
+            async with async_session_factory() as session, session.begin():
+                ws_uuid = uuid_mod.UUID(workspace_id)
+                validated_wid = str(ws_uuid)
+                # Set RLS context so the insert is accepted by the workspace-scoped policy
+                await session.execute(_text(f"SET LOCAL app.workspace_id = '{validated_wid}'"))
+                api_key_obj, raw_key = await create_api_key(
+                    session=session,
+                    workspace_id=ws_uuid,
+                    name="bench-key",
+                    scopes=["read", "write", "admin"],
+                )
+                # Sanity check: key must be bound to bench workspace
+                assert api_key_obj.workspace_id == ws_uuid, (
+                    f"Key workspace mismatch: {api_key_obj.workspace_id} != {ws_uuid}"
+                )
+                return raw_key
+        finally:
+            await engine.dispose()
+
+    loop = asyncio.new_event_loop()
+    try:
+        raw_key = loop.run_until_complete(_create_key())
+    except Exception as e:
+        _log(f"FAIL: bench API key creation failed: {e}")
+        return EXIT_PREFLIGHT, workspace_id, ""
+    finally:
+        loop.close()
+
+    # Write key to temp file with restricted permissions — never echo it
+    fd, key_path = tempfile.mkstemp(prefix="alaya-bench-", dir=os.environ.get("TMPDIR", "/tmp"))
+    os.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)
+    with os.fdopen(fd, "w") as f:
+        f.write(raw_key)
+
+    _log("API key written to temp file (not echoed)")
+    return EXIT_SUCCESS, workspace_id, key_path
 
 
 def phase_ingest(
@@ -316,8 +374,9 @@ def phase_drain(
                     r = client.get(f"{API_URL}/extraction-runs/{run_id}", headers=headers)
                     if r.status_code == 200:
                         status = r.json()["data"]["status"]
+                        prev = statuses.get(run_id)
                         statuses[run_id] = status
-                        if status in terminal and run_id not in statuses:
+                        if status in terminal and prev not in terminal:
                             _log(f"  run {run_id[:8]} → {status}")
                 except Exception:
                     pass
@@ -373,6 +432,71 @@ def phase_integrator(key_path: str, workspace_id: str, deadline: float) -> tuple
     return EXIT_INTEGRATOR_TIMEOUT, integrator_run_id
 
 
+# Env var names whose values are masked in model_versions (same semantics as env_summary).
+# Charter §11: .env content NEVER written to manifest.json — values masked to set/unset.
+_MODEL_VERSION_KEYS: tuple[str, ...] = (
+    "CORTEX_CLASSIFIER_MODEL",
+    "CRYSTALLIZER_MODEL",
+    "INTEGRATOR_MODEL",
+    "ASK_MODEL",
+    "TREE_BRIEFING_MODEL",
+)
+
+
+def _build_manifest(
+    *,
+    fixture_path: Path,
+    fixture_name: str,
+    fixture_meta: dict[str, Any],
+    git_sha: str,
+    ts_started: datetime,
+    ts_completed: datetime,
+    exit_code: int,
+    exit_phase: str,
+    args_fixture: str,
+    args_keep: bool,
+    args_reuse: bool,
+    args_timeout_seconds: int,
+) -> dict[str, Any]:
+    """Build the base manifest dict without touching the network or DB.
+
+    All env values are masked to 'set'/'unset' — never raw values.
+    This is a pure function (no I/O) so it can be tested in isolation.
+    """
+    env_sum = _env_summary()
+    model_versions: dict[str, str] = {k: ("set" if os.environ.get(k) else "unset") for k in _MODEL_VERSION_KEYS}
+
+    if exit_code == EXIT_SUCCESS:
+        result_type = "complete"
+    elif exit_phase == "drain":
+        result_type = "partial_drain"
+    elif exit_phase == "integrator":
+        result_type = "partial_integrator"
+    elif exit_phase == "preflight":
+        result_type = "preflight_failed"
+    else:
+        result_type = "complete"
+
+    return {
+        "schema_version": 1,
+        "git_sha": git_sha,
+        "ts_started": ts_started.isoformat(),
+        "ts_completed": ts_completed.isoformat(),
+        "fixture": fixture_meta,
+        "model_versions": model_versions,
+        "env_summary": env_sum,
+        "command_args": {
+            "fixture": args_fixture,
+            "keep": args_keep,
+            "reuse": args_reuse,
+            "timeout_seconds": args_timeout_seconds,
+        },
+        "exit_code": exit_code,
+        "exit_phase": exit_phase,
+        "result": result_type,
+    }
+
+
 def phase_report(
     out_dir: Path,
     workspace_id: str,
@@ -391,18 +515,6 @@ def phase_report(
     _log(f"Phase 8: report → {out_dir}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build env_summary — NEVER include values, only set/unset status
-    env_sum = _env_summary()
-
-    # Build model_versions from env vars (values allowed — these are model names not secrets)
-    model_versions = {
-        "cortex_classifier_model": os.environ.get("CORTEX_CLASSIFIER_MODEL", "unset"),
-        "crystallizer_model": os.environ.get("CRYSTALLIZER_MODEL", "unset"),
-        "integrator_model": os.environ.get("INTEGRATOR_MODEL", "unset"),
-        "ask_model": os.environ.get("ASK_MODEL", "unset"),
-        "tree_briefing_model": os.environ.get("TREE_BRIEFING_MODEL", "unset"),
-    }
-
     # Fixture metadata
     fixture_meta = {
         "name": fixture_name,
@@ -411,36 +523,20 @@ def phase_report(
         "event_count": FIXTURE_EVENT_COUNTS.get(fixture_name, len(ingest_results)),
     }
 
-    # Determine result type
-    if exit_code == EXIT_SUCCESS:
-        result_type = "complete"
-    elif exit_phase == "drain":
-        result_type = "partial_drain"
-    elif exit_phase == "integrator":
-        result_type = "partial_integrator"
-    elif exit_phase == "preflight":
-        result_type = "preflight_failed"
-    else:
-        result_type = "complete"
-
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "git_sha": git_sha,
-        "ts_started": ts_started.isoformat(),
-        "ts_completed": ts_completed.isoformat(),
-        "fixture": fixture_meta,
-        "model_versions": model_versions,
-        "env_summary": env_sum,
-        "command_args": {
-            "fixture": fixture_name,
-            "keep": args.keep,
-            "reuse": args.reuse,
-            "timeout_seconds": args.timeout_seconds,
-        },
-        "exit_code": exit_code,
-        "exit_phase": exit_phase,
-        "result": result_type,
-    }
+    manifest = _build_manifest(
+        fixture_path=fixture_path,
+        fixture_name=fixture_name,
+        fixture_meta=fixture_meta,
+        git_sha=git_sha,
+        ts_started=ts_started,
+        ts_completed=ts_completed,
+        exit_code=exit_code,
+        exit_phase=exit_phase,
+        args_fixture=fixture_name,
+        args_keep=args.keep,
+        args_reuse=args.reuse,
+        args_timeout_seconds=args.timeout_seconds,
+    )
 
     # Write manifest — security: no ak_ keys in any value
     manifest_path = out_dir / "manifest.json"
@@ -453,31 +549,28 @@ def phase_report(
         "postgresql+asyncpg://alaya:alaya@localhost:5432/alaya",
     )
     try:
-        import asyncio
+        from sqlalchemy import create_engine
+        from sqlalchemy import text as _sql_text
 
         from scripts.bench_report import format_summary
 
-        async def _run_report() -> tuple[dict[str, Any], str]:
-
+        def _run_report() -> tuple[dict[str, Any], str]:
             # Use sync URL for bench_report (simpler for script context)
             sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
-            from sqlalchemy import create_engine
-
             engine = create_engine(sync_url, future=True)
-            with engine.connect() as conn:
-                import uuid as uuid_mod
-
-                ws_id = uuid_mod.UUID(workspace_id)
+            ws_id = uuid_mod.UUID(workspace_id)
+            with engine.begin() as conn:
+                # Set RLS workspace context so workspace-scoped tables return rows.
+                # set_config(..., false) = session-local (safe for a single-use connection).
+                conn.execute(
+                    _sql_text("SELECT set_config('app.workspace_id', :wid, false)"),
+                    {"wid": str(ws_id)},
+                )
                 manifest_data, summary_text = format_summary(conn, ws_id, ts_started)
             engine.dispose()
             return manifest_data, summary_text
 
-        # Run synchronously since bench.py is a script
-        loop = asyncio.new_event_loop()
-        try:
-            report_data, summary_text = loop.run_until_complete(_run_report())
-        finally:
-            loop.close()
+        report_data, summary_text = _run_report()
 
         # Merge report data into manifest
         manifest.update(report_data)
@@ -539,7 +632,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reuse",
         action="store_true",
-        help="Skip docker compose up (assume stack is already running)",
+        help=(
+            "Skip docker compose up/down (stack is externally managed). "
+            "Requires 'just up' to be running. Teardown is skipped — "
+            "caller is responsible for shutting down the stack."
+        ),
     )
     parser.add_argument(
         "--timeout-seconds",
@@ -577,6 +674,9 @@ def main() -> int:
     workspace_id: str = ""
     ingest_results: list[dict[str, Any]] = []
     integrator_run_id: str | None = None
+    # Track whether this bench invocation started the docker stack.
+    # Only run teardown if we own the stack (not --reuse, and phase_up succeeded).
+    we_started_stack: bool = False
 
     try:
         # Phase 1: preflight
@@ -589,6 +689,7 @@ def main() -> int:
             rc = phase_up()
             if rc != EXIT_SUCCESS:
                 return rc
+            we_started_stack = True
 
         # Phase 3: wait
         rc = phase_wait(deadline)
@@ -680,11 +781,15 @@ def main() -> int:
             except Exception:
                 pass
 
-        # Phase 9: teardown
-        if not args.keep:
+        # Phase 9: teardown — only if we started the stack in this run.
+        # With --reuse the stack is externally owned; with preflight failures
+        # before phase_up, we_started_stack stays False and no teardown happens.
+        if we_started_stack and not args.keep:
             phase_teardown()
-        else:
+        elif args.keep:
             _log("--keep: skipping teardown")
+        elif args.reuse:
+            _log("--reuse: stack externally owned, skipping teardown")
 
 
 if __name__ == "__main__":

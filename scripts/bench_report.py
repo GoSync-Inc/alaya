@@ -342,27 +342,21 @@ def _format_summary_md(
     lines.append("")
 
     # Tokens (per-stage totals from traces)
+    # S1: only tokens_used is available in pipeline_traces. tokens_in/out/cached and
+    # cache_hit_ratio will be added in S3 after migration 009 adds those columns.
     lines.append("## Token Usage (per stage, from pipeline_traces)")
     lines.append("")
-    lines.append("| Stage | tokens_in | tokens_out | tokens_cached | cache_read | cache_hit_ratio |")
-    lines.append("|-------|-----------|------------|---------------|------------|-----------------|")
-    stage_tokens: dict[str, dict[str, int]] = {}
+    lines.append("| Stage | tokens_used | cache_hit_ratio |")
+    lines.append("|-------|-------------|-----------------|")
+    stage_tokens: dict[str, int] = {}
     for t in pipeline_traces:
         stage = t.get("stage") or "unknown"
-        if stage not in stage_tokens:
-            stage_tokens[stage] = {"tokens_in": 0, "tokens_out": 0, "tokens_cached": 0}
-        stage_tokens[stage]["tokens_in"] += t.get("tokens_in") or 0
-        stage_tokens[stage]["tokens_out"] += t.get("tokens_out") or 0
-        stage_tokens[stage]["tokens_cached"] += t.get("tokens_cached") or 0
+        stage_tokens[stage] = stage_tokens.get(stage, 0) + (t.get("tokens_used") or 0)
     if stage_tokens:
         for stage, tok in sorted(stage_tokens.items()):
-            ti = tok["tokens_in"]
-            to_ = tok["tokens_out"]
-            tc = tok["tokens_cached"]
-            # Cache hit ratio: n/a in S1 (columns don't exist yet in legacy schema)
-            lines.append(f"| {stage} | {ti} | {to_} | {tc} | n/a | n/a |")
+            lines.append(f"| {stage} | {tok} | n/a |")
     else:
-        lines.append("| — | 0 | 0 | 0 | n/a | n/a |")
+        lines.append("| — | 0 | n/a |")
     lines.append("")
 
     # Cost

@@ -15,11 +15,18 @@ def _make_session_mock(rows: list | None = None) -> AsyncMock:
 
     The new v2 audit code calls result.fetchall() (sync) after await session.execute(...).
     A plain AsyncMock returns another coroutine for fetchall() — this helper fixes that.
+
+    Also configures begin_nested() as a sync MagicMock returning an async CM, since
+    the engine wraps each phase in `async with session.begin_nested():` (SAVEPOINT).
     """
     mock_result = MagicMock()
     mock_result.fetchall.return_value = rows if rows is not None else []
     session = AsyncMock()
     session.execute.return_value = mock_result
+    nested_cm = MagicMock()
+    nested_cm.__aenter__ = AsyncMock(return_value=None)
+    nested_cm.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested = MagicMock(return_value=nested_cm)
     return session
 
 

@@ -383,7 +383,8 @@ async def test_recalc_usage_sums_traces():
     update_call_args = session.execute.call_args_list[1]
     stmt = update_call_args.args[0]
     compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
-    assert "tokens_used" in compiled
+    # ExtractionRun has tokens_in/tokens_out/cost_usd (no tokens_used scalar column)
+    assert "tokens_in" in compiled
     assert "cost_usd" in compiled
     # UUID may be rendered without dashes in compiled SQL
     assert run_id.hex in compiled

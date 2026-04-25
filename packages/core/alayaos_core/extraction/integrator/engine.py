@@ -34,9 +34,11 @@ from alayaos_core.extraction.integrator.schemas import (
     DuplicatePair,
     EnrichmentAction,
     EntityWithContext,
+    IntegratorPhaseUsage,
     IntegratorRunResult,
 )
 from alayaos_core.extraction.writer import acquire_workspace_lock, release_workspace_lock
+from alayaos_core.llm.interface import LLMUsage
 from alayaos_core.repositories.errors import HierarchyViolationError
 
 log = structlog.get_logger()
@@ -152,10 +154,22 @@ class IntegratorEngine:
         run_id: uuid.UUID,
         session,
     ) -> IntegratorRunResult:
-        """Execute the integrator multi-pass loop (called while lock is held)."""
+        """Execute the integrator multi-pass loop (called while lock is held).
+
+        Each logical phase (panoramic, dedup, enricher) is wrapped in
+        `session.begin_nested()` (PostgreSQL SAVEPOINT). A phase exception:
+        - Rolls back only that phase's KG mutations (savepoint released on exception).
+        - Sets result.status = "failed" + records error_message.
+        - Breaks the phase loop; preceding phases' mutations remain in the outer transaction.
+
+        The engine NEVER re-raises phase exceptions — the caller receives a
+        valid IntegratorRunResult whose status reflects the outcome.
+        """
         from alayaos_core.repositories.integrator_action import IntegratorActionRepository
 
         start_ms = int(time.time() * 1000)
+        phase_usages: list[IntegratorPhaseUsage] = []
+        result = IntegratorRunResult(status="completed", phase_usages=phase_usages)
 
         # Step 1: Drain dirty-set atomically via RENAME
         dirty_key = f"dirty_set:{workspace_id}"
@@ -208,15 +222,18 @@ class IntegratorEngine:
         # Action repo for persisting audit records
         action_repo = IntegratorActionRepository(session)
 
-        # Multi-pass convergence loop
+        # Zero-cost usage placeholder (LLM calls within phases do not yet thread usage back).
+        # Phase cost tracking is additive; individual LLM call costs are emitted as pipeline_traces.
+        _zero_usage = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
+
+        # Multi-pass convergence loop — each pass runs panoramic + dedup under separate savepoints.
         pass_number = 1
         convergence_reason = "max_passes"  # default if loop completes without break
         previous_hash: int | None = None
 
+        phase_loop_failed = False
         for pass_number in range(1, _MAX_PASSES + 1):
             # Re-fetch entities on pass 2+ to avoid stale data after mutations.
-            # Re-query the window so newly created entities (e.g. from create_from_cluster)
-            # are picked up, and deleted entities are excluded.
             if pass_number > 1:
                 fresh_window = await self.entity_repo.list_recent(workspace_id, hours=window_hours)
                 all_entity_ids = dirty_entity_ids | {e.id for e in fresh_window}
@@ -230,43 +247,90 @@ class IntegratorEngine:
                 pass_number=pass_number,
             )
 
-            # ── Panoramic pass ──
-            panoramic_pass = PanoramicPass(llm_service=self.llm, session=session)
-            panoramic_result = await panoramic_pass.run(
-                workspace_id=workspace_id,
-                entities=entities_with_context,
-                entity_types=entity_types,
-                claims_by_entity=claims_by_entity,
-                relations_by_entity=relations_by_entity,
-            )
+            # ── Panoramic phase (SAVEPOINT) ──
+            panoramic_result_inner = None
+            applied_p = 0
+            phase_start_ms = int(time.time() * 1000)
+            try:
+                async with session.begin_nested():
+                    panoramic_pass = PanoramicPass(llm_service=self.llm, session=session)
+                    panoramic_result_inner = await panoramic_pass.run(
+                        workspace_id=workspace_id,
+                        entities=entities_with_context,
+                        entity_types=entity_types,
+                        claims_by_entity=claims_by_entity,
+                        relations_by_entity=relations_by_entity,
+                    )
+                    applied_p = await self._apply_panoramic_actions(
+                        panoramic_result_inner.actions,
+                        workspace_id,
+                        run_id,
+                        pass_number=pass_number,
+                        session=session,
+                        action_repo=action_repo,
+                    )
+                    noise_removed += sum(1 for a in panoramic_result_inner.actions if a.action == "remove_noise")
+                # Savepoint released — panoramic mutations persist in outer transaction
+                phase_usages.append(
+                    IntegratorPhaseUsage(
+                        stage="integrator:panoramic",
+                        pass_number=pass_number,
+                        usage=_zero_usage,
+                        duration_ms=int(time.time() * 1000) - phase_start_ms,
+                        details={"applied_actions": applied_p},
+                    )
+                )
+            except Exception as exc:
+                # Savepoint rolled back — panoramic mutations for this pass undone
+                result.status = "failed"
+                result.error_message = f"{type(exc).__name__}: {exc}"
+                log.warning(
+                    "integrator_panoramic_phase_failed",
+                    workspace_id=str(workspace_id),
+                    pass_number=pass_number,
+                    error=str(exc),
+                )
+                phase_loop_failed = True
+                break
 
-            applied_p = await self._apply_panoramic_actions(
-                panoramic_result.actions,
-                workspace_id,
-                run_id,
-                pass_number=pass_number,
-                session=session,
-                action_repo=action_repo,
-            )
-            # Count only the remove_noise actions (not reclassify/rewrite/etc.)
-            noise_removed += sum(1 for a in panoramic_result.actions if a.action == "remove_noise")
-
-            # ── Dedup v2 pass ──
+            # ── Dedup phase (SAVEPOINT) ──
             applied_d = 0
             dedup_signatures: list[str] = []
-            if entities_with_context:
-                applied_d, dedup_signatures = await self._dedup_v2(
-                    entities_with_context,
-                    workspace_id,
-                    session,
-                    run_id=run_id,
-                    action_repo=action_repo,
+            phase_start_ms = int(time.time() * 1000)
+            try:
+                async with session.begin_nested():
+                    if entities_with_context:
+                        applied_d, dedup_signatures = await self._dedup_v2(
+                            entities_with_context,
+                            workspace_id,
+                            session,
+                            run_id=run_id,
+                            action_repo=action_repo,
+                        )
+                        entities_deduplicated += applied_d
+                    # Flush after each pass inside the savepoint
+                    await session.flush()
+                # Savepoint released — dedup mutations persist
+                phase_usages.append(
+                    IntegratorPhaseUsage(
+                        stage="integrator:dedup",
+                        pass_number=pass_number,
+                        usage=_zero_usage,
+                        duration_ms=int(time.time() * 1000) - phase_start_ms,
+                        details={"merged": applied_d},
+                    )
                 )
-                entities_deduplicated += applied_d
-
-            # Flush after each pass; the outer session.begin() context manager handles commit.
-            # (Calling session.commit() here would close the managed transaction in workers.)
-            await session.flush()
+            except Exception as exc:
+                result.status = "failed"
+                result.error_message = f"{type(exc).__name__}: {exc}"
+                log.warning(
+                    "integrator_dedup_phase_failed",
+                    workspace_id=str(workspace_id),
+                    pass_number=pass_number,
+                    error=str(exc),
+                )
+                phase_loop_failed = True
+                break
 
             total_actions = applied_p + applied_d
             log.info(
@@ -284,9 +348,13 @@ class IntegratorEngine:
                 break
 
             # Convergence check 2: cycle detection via action signature hash.
-            # Include panoramic actions and dedup entity IDs (not just count) so that
-            # passes with the same count but different entity merges do not collide.
-            action_hash = hash(frozenset([str(a) for a in panoramic_result.actions] + dedup_signatures))
+            panoramic_result_for_hash = panoramic_result_inner
+            action_hash = hash(
+                frozenset(
+                    [str(a) for a in (panoramic_result_for_hash.actions if panoramic_result_for_hash else [])]
+                    + dedup_signatures
+                )
+            )
             if previous_hash is not None and action_hash == previous_hash:
                 convergence_reason = "cycle_detected"
                 break
@@ -295,21 +363,47 @@ class IntegratorEngine:
             # for-loop completed without break → max_passes
             convergence_reason = "max_passes"
 
+        if phase_loop_failed:
+            # Failed phase: compute back-compat scalars and return without enrichment
+            result.tokens_used = sum(p.usage.tokens_in + p.usage.tokens_out for p in phase_usages)
+            result.cost_usd = sum(p.usage.cost_usd for p in phase_usages)
+            result.duration_ms = int(time.time() * 1000) - start_ms
+            result.phase_usages = phase_usages
+            return result
+
         # ── Reload entities after convergence, before enrichment ──
-        # Ensures enrichment sees post-consolidation state: deleted entities excluded,
-        # newly created entities (e.g. from create_from_cluster) included.
         fresh_window = await self.entity_repo.list_recent(workspace_id, hours=window_hours)
         all_entity_ids = dirty_entity_ids | {e.id for e in fresh_window}
         entities_with_context = await self._load_entities_with_context(workspace_id, all_entity_ids)
 
-        # ── Enrichment (single pass after convergence) ──
-        enrichment_result = await self._enricher.enrich_batch(entities_with_context)
-        entities_enriched = len(entities_with_context)
-
-        for action in enrichment_result.actions:
-            counters = await self._apply_action(action, workspace_id, session)
-            relations_created += counters.get("relations_created", 0)
-            claims_updated += counters.get("claims_updated", 0)
+        # ── Enricher phase (SAVEPOINT) ──
+        entities_enriched = 0
+        phase_start_ms = int(time.time() * 1000)
+        try:
+            async with session.begin_nested():
+                enrichment_result = await self._enricher.enrich_batch(entities_with_context)
+                entities_enriched = len(entities_with_context)
+                for action in enrichment_result.actions:
+                    counters = await self._apply_action(action, workspace_id, session)
+                    relations_created += counters.get("relations_created", 0)
+                    claims_updated += counters.get("claims_updated", 0)
+            phase_usages.append(
+                IntegratorPhaseUsage(
+                    stage="integrator:enricher",
+                    pass_number=1,
+                    usage=_zero_usage,
+                    duration_ms=int(time.time() * 1000) - phase_start_ms,
+                    details={"entities_enriched": entities_enriched},
+                )
+            )
+        except Exception as exc:
+            result.status = "failed"
+            result.error_message = f"{type(exc).__name__}: {exc}"
+            log.warning(
+                "integrator_enricher_phase_failed",
+                workspace_id=str(workspace_id),
+                error=str(exc),
+            )
 
         # ── Warm entity cache with processed entities ──
         cache_entities = [
@@ -325,18 +419,20 @@ class IntegratorEngine:
 
         duration_ms = int(time.time() * 1000) - start_ms
 
-        return IntegratorRunResult(
-            status="completed",
-            entities_scanned=entities_scanned,
-            entities_deduplicated=entities_deduplicated,
-            entities_enriched=entities_enriched,
-            relations_created=relations_created,
-            claims_updated=claims_updated,
-            noise_removed=noise_removed,
-            duration_ms=duration_ms,
-            pass_count=pass_number,
-            convergence_reason=convergence_reason,
-        )
+        # Compute back-compat scalars from phase_usages
+        result.entities_scanned = entities_scanned
+        result.entities_deduplicated = entities_deduplicated
+        result.entities_enriched = entities_enriched
+        result.relations_created = relations_created
+        result.claims_updated = claims_updated
+        result.noise_removed = noise_removed
+        result.duration_ms = duration_ms
+        result.pass_count = pass_number
+        result.convergence_reason = convergence_reason
+        result.tokens_used = sum(p.usage.tokens_in + p.usage.tokens_out for p in phase_usages)
+        result.cost_usd = sum(p.usage.cost_usd for p in phase_usages)
+        result.phase_usages = phase_usages
+        return result
 
     # ---------------------------------------------------------------------------
     # Panoramic action application

@@ -23,6 +23,16 @@ def _make_settings():
     return settings
 
 
+def _make_session() -> AsyncMock:
+    """AsyncMock session with begin_nested properly configured as an async CM."""
+    session = AsyncMock()
+    nested_cm = MagicMock()
+    nested_cm.__aenter__ = AsyncMock(return_value=None)
+    nested_cm.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested = MagicMock(return_value=nested_cm)
+    return session
+
+
 def _make_entity(entity_id: uuid.UUID, name: str, workspace_id: uuid.UUID) -> MagicMock:
     entity = MagicMock()
     entity.id = entity_id
@@ -82,7 +92,7 @@ async def test_integrator_runs_in_workspace_isolation():
     redis = _make_redis(ws_a)
     settings = _make_settings()
     llm = FakeLLMAdapter()
-    session = AsyncMock()
+    session = _make_session()
 
     engine = IntegratorEngine(
         llm=llm,
@@ -127,7 +137,7 @@ async def test_integrator_dirty_set_key_scoped_to_workspace():
     claim_repo = AsyncMock()
     relation_repo = AsyncMock()
     entity_cache = AsyncMock()
-    session = AsyncMock()
+    session = _make_session()
     settings = _make_settings()
     llm = FakeLLMAdapter()
 
@@ -207,7 +217,7 @@ async def test_integrator_two_workspaces_independent():
     engine_a = _make_engine(entity_repo_a, ws_a)
     engine_b = _make_engine(entity_repo_b, ws_b)
 
-    session = AsyncMock()
+    session = _make_session()
 
     with (
         patch("alayaos_core.extraction.writer.acquire_workspace_lock", new=AsyncMock(return_value="token")),

@@ -820,7 +820,7 @@ async def test_merge_with_rewrite_output():
     )
 
     batches = [[winner_ewc, loser_ewc]]
-    merged, _sigs = await deduplicator.execute_batches(
+    merged, _sigs, _usage = await deduplicator.execute_batches(
         batches=batches,
         entity_type="person",
         workspace_id=ws_id,
@@ -1095,7 +1095,7 @@ async def test_apply_merge_group_writes_v2_audit_inverse():
     winner_ewc = EntityWithContext(id=winner_id, name="Alice Johnson", entity_type="person", aliases=["AJ"])
     loser_ewc = EntityWithContext(id=loser_id, name="Alice Jonson", entity_type="person", aliases=["Alice J"])
 
-    merged, _ = await deduplicator.execute_batches(
+    merged, _, _usage = await deduplicator.execute_batches(
         batches=[[winner_ewc, loser_ewc]],
         entity_type="person",
         workspace_id=ws_id,
@@ -1233,7 +1233,7 @@ async def test_apply_merge_group_dedup_inside_loop():
     loser1_ewc = EntityWithContext(id=loser1_id, name="Alice1", entity_type="person")
     loser2_ewc = EntityWithContext(id=loser2_id, name="Alice2", entity_type="person")
 
-    merged, _ = await deduplicator.execute_batches(
+    merged, _, _usage = await deduplicator.execute_batches(
         batches=[[winner_ewc, loser1_ewc, loser2_ewc]],
         entity_type="person",
         workspace_id=ws_id,

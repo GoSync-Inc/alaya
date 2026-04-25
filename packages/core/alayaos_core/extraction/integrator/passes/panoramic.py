@@ -17,6 +17,7 @@ import structlog
 from pydantic import BaseModel, Field
 
 from alayaos_core.extraction.integrator.normalization import normalize_for_hint
+from alayaos_core.llm.interface import LLMUsage  # noqa: TC001
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +54,7 @@ class PanoramicResult(BaseModel):
     """Result of a panoramic triage pass — list of proposed actions."""
 
     actions: list[PanoramicAction] = Field(default_factory=list)
+    usage: LLMUsage | None = None  # LLM token usage; None when no LLM call was made
 
 
 # ---------------------------------------------------------------------------
@@ -190,17 +192,15 @@ class PanoramicPass:
             entity_table=entity_table,
         )
 
-        # Call LLM — output is untrusted; validate via PanoramicResult Pydantic schema
-        try:
-            result, _usage = await self._llm.extract(
-                text=prompt_text,
-                system_prompt=system_prompt,
-                response_model=PanoramicResult,
-                max_tokens=4096,
-            )
-        except Exception:
-            log.warning("panoramic_pass_llm_failed", workspace_id=str(workspace_id))
-            return PanoramicResult()
+        # Call LLM — output is untrusted; validate via PanoramicResult Pydantic schema.
+        # Exceptions propagate to the engine's begin_nested savepoint (Pattern A per charter).
+        result, llm_usage = await self._llm.extract(
+            text=prompt_text,
+            system_prompt=system_prompt,
+            response_model=PanoramicResult,
+            max_tokens=4096,
+            stage="integrator:panoramic",
+        )
 
         # Validate entity_ids: drop actions referencing unknown UUIDs
         # Fix 1: single-entity actions (remove_noise, reclassify, rewrite) MUST have entity_id
@@ -270,4 +270,4 @@ class PanoramicPass:
 
             validated_actions.append(action)
 
-        return PanoramicResult(actions=validated_actions)
+        return PanoramicResult(actions=validated_actions, usage=llm_usage)

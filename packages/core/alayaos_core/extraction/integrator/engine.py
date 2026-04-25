@@ -234,8 +234,6 @@ class IntegratorEngine:
         # Action repo for persisting audit records
         action_repo = IntegratorActionRepository(session)
 
-        # Zero-cost usage placeholder (LLM calls within phases do not yet thread usage back).
-        # Phase cost tracking is additive; individual LLM call costs are emitted as pipeline_traces.
         _zero_usage = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
 
         # Multi-pass convergence loop — each pass runs panoramic + dedup under separate savepoints.
@@ -283,11 +281,16 @@ class IntegratorEngine:
                     )
                     noise_removed += sum(1 for a in panoramic_result_inner.actions if a.action == "remove_noise")
                 # Savepoint released — panoramic mutations persist in outer transaction
+                panoramic_usage = (
+                    panoramic_result_inner.usage
+                    if panoramic_result_inner is not None and panoramic_result_inner.usage is not None
+                    else _zero_usage
+                )
                 phase_usages.append(
                     IntegratorPhaseUsage(
                         stage="integrator:panoramic",
                         pass_number=pass_number,
-                        usage=_zero_usage,
+                        usage=panoramic_usage,
                         duration_ms=int(time.time() * 1000) - phase_start_ms,
                         details={"applied_actions": applied_p},
                     )
@@ -310,9 +313,10 @@ class IntegratorEngine:
             dedup_signatures: list[str] = []
             phase_start_ms = int(time.time() * 1000)
             try:
+                dedup_phase_usage = _zero_usage
                 async with session.begin_nested():
                     if entities_with_context:
-                        applied_d, dedup_signatures = await self._dedup_v2(
+                        applied_d, dedup_signatures, dedup_phase_usage = await self._dedup_v2(
                             entities_with_context,
                             workspace_id,
                             session,
@@ -327,7 +331,7 @@ class IntegratorEngine:
                     IntegratorPhaseUsage(
                         stage="integrator:dedup",
                         pass_number=pass_number,
-                        usage=_zero_usage,
+                        usage=dedup_phase_usage,
                         duration_ms=int(time.time() * 1000) - phase_start_ms,
                         details={"merged": applied_d},
                     )
@@ -393,7 +397,7 @@ class IntegratorEngine:
         phase_start_ms = int(time.time() * 1000)
         try:
             async with session.begin_nested():
-                enrichment_result = await self._enricher.enrich_batch(entities_with_context)
+                enrichment_result, enricher_usage = await self._enricher.enrich_batch(entities_with_context)
                 entities_enriched = len(entities_with_context)
                 for action in enrichment_result.actions:
                     counters = await self._apply_action(action, workspace_id, session)
@@ -403,7 +407,7 @@ class IntegratorEngine:
                 IntegratorPhaseUsage(
                     stage="integrator:enricher",
                     pass_number=1,
-                    usage=_zero_usage,
+                    usage=enricher_usage,
                     duration_ms=int(time.time() * 1000) - phase_start_ms,
                     details={"entities_enriched": entities_enriched},
                 )
@@ -751,7 +755,7 @@ class IntegratorEngine:
         *,
         run_id: uuid.UUID | None = None,
         action_repo=None,
-    ) -> tuple[int, list[str]]:
+    ) -> tuple[int, list[str], LLMUsage]:
         """Dedup v2: batch-oriented deduplication with composite signal ordering.
 
         1. Filter out entities with entity_type == 'unknown' (no type = unpaireable).
@@ -760,8 +764,7 @@ class IntegratorEngine:
         4. DeduplicatorV2.execute_batches: LLM batch call → MergeGroups → apply merges.
 
         Falls back to _shortlist_dedup if embedding fails.
-        Returns (total_merged, merge_signatures) where merge_signatures are used for
-        cycle detection hashing — each entry is "merge:<winner_id>:[<loser_ids>]".
+        Returns (total_merged, merge_signatures, aggregated_llm_usage).
 
         Args:
             run_id:      IntegratorRun ID for action provenance.  Falls back to
@@ -770,9 +773,10 @@ class IntegratorEngine:
             action_repo: IntegratorActionRepository for audit records.
         """
         effective_run_id = run_id if run_id is not None else uuid.UUID(int=0)
+        _zero = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
 
         if len(entities) < 2:
-            return 0, []
+            return 0, [], _zero
 
         # Skip entities without a resolved type — grouping unknowns together would pair
         # unrelated entities and produces noise.
@@ -782,7 +786,7 @@ class IntegratorEngine:
             log.debug("integrator_dedup_v2_skip_typeless", skipped=skipped)
         entities = resolved
         if len(entities) < 2:
-            return 0, []
+            return 0, [], _zero
 
         # Embed entity names for cosine component of composite signal
         embed_svc = self._get_embedding_service()
@@ -800,7 +804,7 @@ class IntegratorEngine:
                 dup_pairs, workspace_id, session, run_id=effective_run_id, action_repo=action_repo
             )
             sigs = [f"merge:{p.entity_a_id}:{sorted([str(p.entity_b_id)])}" for p in dup_pairs]
-            return merged, sigs
+            return merged, sigs, _zero
 
         if len(vectors) != len(entities):
             log.warning(
@@ -814,7 +818,7 @@ class IntegratorEngine:
                 dup_pairs, workspace_id, session, run_id=effective_run_id, action_repo=action_repo
             )
             sigs = [f"merge:{p.entity_a_id}:{sorted([str(p.entity_b_id)])}" for p in dup_pairs]
-            return merged, sigs
+            return merged, sigs, _zero
 
         embeddings: dict[uuid.UUID, list[float]] = {e.id: v for e, v in zip(entities, vectors, strict=True)}
 
@@ -838,8 +842,14 @@ class IntegratorEngine:
 
         total_merged = 0
         all_signatures: list[str] = []
+        agg_tokens_in = 0
+        agg_tokens_out = 0
+        agg_tokens_cached = 0
+        agg_cache_write_5m = 0
+        agg_cache_write_1h = 0
+        agg_cost_usd = 0.0
         for entity_type, type_batches in batches_by_type.items():
-            merged, sigs = await self._deduplicator_v2.execute_batches(
+            merged, sigs, type_usage = await self._deduplicator_v2.execute_batches(
                 batches=type_batches,
                 entity_type=entity_type,
                 workspace_id=workspace_id,
@@ -850,8 +860,25 @@ class IntegratorEngine:
             )
             total_merged += merged
             all_signatures.extend(sigs)
+            agg_tokens_in += type_usage.tokens_in
+            agg_tokens_out += type_usage.tokens_out
+            agg_tokens_cached += type_usage.tokens_cached
+            agg_cache_write_5m += type_usage.cache_write_5m_tokens
+            agg_cache_write_1h += type_usage.cache_write_1h_tokens
+            agg_cost_usd += type_usage.cost_usd
 
-        return total_merged, all_signatures
+        return (
+            total_merged,
+            all_signatures,
+            LLMUsage(
+                tokens_in=agg_tokens_in,
+                tokens_out=agg_tokens_out,
+                tokens_cached=agg_tokens_cached,
+                cache_write_5m_tokens=agg_cache_write_5m,
+                cache_write_1h_tokens=agg_cache_write_1h,
+                cost_usd=agg_cost_usd,
+            ),
+        )
 
     # ---------------------------------------------------------------------------
     # Shortlist dedup (fallback when embedding fails)

@@ -128,9 +128,13 @@ def _env_summary() -> dict[str, str]:
     return result
 
 
-def _docker_compose(args: list[str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
+def _docker_compose(
+    args: list[str],
+    timeout: int = 120,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     cmd = ["docker", "compose", *args]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
 
 
 # ---------------------------------------------------------------------------
@@ -195,9 +199,16 @@ def phase_preflight_reuse() -> int:
 def phase_up() -> int:
     """Start required docker compose services."""
     _log("Phase 2: docker compose up")
+    # Override compose-host env vars to compose-internal hostnames; .env's localhost
+    # values would otherwise leak into containers via compose variable interpolation.
+    compose_env = os.environ.copy()
+    compose_env["ALAYA_DATABASE_URL"] = "postgresql+asyncpg://alaya:alaya@postgres:5432/alaya"
+    compose_env["ALAYA_REDIS_URL"] = "redis://redis:6379/0"
+    compose_env["ALAYA_ENV"] = "dev"
     result = _docker_compose(
         ["up", "-d", "postgres", "redis", "migrations", "api", "worker"],
         timeout=120,
+        env=compose_env,
     )
     if result.returncode != 0:
         _log(f"FAIL: docker compose up failed:\n{result.stderr}")
@@ -253,10 +264,11 @@ def phase_bootstrap(deadline: float) -> tuple[int, str, str]:
 
     with httpx.Client(timeout=30.0) as client:
         # Create workspace via HTTP API (requires bootstrap key)
+        ts = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
         r = client.post(
             f"{API_URL}/workspaces",
             headers={"X-Api-Key": bootstrap_key, "Content-Type": "application/json"},
-            json={"name": f"bench-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"},
+            json={"name": f"bench-{ts}", "slug": f"bench-{ts}"},
         )
         if r.status_code not in (200, 201):
             _log(f"FAIL: workspace create returned {r.status_code}: {r.text[:200]}")

@@ -79,7 +79,7 @@ bench *ARGS:
 
 # Stream LLM call events from the worker logs (requires jq)
 logs-llm:
-    docker compose logs -f worker | jq -c 'select(.event=="llm.call_completed") | {stage, model, cache_hit_ratio, cost_usd, tokens_in, tokens_out, cache_read}'
+    docker compose logs -f worker --no-log-prefix | jq -c 'select(.event=="llm.call_completed") | {stage, model, latency_ms, tokens_in, tokens_out, tokens_cached, cache_write_5m_tokens, cache_write_1h_tokens, cache_hit_ratio, cost_usd}'
 
 # Remove all bench result directories (preserves .gitkeep)
 bench-clean:

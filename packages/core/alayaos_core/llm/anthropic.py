@@ -18,10 +18,6 @@ if TYPE_CHECKING:
     from anthropic.types import ToolParam
     from pydantic import BaseModel
 
-# Module-level flag kept for backwards compat; S3 observability uses observability.py guard.
-_cache_breakdown_warned: bool = False
-
-
 def _is_list_annotation(annotation: object) -> bool:
     """Return True if *annotation* represents a list type (including Optional[list[...]])."""
     origin = typing.get_origin(annotation)

@@ -31,25 +31,21 @@ class TestModelPrice:
         assert price.cost_usd(usage) == pytest.approx(15.0)
 
     def test_cost_usd_cache_read(self) -> None:
-        """Cache read is 0.10× input rate (cache_read_per_mtok = 0.30 for Sonnet, input = 3.0)."""
+        """Cache read is 0.10x input rate (cache_read_per_mtok = 0.30 for Sonnet, input = 3.0)."""
         price = PRICING["claude-sonnet-4-6-20250514"]
         usage = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=1_000_000, cost_usd=0.0)
         assert price.cost_usd(usage) == pytest.approx(0.30)
 
     def test_cost_usd_cache_write_5m(self) -> None:
-        """Cache write 5m is 1.25× input rate (3.75 for Sonnet)."""
+        """Cache write 5m is 1.25x input rate (3.75 for Sonnet)."""
         price = PRICING["claude-sonnet-4-6-20250514"]
-        usage = LLMUsage(
-            tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0, cache_write_5m_tokens=1_000_000
-        )
+        usage = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0, cache_write_5m_tokens=1_000_000)
         assert price.cost_usd(usage) == pytest.approx(3.75)
 
     def test_cost_usd_cache_write_1h(self) -> None:
-        """Cache write 1h is 2.0× input rate (6.0 for Sonnet)."""
+        """Cache write 1h is 2.0x input rate (6.0 for Sonnet)."""
         price = PRICING["claude-sonnet-4-6-20250514"]
-        usage = LLMUsage(
-            tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0, cache_write_1h_tokens=1_000_000
-        )
+        usage = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0, cache_write_1h_tokens=1_000_000)
         assert price.cost_usd(usage) == pytest.approx(6.00)
 
     def test_cost_usd_combined_all_classes(self) -> None:
@@ -108,10 +104,10 @@ class TestPricingDict:
         assert DEFAULT_PRICING is PRICING["claude-sonnet-4-6-20250514"]
 
     def test_default_pricing_used_for_unknown_model(self) -> None:
-        from alayaos_core.llm.pricing import DEFAULT_PRICING as dp
+        from alayaos_core.llm.pricing import DEFAULT_PRICING
 
-        price = PRICING.get("unknown-model-xyz", dp)
-        assert price is dp
+        price = PRICING.get("unknown-model-xyz", DEFAULT_PRICING)
+        assert price is DEFAULT_PRICING
 
 
 class TestModelCacheMinimum:

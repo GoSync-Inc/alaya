@@ -77,8 +77,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Safety check: abort if any pipeline_traces rows have NULL event_id.
     # Those are integrator-scoped traces — drop them manually before downgrading.
-    from alembic import op as alembic_op
     from sqlalchemy import text
+
+    from alembic import op as alembic_op
 
     conn = alembic_op.get_bind()
     result = conn.execute(text("SELECT COUNT(*) FROM pipeline_traces WHERE event_id IS NULL"))

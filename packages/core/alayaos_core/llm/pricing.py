@@ -1,9 +1,9 @@
 """Single source of truth for Anthropic model pricing.
 
 Pricing multipliers (per Anthropic published rates, 2026):
-  - Cache reads:           0.10× base input rate
-  - Cache writes 5-min TTL: 1.25× base input rate
-  - Cache writes 1-hour TTL: 2.00× base input rate
+  - Cache reads:           0.10x base input rate
+  - Cache writes 5-min TTL: 1.25x base input rate
+  - Cache writes 1-hour TTL: 2.00x base input rate
 
 Do NOT use cache_creation_input_tokens (the aggregated scalar) for cost math.
 Always use the TTL-split fields ephemeral_5m_input_tokens / ephemeral_1h_input_tokens.
@@ -40,7 +40,7 @@ class ModelPrice:
 
 
 # Published Anthropic rates (USD per 1M tokens), 2026.
-# cache_read = 0.10× input; cache_write_5m = 1.25× input; cache_write_1h = 2.00× input.
+# cache_read = 0.10x input; cache_write_5m = 1.25x input; cache_write_1h = 2.00x input.
 PRICING: dict[str, ModelPrice] = {
     "claude-haiku-4-5-20251001": ModelPrice(
         input_per_mtok=0.80,

@@ -8,8 +8,7 @@ Covers:
 
 from __future__ import annotations
 
-import types
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import BaseModel
@@ -72,9 +71,16 @@ async def test_cold_cache_state_token_hash_equality() -> None:
 
     # Charter SC3 hash equality
     assert (
-        usage.tokens_in + usage.tokens_out + usage.tokens_cached + usage.cache_write_5m_tokens + usage.cache_write_1h_tokens
+        usage.tokens_in
+        + usage.tokens_out
+        + usage.tokens_cached
+        + usage.cache_write_5m_tokens
+        + usage.cache_write_1h_tokens
     ) == (
-        resp.usage.input_tokens + resp.usage.output_tokens + resp.usage.cache_read_input_tokens + resp.usage.cache_creation_input_tokens
+        resp.usage.input_tokens
+        + resp.usage.output_tokens
+        + resp.usage.cache_read_input_tokens
+        + resp.usage.cache_creation_input_tokens
     )
 
     assert usage.tokens_in == 1000
@@ -107,9 +113,16 @@ async def test_warm_write_cache_state() -> None:
 
     # Hash equality
     assert (
-        usage.tokens_in + usage.tokens_out + usage.tokens_cached + usage.cache_write_5m_tokens + usage.cache_write_1h_tokens
+        usage.tokens_in
+        + usage.tokens_out
+        + usage.tokens_cached
+        + usage.cache_write_5m_tokens
+        + usage.cache_write_1h_tokens
     ) == (
-        resp.usage.input_tokens + resp.usage.output_tokens + resp.usage.cache_read_input_tokens + resp.usage.cache_creation_input_tokens
+        resp.usage.input_tokens
+        + resp.usage.output_tokens
+        + resp.usage.cache_read_input_tokens
+        + resp.usage.cache_creation_input_tokens
     )
 
 
@@ -133,9 +146,16 @@ async def test_warm_read_cache_state() -> None:
 
     # Hash equality
     assert (
-        usage.tokens_in + usage.tokens_out + usage.tokens_cached + usage.cache_write_5m_tokens + usage.cache_write_1h_tokens
+        usage.tokens_in
+        + usage.tokens_out
+        + usage.tokens_cached
+        + usage.cache_write_5m_tokens
+        + usage.cache_write_1h_tokens
     ) == (
-        resp.usage.input_tokens + resp.usage.output_tokens + resp.usage.cache_read_input_tokens + resp.usage.cache_creation_input_tokens
+        resp.usage.input_tokens
+        + resp.usage.output_tokens
+        + resp.usage.cache_read_input_tokens
+        + resp.usage.cache_creation_input_tokens
     )
 
 
@@ -160,7 +180,7 @@ async def test_correct_cost_cold_no_buggy_subtraction() -> None:
 
 @pytest.mark.asyncio
 async def test_correct_cost_warm_write() -> None:
-    """Warm-write cost: cache_write_5m billed at 1.25× input rate."""
+    """Warm-write cost: cache_write_5m billed at 1.25x input rate."""
     model = "claude-sonnet-4-6-20250514"
     adapter, mock_create = _make_adapter(model)
     resp = _make_response(
@@ -180,7 +200,7 @@ async def test_correct_cost_warm_write() -> None:
 
 @pytest.mark.asyncio
 async def test_correct_cost_warm_read() -> None:
-    """Warm-read cost: cache_read billed at 0.10× input rate."""
+    """Warm-read cost: cache_read billed at 0.10x input rate."""
     model = "claude-sonnet-4-6-20250514"
     adapter, mock_create = _make_adapter(model)
     resp = _make_response(
@@ -204,5 +224,5 @@ async def test_stage_kwarg_accepted() -> None:
     resp = _make_response(input_tokens=10, output_tokens=5)
     mock_create.return_value = resp
 
-    result, usage = await adapter.extract("text", "prompt", _SimpleResult, stage="cortex")
+    _result, usage = await adapter.extract("text", "prompt", _SimpleResult, stage="cortex")
     assert isinstance(usage, LLMUsage)

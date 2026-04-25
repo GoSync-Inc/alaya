@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from alayaos_core.llm.interface import LLMUsage
+from alayaos_core.llm.interface import LLMUsage  # noqa: TC001
 
 
 class MergeGroup(BaseModel):

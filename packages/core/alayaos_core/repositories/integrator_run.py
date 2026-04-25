@@ -149,7 +149,11 @@ class IntegratorRunRepository(BaseRepository):
             return
 
         def _sum(col):
-            return select(func.coalesce(func.sum(col), 0)).where(PipelineTrace.integrator_run_id == run_id).scalar_subquery()
+            return (
+                select(func.coalesce(func.sum(col), 0))
+                .where(PipelineTrace.integrator_run_id == run_id)
+                .scalar_subquery()
+            )
 
         stmt = (
             update(IntegratorRun)

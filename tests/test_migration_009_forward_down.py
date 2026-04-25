@@ -28,11 +28,13 @@ def test_migration_009_forward_adds_columns(migrated_container) -> None:
 
     with engine.connect() as conn:
         # pipeline_traces must have the new columns
-        result = conn.execute(text("""
+        result = conn.execute(
+            text("""
             SELECT column_name
             FROM information_schema.columns
             WHERE table_name = 'pipeline_traces'
-        """))
+        """)
+        )
         columns = {row[0] for row in result}
 
     expected_new_columns = {
@@ -55,12 +57,14 @@ def test_migration_009_forward_event_id_nullable(migrated_container) -> None:
     engine = create_engine(sync_url, poolclass=NullPool)
 
     with engine.connect() as conn:
-        result = conn.execute(text("""
+        result = conn.execute(
+            text("""
             SELECT is_nullable
             FROM information_schema.columns
             WHERE table_name = 'pipeline_traces'
               AND column_name = 'event_id'
-        """))
+        """)
+        )
         row = result.fetchone()
     assert row is not None, "event_id column not found in pipeline_traces"
     assert row[0] == "YES", f"event_id should be nullable after 009, got is_nullable={row[0]}"
@@ -91,11 +95,13 @@ def test_migration_009_down_removes_columns(migrated_container, monkeypatch) -> 
 
     # Verify: new columns removed
     with engine.connect() as conn:
-        result = conn.execute(text("""
+        result = conn.execute(
+            text("""
             SELECT column_name
             FROM information_schema.columns
             WHERE table_name = 'pipeline_traces'
-        """))
+        """)
+        )
         columns_after_down = {row[0] for row in result}
 
     removed_columns = {"tokens_in", "tokens_out", "tokens_cached", "cache_write_5m_tokens", "cache_write_1h_tokens"}

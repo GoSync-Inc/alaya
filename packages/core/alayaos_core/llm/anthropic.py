@@ -127,6 +127,7 @@ class AnthropicAdapter:
             if not _cache_breakdown_warned:
                 _cache_breakdown_warned = True
                 import structlog
+
                 structlog.get_logger().warning(
                     "llm.cache_breakdown_unavailable",
                     model=self._model,

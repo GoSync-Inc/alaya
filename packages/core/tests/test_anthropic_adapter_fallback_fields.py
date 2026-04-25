@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import BaseModel
 
+import alayaos_core.llm.observability as observability_mod
 from alayaos_core.llm import anthropic as anthropic_mod
 from alayaos_core.llm.anthropic import AnthropicAdapter
 
@@ -40,12 +41,17 @@ def _make_response_no_cache_creation(*, input_tokens: int = 100, output_tokens: 
     return resp
 
 
+@pytest.fixture(autouse=True)
+def reset_observability_guard():
+    """Reset the observability module-level set before each test."""
+    observability_mod._cache_breakdown_warned = set()
+    yield
+    observability_mod._cache_breakdown_warned = set()
+
+
 @pytest.mark.asyncio
 async def test_missing_cache_creation_returns_zero_write_fields() -> None:
     """When cache_creation is absent, cache_write_* fields default to 0."""
-    # Reset module-level warning guard before this test
-    anthropic_mod._cache_breakdown_warned = False
-
     adapter, mock_create = _make_adapter()
     resp = _make_response_no_cache_creation()
     mock_create.return_value = resp
@@ -58,40 +64,35 @@ async def test_missing_cache_creation_returns_zero_write_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_missing_cache_creation_logs_warning_once(caplog) -> None:
-    """cache_breakdown_unavailable is logged exactly once per process (module flag)."""
+    """cache_breakdown_unavailable is logged exactly once per process (observability guard)."""
     import logging
-
-    # Reset the module-level guard
-    anthropic_mod._cache_breakdown_warned = False
 
     adapter, mock_create = _make_adapter()
     resp = _make_response_no_cache_creation()
     mock_create.return_value = resp
 
     with caplog.at_level(logging.WARNING):
-        # First call — should set the flag and log once
+        # First call — should add model to set and log once
         await adapter.extract("text", "prompt", _SimpleResult)
-        assert anthropic_mod._cache_breakdown_warned is True
+        assert "claude-sonnet-4-6-20250514" in observability_mod._cache_breakdown_warned
 
-        # Second call — flag already set, should not log again
+        # Second call — model already in set, should not log again
         await adapter.extract("text", "prompt", _SimpleResult)
 
-    # We can't easily count structlog warnings with caplog, but we verify the flag is set
+    # We can't easily count structlog warnings with caplog, but we verify the guard is set
     # and that no exception is raised on subsequent calls.
 
 
 @pytest.mark.asyncio
-async def test_cache_breakdown_warned_flag_resets_between_tests() -> None:
-    """Verify the test infrastructure properly resets the module flag."""
-    anthropic_mod._cache_breakdown_warned = False
-    assert anthropic_mod._cache_breakdown_warned is False
+async def test_cache_breakdown_warned_guard_resets_between_tests() -> None:
+    """Verify the test infrastructure (autouse fixture) properly resets the observability guard."""
+    # autouse fixture already ran — guard should be empty at test start
+    assert len(observability_mod._cache_breakdown_warned) == 0
 
 
 @pytest.mark.asyncio
 async def test_response_with_zero_cache_creation_fields() -> None:
     """When cache_creation exists but all sub-fields are 0, no warning is needed."""
-    anthropic_mod._cache_breakdown_warned = False
-
     adapter, mock_create = _make_adapter()
 
     cache_creation_obj = MagicMock()
@@ -116,7 +117,7 @@ async def test_response_with_zero_cache_creation_fields() -> None:
 
     _, llm_usage = await adapter.extract("text", "prompt", _SimpleResult)
 
-    # With cache_creation present and zero, cache_breakdown_warned should NOT be set
-    assert anthropic_mod._cache_breakdown_warned is False
+    # With cache_creation present, observability guard should NOT have been triggered
+    assert "claude-sonnet-4-6-20250514" not in observability_mod._cache_breakdown_warned
     assert llm_usage.cache_write_5m_tokens == 0
     assert llm_usage.cache_write_1h_tokens == 0

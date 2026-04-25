@@ -562,47 +562,46 @@ def test_workspace_scoping_excludes_other_workspace():
 # ---------------------------------------------------------------------------
 
 
-def test_started_at_filter_excludes_old_runs():
-    """Runs created before started_at should not be counted."""
+def test_pipeline_traces_filter_excludes_old_traces():
+    """pipeline_traces with created_at before started_at should not be returned.
+
+    extraction_runs.started_at is nullable (never set in practice), so temporal
+    scoping for extraction_runs was dropped — workspace isolation suffices.
+    pipeline_traces.created_at IS always populated, so temporal filter is kept there.
+    """
     engine = _make_engine()
     ws_id = _uid()
-    old_run_id = _uid()
-    new_run_id = _uid()
+    run_id = _uid()
+    old_trace_id = _uid()
+    new_trace_id = _uid()
 
     with engine.connect() as conn:
-        # old run: started 1 hour before ANCHOR_DT
+        _insert_extraction_run(conn, ws_id, run_id)
+        # Old trace: created_at 1 hour before ANCHOR_DT (before the bench window)
         conn.execute(
             text(
-                "INSERT INTO extraction_runs (id, workspace_id, status, cost_usd, started_at, completed_at)"
-                " VALUES (:id, :ws, 'failed', 0.001, :ts, :ts)"
+                "INSERT INTO pipeline_traces"
+                " (id, workspace_id, extraction_run_id, stage, duration_ms, cost_usd, created_at)"
+                " VALUES (:id, :ws, :run, 'cortex', 100, 0.001, :ts)"
             ),
-            {
-                "id": old_run_id,
-                "ws": ws_id,
-                "ts": BEFORE_DT.isoformat(),
-            },
+            {"id": old_trace_id, "ws": ws_id, "run": run_id, "ts": BEFORE_DT.isoformat()},
         )
-        # new run: at ANCHOR_DT + 1 second (inside window)
+        # New trace: created_at at ANCHOR_DT + 30 seconds (inside window)
         conn.execute(
             text(
-                "INSERT INTO extraction_runs (id, workspace_id, status, cost_usd, started_at, completed_at)"
-                " VALUES (:id, :ws, 'completed', 0.001, :ts, :ts)"
+                "INSERT INTO pipeline_traces"
+                " (id, workspace_id, extraction_run_id, stage, duration_ms, cost_usd, created_at)"
+                " VALUES (:id, :ws, :run, 'cortex', 150, 0.001, :ts)"
             ),
-            {
-                "id": new_run_id,
-                "ws": ws_id,
-                "ts": _ts(1),  # 1 second after anchor
-            },
+            {"id": new_trace_id, "ws": ws_id, "run": run_id, "ts": _ts(30)},
         )
         conn.commit()
 
         data, _ = format_summary(conn, uuid.UUID(ws_id), ANCHOR_DT)
 
-    # Only the new run should be counted
-    assert len(data["extraction_runs"]) == 1
-    assert data["extraction_runs"][0]["id"] == new_run_id
-    # Failed old run is excluded → failure count is 0
-    assert data["quality_proxies"]["run_failure_count"] == 0
+    # Only the new trace should be returned (old one is before the bench window)
+    assert len(data["pipeline_traces"]) == 1
+    assert data["pipeline_traces"][0]["id"] == new_trace_id
 
 
 # ---------------------------------------------------------------------------

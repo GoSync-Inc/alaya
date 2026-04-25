@@ -59,11 +59,15 @@ def _scalar(conn: Connection, sql: str, **params: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# Data queries (all scoped to workspace + per-table timestamp >= started_at)
+# Data queries (all scoped to workspace_id; temporal filter only on
+# pipeline_traces.created_at and integrator_runs.started_at where columns
+# are always populated)
 # ---------------------------------------------------------------------------
 
 
 def _get_extraction_runs(conn: Connection, workspace_id: uuid.UUID, started_at: str) -> list[dict[str, Any]]:
+    # No temporal filter: extraction_runs.started_at is nullable (never set in practice).
+    # Workspace isolation is sufficient — bench creates a fresh workspace per run.
     rows = _query(
         conn,
         """
@@ -72,11 +76,9 @@ def _get_extraction_runs(conn: Connection, workspace_id: uuid.UUID, started_at: 
                claims_created, claims_superseded, started_at, completed_at
         FROM extraction_runs
         WHERE workspace_id = :wid
-          AND started_at >= :started_at
-        ORDER BY started_at
+        ORDER BY completed_at NULLS LAST, id
         """,
         wid=str(workspace_id),
-        started_at=started_at,
     )
     return [_serialize_row(r) for r in rows]
 
@@ -146,10 +148,8 @@ def _description_rate(conn: Connection, workspace_id: uuid.UUID, started_at: str
         SELECT COUNT(*) FROM claims c
         JOIN extraction_runs er ON er.id = c.extraction_run_id
         WHERE c.workspace_id = :wid
-          AND er.started_at >= :started_at
         """,
         wid=str(workspace_id),
-        started_at=started_at,
     )
     if not total:
         return None
@@ -161,11 +161,9 @@ def _description_rate(conn: Connection, workspace_id: uuid.UUID, started_at: str
         JOIN predicates p ON p.id = c.predicate_id AND p.workspace_id = c.workspace_id
         JOIN extraction_runs er ON er.id = c.extraction_run_id
         WHERE c.workspace_id = :wid
-          AND er.started_at >= :started_at
           AND p.slug IN ({slugs_list})
         """,
         wid=str(workspace_id),
-        started_at=started_at,
     )
     return round((desc_count or 0) / total, 4)
 
@@ -178,10 +176,8 @@ def _claims_per_entity(conn: Connection, workspace_id: uuid.UUID, started_at: st
         SELECT COUNT(*) FROM claims c
         JOIN extraction_runs er ON er.id = c.extraction_run_id
         WHERE c.workspace_id = :wid
-          AND er.started_at >= :started_at
         """,
         wid=str(workspace_id),
-        started_at=started_at,
     )
     entities_total = _scalar(
         conn,
@@ -208,11 +204,9 @@ def _claims_per_event_stddev(conn: Connection, workspace_id: uuid.UUID, started_
         FROM extraction_runs er
         LEFT JOIN claims c ON c.extraction_run_id = er.id
         WHERE er.workspace_id = :wid
-          AND er.started_at >= :started_at
         GROUP BY er.id
         """,
         wid=str(workspace_id),
-        started_at=started_at,
     )
     counts = [r["claim_count"] for r in rows]
     if len(counts) < 2:
@@ -244,11 +238,9 @@ def _run_failure_count(conn: Connection, workspace_id: uuid.UUID, started_at: st
         """
         SELECT COUNT(*) FROM extraction_runs
         WHERE workspace_id = :wid
-          AND started_at >= :started_at
           AND status = 'failed'
         """,
         wid=str(workspace_id),
-        started_at=started_at,
     )
     return int(val or 0)
 

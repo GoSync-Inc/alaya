@@ -27,15 +27,17 @@ Four sequential runs. Each closes with a merged PR set and a post-merge audit. P
 
 **Outcome:** `just test-integration` runs green in CI; `pytest` proves tier_rank + self-ref enforcement; merge rollback integration test proves FK + winner metadata reversal; legacy v1 audits degrade gracefully. Preflight audit artifact: `docs/superflow/audits/2026-04-25-run6.1-audit.md`.
 
-### Run 6.2 — Access & Normalization
+### Run 6.2 — Access & Normalization ✅ FINAL 2026-04-25
 
 **Goal:** close remaining correctness gaps around permissions and temporal data before benchmark work.
 
-**Sprints (2):**
-- S1 — ACL propagation event → chunks → claims → retrieval (`VGAP.05`). Today `access_level` only gates `should_extract()`; search/ask/tree do not filter.
-- S2 — `DateNormalizer` wired into `Writer` (`RUN3.07`). Claim dates normalize on write-time, not only in integrator enrichment.
+**Sprints (4, PRs #111-#114 queued for Phase 3 merge):**
+- S1 — ACL propagation from events into `vector_chunks` and `claim_effective_access`; search, ask, tree, singleton repositories, and list metadata enforce caller visibility (`VGAP.05`).
+- S2 — `DateNormalizer` moved to the shared extraction package and wired into `Writer`; date claims normalize at write time with anchor/reason metadata (`RUN3.07`).
+- S3 — `ALAYA_PART_OF_STRICT` supports `strict`/`warn`/`off`, with admin visibility and startup flag logging for `part_of` hierarchy enforcement.
+- S4 — Redis readiness reports bounded `ok`/`down`/`degraded` states; `channel` access is explicit retrieval tier 1; obsolete restricted-skip monitoring was removed.
 
-**Exit criteria:** retrieval returns zero rows for scopes that should not see them; new `pytest` case covers write-time date normalization for relative strings.
+**Outcome:** retrieval ACL is enforced beyond `should_extract()`; `channel`/`private`/`restricted` events still extract and gate at retrieval; write-time date normalization is covered by focused `pytest`; Redis and channel hygiene are ready for Run 6.3 benchmarks.
 
 ### Run 6.3 — Observability & Benchmark Automation
 
@@ -92,3 +94,5 @@ See the merged PR history on GitHub and `docs/backlog/BACKLOG.md` for item-level
 - **Status updates:** when a run completes, move the row to "Runs already completed" and advance the current pointer.
 
 This file is the source of truth for sequencing. Item-level detail lives in `docs/backlog/BACKLOG.md`; per-run plans live in `docs/superflow/plans/*` (internal, not tracked in git).
+
+<!-- updated-by-superflow:2026-04-25 -->

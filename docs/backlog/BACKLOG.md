@@ -150,7 +150,7 @@ Merged 2026-04-16 via PRs #87–#94. Plan files not in repo (planning artifacts)
 
 | ID | P | Title | Where | Details |
 |----|---|-------|-------|---------|
-| RUN5.4.FU.06 | P2 | Wire `CONSOLIDATOR_PANORAMIC_MAX_ENTITIES` through `Settings` | `packages/core/alayaos_core/config.py`, `packages/core/alayaos_core/extraction/integrator/passes/panoramic.py:150` | `CLAUDE.md:85` advertises it as an env var; implementation reads only the constructor param. The env var is inert today — panoramic cap is fixed at whatever the caller passes. |
+| RUN5.4.FU.06 | P2 | Wire panoramic max-entity cap through `Settings` | `packages/core/alayaos_core/config.py`, `packages/core/alayaos_core/extraction/integrator/passes/panoramic.py:150` | Implementation reads only the constructor param. No production env var exists today, so docs must not advertise one until the setting is actually wired. |
 | RUN5.4.FU.07 | P2 | Synthetic dedup-gold fixture | `tests/fixtures/`, `test_integrator_dedup.py` | Dedup tests use FakeLLM with hand-crafted batches. No regression fixture for abbreviation/transliteration pairs (Орг/Орги, КС/Ticketscloud). Run 5.3 follow-up #5, still open post-Run 5.4. |
 
 ### P3 — nice to have
@@ -169,7 +169,7 @@ Ported verbatim from the brief's "Items deferred" table (RUN5.4.10–15).
 | RUN5.4.10 | P2 | Slack handle → user name resolution | `packages/core/alayaos_core/extraction/resolver.py` | `<@UXXXXXX>` persists as a `person` entity name. Needs the Slack connector (Run 5a, not started) to populate a user table with handle→name mapping. Cross-link: prior RUN5.3.11. |
 | RUN5.4.11 | P2 | LLM decision cache for panoramic pass | new | Panoramic LLM call is the dominant per-pass cost. Repeated runs over overlapping entity sets could cache the decision. Out of scope in Run 5.4 because benchmark-driven evidence does not yet exist. |
 | RUN5.4.12 | P3 | Action review UI | new | `integrator_actions` is a full audit table, but there is no UI/CLI surface to review pending actions before apply or to batch-rollback. Deferred until Web UI (Run 7). |
-| RUN5.4.13 | P3 | Per-workspace dedup / panoramic thresholds | `packages/core/alayaos_core/config.py` | Thresholds (`INTEGRATOR_DEDUP_*`, `CONSOLIDATOR_PANORAMIC_MAX_ENTITIES`) are global-per-deployment today. Per-workspace tuning needs a workspace-level settings table. Not needed until multi-tenant deployments appear. |
+| RUN5.4.13 | P3 | Per-workspace dedup / panoramic thresholds | `packages/core/alayaos_core/config.py` | Dedup thresholds (`INTEGRATOR_DEDUP_*`) are global-per-deployment today; panoramic max-entity cap is constructor-only. Per-workspace tuning needs a workspace-level settings table. Not needed until multi-tenant deployments appear. |
 | RUN5.4.14 | P2 | Cortex verify-vs-classify ordering fix | `packages/core/alayaos_core/extraction/cortex/classifier.py` | Duplicate of prior RUN5.3 follow-up #4. Benchmark in Run 5.3 showed `verify` changes scores in 38/40 chunks without demonstrable quality improvement. Either drop `verify` by default (`CORTEX_VERIFY_ENABLED=false`) or fix the ordering so `verify` runs on top of `classify` rather than standalone. |
 | RUN5.4.15 | P2 | `tokens_in` split into `input`/`output`/`cache_*` | `packages/core/alayaos_core/models/extraction_run.py`, `models/pipeline_trace.py` | Duplicate of prior RUN5.3 follow-up #2. Current single `tokens_in` column conflates all Anthropic token classes, so cache efficiency cannot be measured against total spend. Needs schema change + `recalc_usage` update. |
 
@@ -276,3 +276,5 @@ Security audit source: `docs/audits/2026-04-13-security-best-practices.md`
 | RUN5.3.04 | Integrator O(n²) dedup times out | DONE | `b7cf224` perf: batch integrator dedup via vector shortlist |
 | RUN5.3.05 | Cortex `is_crystal`: smalltalk-aware rule | DONE | `2c64e4e` feat: smalltalk-aware is_crystal rule |
 | RUN5.3.06 | `extraction_runs.cost_usd` / `tokens_in` aggregation | DONE | `032f2dd` feat: aggregate cost and tokens onto extraction_runs; `3e4f027` fix: recalc_usage for zero-crystal path |
+
+<!-- updated-by-superflow:2026-04-25 -->

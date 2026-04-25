@@ -87,7 +87,6 @@ Run before every commit:
 - `INTEGRATOR_DEDUP_SHORTLIST_K` (default `5`) — max nearest-neighbours per entity in vector-shortlist dedup phase.
 - `INTEGRATOR_DEDUP_SIMILARITY_THRESHOLD` (default `0.9`) — minimum cosine similarity to forward a pair to LLM verification; lower values increase recall at the cost of more LLM calls.
 - `INTEGRATOR_DEDUP_BATCH_SIZE` (default `9`) — entities per LLM batch in dedup v2 composite-signal pass.
-- `CONSOLIDATOR_PANORAMIC_MAX_ENTITIES` (default `500`) — entity cap for the panoramic triage pass; configurable via constructor param.
 - `ASK_RATE_LIMIT_PER_MINUTE` (default `10`) / `ASK_RATE_LIMIT_PER_HOUR` (default `100`) — rate limits for `/ask` and `/search`; enforced fail-closed (503 when Redis is unavailable).
 - `ALAYA_PART_OF_STRICT` (default `strict`, values `strict|warn|off`) — controls `part_of` tier-rank validation only; non-default values emit `feature_flag_active` at API startup and in `job_feature_flag_digest`. Self-reference remains always rejected.
 - `SECRET_KEY` — must be set to a strong random value in production; defaults to `"change-me-in-production"` which is insecure.

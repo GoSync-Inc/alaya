@@ -42,7 +42,7 @@ packages/
 │       └── routers/                # 18 routers: health, workspaces, entities, claims, chunks, pipeline_traces, integrator_runs, integrator_actions, search, ask, tree, etc.
 ├── cli-go/                         # Go CLI (Cobra): search, ask, tree, entity, claim, ingest, key, setup agent
 └── connectors/                     # Source connectors (placeholder)
-alembic/                            # Migrations 001-008 (001: 18 tables + RLS, 002: auth bypass, 003: extraction schema, 004: intelligence pipeline, 005a/005b: search indexes, 006: consolidator schema, 007: multi-tenant hardening, 008: ACL propagation)
+alembic/                            # Migrations 001-009 (001: 18 tables + RLS, 002: auth bypass, 003: extraction schema, 004: intelligence pipeline, 005a/005b: search indexes, 006: consolidator schema, 007: multi-tenant hardening, 008: ACL propagation, 009: granular token columns + integrator_run_id FK on pipeline_traces)
 docker/                             # seed.py, init-db.sql, Caddyfile
 ```
 
@@ -131,8 +131,9 @@ Core entity types: 13 seeded per workspace (person, project, team, document, dec
 Claims and relations carry `extraction_run_id` for full provenance tracing.
 `integrator_actions.snapshot_schema_version` (int, default 1) — audit payload format version; v2 actions carry additive `inverse` fields enabling full FK + winner-metadata reversal on rollback.
 Access propagation: `l0_events.access_level` is authoritative; `vector_chunks.access_level` is denormalized for pgvector/HNSW filtering and restamped by migration 008 triggers. Missing provenance falls closed to `restricted` for source-less claims and entity vectors without sourced claims. `claim_effective_access` is a non-materialized read-only view that computes most-restrictive claim visibility from `claim_sources`, with source-less claims defaulting to restricted. Request context sets `app.allowed_access_levels` from API key scopes (`read` = public/channel, `write` adds private, `admin` adds restricted); ACL-filtered list, search, and ask responses include `meta.filtered_count` and `meta.filter_reason`.
+Migration 009 (`alembic/versions/009_pipeline_traces_token_classes.py`) adds to `pipeline_traces`: `tokens_in`, `tokens_out`, `tokens_cached`, `cache_write_5m_tokens`, `cache_write_1h_tokens` (all INT NOT NULL default 0); `integrator_run_id UUID nullable` with composite FK to `integrator_runs(workspace_id, id)`; drops NOT NULL on `event_id`; adds partial index `idx_pipeline_traces_integrator_run_id`; adds CHECK `(event_id IS NOT NULL OR extraction_run_id IS NOT NULL OR integrator_run_id IS NOT NULL)`.
 
-## API Endpoints (45 total)
+## API Endpoints (46 total)
 
 Health: `/health/live`, `/health/ready`
 Workspaces: POST, GET, GET/{id}, PATCH/{id} — bootstrap key required for create
@@ -148,7 +149,7 @@ Ingestion: POST `/ingest/text` — trigger extraction pipeline
 Admin: GET /admin/flags, POST /admin/backfill-embeddings — bootstrap-admin feature flag state and embedding maintenance
 Chunks: GET (event_id, processing_stage, is_crystal filters), GET/{id}
 Pipeline Traces: GET /events/{id}/trace
-Integrator Runs: GET, GET/{id}, POST /trigger
+Integrator Runs: GET, GET/{id}, POST /trigger, GET /{id}/trace — per-integrator-run pipeline trace list (granular token columns, integrator_run_id set, event_id=None)
 Integrator Actions: GET /integrator-actions, POST /integrator-actions/{id}/rollback
 Admin: GET /admin/flags, POST /admin/backfill-embeddings
 Search: POST /search — hybrid 3-channel RRF (vector + FTS + entity name)
@@ -168,10 +169,13 @@ Tree: GET /tree, GET /tree/{path}, POST /tree/export
 ## LLM Architecture (Run 2+)
 
 Model-agnostic: `LLMServiceInterface` with provider adapters.
-- `AnthropicAdapter`: Production provider (Haiku for classification, Sonnet for extraction/integration); coerces JSON-string values for top-level `list[...]` / `list[...] | None` fields before Pydantic validation (`_coerce_list_strings` in `llm/anthropic.py`)
+- `AnthropicAdapter`: Production provider (Haiku for classification, Sonnet for extraction/integration); coerces JSON-string values for top-level `list[...]` / `list[...] | None` fields before Pydantic validation (`_coerce_list_strings` in `llm/anthropic.py`); populates granular token classes (`tokens_in`, `tokens_out`, `tokens_cached`, `cache_write_5m_tokens`, `cache_write_1h_tokens`) from Anthropic usage objects; uses `llm/pricing.py` single source for model cost math.
 - `FakeLLMAdapter`: Deterministic test responses with domain-specific overrides
+- `LLMServiceInterface.extract()` accepts `stage: str = "unknown"` kwarg for pipeline trace labeling. Every call site must pass a meaningful stage string (e.g. `"cortex:classify"`, `"crystallizer:extract"`, `"integrator:enricher"`, `"ask:answer"`, `"tree:briefing"`).
+- `LLMUsage` has `total_input` and `cache_hit_ratio` properties.
 Config: per-stage model selection via `CORTEX_CLASSIFIER_MODEL`, `CRYSTALLIZER_MODEL`, `INTEGRATOR_MODEL`.
 Provider-specific features preserved — no lowest common denominator.
+`IntegratorEngine.run()` never raises — always returns `IntegratorRunResult` (status: `completed`/`failed`/`skipped`). Phase failures are caught per savepoint; partial `phase_usages` from completed phases are preserved in the result. `job_integrate` writes one `PipelineTrace` per `IntegratorPhaseUsage` (with `integrator_run_id` set, `event_id=None`) then calls `recalc_usage()`. `GET /integrator-runs/{id}/trace` exposes these traces with granular token columns.
 
 ## Scripts
 

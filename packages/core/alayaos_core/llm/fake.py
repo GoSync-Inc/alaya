@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 
 from alayaos_core.llm.interface import LLMUsage, T
+from alayaos_core.llm.observability import log_call_completed
 
 
 class FakeLLMAdapter:
@@ -61,6 +62,7 @@ class FakeLLMAdapter:
             cache_write_5m_tokens=0,
             cache_write_1h_tokens=0,
         )
+        log_call_completed("llm.call_completed", "fake", stage, 0, usage)
         return result, usage
 
     # Model-specific overrides for realistic fake responses

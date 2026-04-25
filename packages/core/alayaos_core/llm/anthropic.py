@@ -5,19 +5,20 @@ from __future__ import annotations
 import json
 import types
 import typing
+from time import monotonic
 from typing import TYPE_CHECKING
 
 import anthropic
 
 from alayaos_core.llm.interface import LLMUsage, T
+from alayaos_core.llm.observability import log_cache_breakdown_unavailable, log_call_completed
 from alayaos_core.llm.pricing import DEFAULT_PRICING, PRICING
 
 if TYPE_CHECKING:
     from anthropic.types import ToolParam
     from pydantic import BaseModel
 
-# Module-level flag: emit llm.cache_breakdown_unavailable at most once per process.
-# S3 observability hooks read this flag; reset it in tests that need a fresh state.
+# Module-level flag kept for backwards compat; S3 observability uses observability.py guard.
 _cache_breakdown_warned: bool = False
 
 
@@ -84,6 +85,7 @@ class AnthropicAdapter:
             "input_schema": schema,
         }
 
+        _start = monotonic()
         response = await self._client.messages.create(
             model=self._model,
             max_tokens=max_tokens,
@@ -99,6 +101,7 @@ class AnthropicAdapter:
             tools=[tool],
             tool_choice={"type": "tool", "name": "extract_result"},
         )
+        latency_ms = int((monotonic() - _start) * 1000)
 
         # Parse tool use result
         tool_input = None
@@ -122,16 +125,8 @@ class AnthropicAdapter:
             cache_write_1h = getattr(cache_creation, "ephemeral_1h_input_tokens", 0) or 0
         else:
             # cache_creation absent — older SDK or unexpected response shape.
-            # Emit once-per-process warning via module flag (S3 observability wires the full logger).
-            global _cache_breakdown_warned
-            if not _cache_breakdown_warned:
-                _cache_breakdown_warned = True
-                import structlog
-
-                structlog.get_logger().warning(
-                    "llm.cache_breakdown_unavailable",
-                    model=self._model,
-                )
+            # Emit once-per-process warning via observability module (once-per-model guard).
+            log_cache_breakdown_unavailable(self._model)
             cache_write_5m = 0
             cache_write_1h = 0
 
@@ -146,5 +141,7 @@ class AnthropicAdapter:
         # Compute cost using pricing.py (no buggy subtraction)
         price = PRICING.get(self._model, DEFAULT_PRICING)
         usage = usage.model_copy(update={"cost_usd": price.cost_usd(usage)})
+
+        log_call_completed("llm.call_completed", self._model, stage, latency_ms, usage)
 
         return result, usage

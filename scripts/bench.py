@@ -45,6 +45,13 @@ from typing import Any
 
 import httpx
 
+# When invoked as `uv run python scripts/bench.py`, sys.path[0] is `scripts/` (script dir),
+# so `from scripts.bench_ingest import ...` fails because the parent (repo root) is not on path.
+# Add it here so the `scripts.*` package imports inside functions resolve correctly.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------

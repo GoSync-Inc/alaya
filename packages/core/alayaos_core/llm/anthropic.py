@@ -10,20 +10,15 @@ from typing import TYPE_CHECKING
 import anthropic
 
 from alayaos_core.llm.interface import LLMUsage, T
+from alayaos_core.llm.pricing import DEFAULT_PRICING, PRICING
 
 if TYPE_CHECKING:
     from anthropic.types import ToolParam
     from pydantic import BaseModel
 
-# Pricing per 1M tokens
-PRICING: dict[str, dict[str, float]] = {
-    "claude-sonnet-4-20250514": {"input": 3.0, "output": 15.0, "cached": 0.3},
-    "claude-sonnet-4-6-20250514": {"input": 3.0, "output": 15.0, "cached": 0.3},
-    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0, "cached": 0.08},
-    "claude-opus-4-20250514": {"input": 15.0, "output": 75.0, "cached": 1.5},
-    "claude-opus-4-6-20250514": {"input": 15.0, "output": 75.0, "cached": 1.5},
-}
-DEFAULT_PRICING: dict[str, float] = {"input": 3.0, "output": 15.0, "cached": 0.3}  # Sonnet fallback
+# Module-level flag: emit llm.cache_breakdown_unavailable at most once per process.
+# S3 observability hooks read this flag; reset it in tests that need a fresh state.
+_cache_breakdown_warned: bool = False
 
 
 def _is_list_annotation(annotation: object) -> bool:
@@ -79,6 +74,7 @@ class AnthropicAdapter:
         *,
         max_tokens: int = 4096,
         temperature: float = 0.0,
+        stage: str = "unknown",
     ) -> tuple[T, LLMUsage]:
         # Build tool definition from Pydantic schema
         schema = response_model.model_json_schema()
@@ -116,24 +112,38 @@ class AnthropicAdapter:
 
         tool_input = _coerce_list_strings(tool_input, response_model)
         result = response_model.model_validate(tool_input)
-        usage = LLMUsage(
-            tokens_in=response.usage.input_tokens,
-            tokens_out=response.usage.output_tokens,
-            tokens_cached=getattr(response.usage, "cache_read_input_tokens", 0) or 0,
-            cost_usd=self._calculate_cost(response.usage),
-        )
-        return result, usage
 
-    def _calculate_cost(self, usage: object) -> float:
-        # Look up pricing for the current model, fall back to DEFAULT_PRICING
-        pricing = PRICING.get(self._model, DEFAULT_PRICING)
-        input_tokens: int = getattr(usage, "input_tokens", 0)
-        output_tokens: int = getattr(usage, "output_tokens", 0)
-        cached_tokens: int = getattr(usage, "cache_read_input_tokens", 0) or 0
-        # Anthropic's input_tokens includes cache_read_input_tokens.
-        # Subtract cached from input to avoid double-counting.
-        non_cached_input = max(input_tokens - cached_tokens, 0)
-        input_cost = non_cached_input * pricing["input"] / 1_000_000
-        output_cost = output_tokens * pricing["output"] / 1_000_000
-        cached_cost = cached_tokens * pricing["cached"] / 1_000_000
-        return input_cost + output_cost + cached_cost
+        raw_usage = response.usage
+
+        # Granular cache-write fields — use TTL-split nested object, not the aggregated scalar.
+        cache_creation = getattr(raw_usage, "cache_creation", None)
+        if cache_creation is not None:
+            cache_write_5m = getattr(cache_creation, "ephemeral_5m_input_tokens", 0) or 0
+            cache_write_1h = getattr(cache_creation, "ephemeral_1h_input_tokens", 0) or 0
+        else:
+            # cache_creation absent — older SDK or unexpected response shape.
+            # Emit once-per-process warning via module flag (S3 observability wires the full logger).
+            global _cache_breakdown_warned
+            if not _cache_breakdown_warned:
+                _cache_breakdown_warned = True
+                import structlog
+                structlog.get_logger().warning(
+                    "llm.cache_breakdown_unavailable",
+                    model=self._model,
+                )
+            cache_write_5m = 0
+            cache_write_1h = 0
+
+        usage = LLMUsage(
+            tokens_in=getattr(raw_usage, "input_tokens", 0),
+            tokens_out=getattr(raw_usage, "output_tokens", 0),
+            tokens_cached=getattr(raw_usage, "cache_read_input_tokens", 0) or 0,
+            cache_write_5m_tokens=cache_write_5m,
+            cache_write_1h_tokens=cache_write_1h,
+            cost_usd=0.0,  # computed below after fields are set
+        )
+        # Compute cost using pricing.py (no buggy subtraction)
+        price = PRICING.get(self._model, DEFAULT_PRICING)
+        usage = usage.model_copy(update={"cost_usd": price.cost_usd(usage)})
+
+        return result, usage

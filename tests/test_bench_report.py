@@ -1,4 +1,4 @@
-"""Unit tests for scripts.bench_report.
+"""Unit tests for scripts.bench_report and scripts.bench._build_manifest.
 
 Tests run without Docker — uses SQLite in-memory via SQLAlchemy synchronous engine.
 Covers:
@@ -7,7 +7,7 @@ Covers:
   - Quality proxy formulas (description_rate, claims_per_entity,
     claims_per_event_stddev, dedup_actions, run_failure_count)
   - Scoping: workspace_id filter and created_at >= started_at filter
-  - Secrets policy: no ak_... substring in any output bytes
+  - Secrets policy: no ak_... substring in any output bytes (format_summary + _build_manifest)
   - Empty-workspace edge case (spec #11): result="empty_workspace", exit 0 semantic
 """
 
@@ -21,6 +21,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, text
 
+from scripts.bench import FIXTURES_DIR, _build_manifest
 from scripts.bench_report import (
     PROXY_DESCRIPTION_PREDICATE_SLUGS,
     format_summary,
@@ -115,9 +116,6 @@ CREATE TABLE IF NOT EXISTS pipeline_traces (
     extraction_run_id TEXT,
     stage TEXT,
     tokens_used INTEGER DEFAULT 0,
-    tokens_in INTEGER DEFAULT 0,
-    tokens_out INTEGER DEFAULT 0,
-    tokens_cached INTEGER DEFAULT 0,
     cost_usd REAL DEFAULT 0,
     duration_ms INTEGER DEFAULT 0,
     created_at TEXT
@@ -693,3 +691,123 @@ def test_manifest_data_is_json_serialisable():
     # Must not raise
     serialized = json.dumps(data)
     assert len(serialized) > 10
+
+
+# ---------------------------------------------------------------------------
+# Test: _build_manifest secrets policy (I6)
+# Verifies that bench.py's manifest construction never leaks raw env values
+# even when sentinel "ak_"-prefixed values are injected into model env vars.
+# ---------------------------------------------------------------------------
+
+
+def test_build_manifest_no_secrets_in_env_vars(monkeypatch):
+    """Manifest construction must not leak raw env values (charter §11).
+
+    Even if an operator uses 'ak_'-prefixed values in model config env vars,
+    _build_manifest must only emit 'set'/'unset' — never the raw value.
+    """
+    # Inject sentinel values into every env var that could appear in manifest
+    secret_sentinel = "ak_test_secret_DO_NOT_LEAK_xxxx"
+    model_sentinel = "ak_test_secret_DO_NOT_LEAK_yyyy"
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", secret_sentinel)
+    monkeypatch.setenv("CORTEX_CLASSIFIER_MODEL", model_sentinel)
+    monkeypatch.setenv("CRYSTALLIZER_MODEL", model_sentinel)
+    monkeypatch.setenv("INTEGRATOR_MODEL", model_sentinel)
+    monkeypatch.setenv("ASK_MODEL", model_sentinel)
+    monkeypatch.setenv("TREE_BRIEFING_MODEL", model_sentinel)
+
+    fixture_path = FIXTURES_DIR / "small.jsonl"
+    fixture_meta = {
+        "name": "small",
+        "path": "tests/fixtures/bench/small.jsonl",
+        "file_hash": "abc123",
+        "event_count": 5,
+    }
+    ts_started = ANCHOR_DT
+    ts_completed = ANCHOR_DT + timedelta(seconds=60)
+
+    manifest = _build_manifest(
+        fixture_path=fixture_path,
+        fixture_name="small",
+        fixture_meta=fixture_meta,
+        git_sha="abc1234",
+        ts_started=ts_started,
+        ts_completed=ts_completed,
+        exit_code=0,
+        exit_phase="complete",
+        args_fixture="small",
+        args_keep=False,
+        args_reuse=False,
+        args_timeout_seconds=600,
+    )
+
+    manifest_bytes = json.dumps(manifest).encode()
+
+    # Neither the API key sentinel nor the model sentinel must appear anywhere
+    assert b"ak_test_secret" not in manifest_bytes, "Secret sentinel 'ak_test_secret' found in manifest output"
+    assert b"DO_NOT_LEAK" not in manifest_bytes, "Leak sentinel 'DO_NOT_LEAK' found in manifest output"
+
+
+def test_build_manifest_model_versions_masked(monkeypatch):
+    """model_versions in manifest must be set/unset, never raw env values."""
+    monkeypatch.setenv("CORTEX_CLASSIFIER_MODEL", "claude-haiku-secret-internal")
+    monkeypatch.setenv("CRYSTALLIZER_MODEL", "claude-sonnet-special")
+    monkeypatch.delenv("INTEGRATOR_MODEL", raising=False)
+
+    fixture_path = FIXTURES_DIR / "small.jsonl"
+    fixture_meta = {"name": "small", "path": "tests/fixtures/bench/small.jsonl", "file_hash": "x", "event_count": 5}
+
+    manifest = _build_manifest(
+        fixture_path=fixture_path,
+        fixture_name="small",
+        fixture_meta=fixture_meta,
+        git_sha="abc1234",
+        ts_started=ANCHOR_DT,
+        ts_completed=ANCHOR_DT + timedelta(seconds=60),
+        exit_code=0,
+        exit_phase="complete",
+        args_fixture="small",
+        args_keep=False,
+        args_reuse=False,
+        args_timeout_seconds=600,
+    )
+
+    mv = manifest["model_versions"]
+    # Set vars must show "set", unset must show "unset"
+    assert mv["CORTEX_CLASSIFIER_MODEL"] == "set"
+    assert mv["CRYSTALLIZER_MODEL"] == "set"
+    assert mv["INTEGRATOR_MODEL"] == "unset"
+    # Raw model strings must not appear
+    assert "claude-haiku-secret-internal" not in json.dumps(mv)
+    assert "claude-sonnet-special" not in json.dumps(mv)
+
+
+def test_build_manifest_env_summary_masked(monkeypatch):
+    """env_summary in manifest must only contain set/unset, never raw key values."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-realkey-DO_NOT_LEAK")
+
+    fixture_path = FIXTURES_DIR / "small.jsonl"
+    fixture_meta = {"name": "small", "path": "tests/fixtures/bench/small.jsonl", "file_hash": "x", "event_count": 5}
+
+    manifest = _build_manifest(
+        fixture_path=fixture_path,
+        fixture_name="small",
+        fixture_meta=fixture_meta,
+        git_sha="abc1234",
+        ts_started=ANCHOR_DT,
+        ts_completed=ANCHOR_DT + timedelta(seconds=60),
+        exit_code=0,
+        exit_phase="complete",
+        args_fixture="small",
+        args_keep=False,
+        args_reuse=False,
+        args_timeout_seconds=600,
+    )
+
+    env_sum = manifest["env_summary"]
+    assert env_sum["ANTHROPIC_API_KEY"] == "set"
+    # The raw key value must not appear
+    manifest_bytes = json.dumps(manifest).encode()
+    assert b"sk-ant-api03" not in manifest_bytes
+    assert b"DO_NOT_LEAK" not in manifest_bytes

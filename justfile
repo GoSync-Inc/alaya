@@ -72,3 +72,15 @@ serve:
 # Run smoke test
 smoke:
     bash scripts/smoke-test.sh
+
+# Run the full bench harness (pass --fixture, --keep, --reuse, --timeout-seconds as needed)
+bench *ARGS:
+    uv run python scripts/bench.py {{ARGS}}
+
+# Stream LLM call events from the worker logs (requires jq)
+logs-llm:
+    docker compose logs -f worker | jq -c 'select(.event=="llm.call_completed") | {stage, model, cache_hit_ratio, cost_usd, tokens_in, tokens_out, cache_read}'
+
+# Remove all bench result directories (preserves .gitkeep)
+bench-clean:
+    rm -rf bench_results/*

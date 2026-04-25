@@ -246,7 +246,7 @@ class EntityDeduplicator:
                     elif best_score >= self.ambiguous_low:
                         # Tier 3: LLM fallback for ambiguous band
                         seen.add(pair_key)  # mark as seen regardless of LLM result
-                        is_same = await self._llm_check(entity, candidate)
+                        is_same, _ = await self._llm_check(entity, candidate)
                         if is_same:
                             pairs.append(
                                 DuplicatePair(
@@ -261,32 +261,35 @@ class EntityDeduplicator:
 
         return pairs
 
-    async def llm_check_pair(self, entity_a: EntityWithContext, entity_b: EntityWithContext) -> bool:
+    async def llm_check_pair(self, entity_a: EntityWithContext, entity_b: EntityWithContext) -> tuple[bool, LLMUsage]:
         """Public API: ask LLM whether two entities represent the same real-world entity.
 
         Used by IntegratorEngine._shortlist_dedup to verify shortlisted pairs.
+        Returns (is_same_entity, usage). Exceptions propagate to the caller.
         """
         return await self._llm_check(entity_a, entity_b)
 
-    async def _llm_check(self, entity_a: EntityWithContext, entity_b: EntityWithContext) -> bool:
-        """Ask LLM whether two entities represent the same real-world entity."""
+    async def _llm_check(self, entity_a: EntityWithContext, entity_b: EntityWithContext) -> tuple[bool, LLMUsage]:
+        """Ask LLM whether two entities represent the same real-world entity.
+
+        Returns (is_same_entity, usage). Exceptions propagate to the caller so that
+        the engine's begin_nested savepoint can handle phase failure correctly.
+        Stage is always 'integrator:dedup' so pipeline_traces carry a meaningful label.
+        """
         prompt = (
             "Are these the same entity?\n"
             f'Entity A: name="{entity_a.name}", type="{entity_a.entity_type}", aliases={entity_a.aliases}\n'
             f'Entity B: name="{entity_b.name}", type="{entity_b.entity_type}", aliases={entity_b.aliases}\n'
             "Respond with is_same_entity (true/false) and brief reasoning."
         )
-        try:
-            result, _ = await self.llm.extract(
-                text=prompt,
-                system_prompt="You are an entity deduplication assistant. Decide if two entity mentions refer to the same real-world entity.",
-                response_model=EntityMatchResult,
-                max_tokens=256,
-            )
-            return result.is_same_entity
-        except Exception:
-            log.warning("dedup_llm_check_failed", entity_a=entity_a.name, entity_b=entity_b.name)
-            return False
+        result, usage = await self.llm.extract(
+            text=prompt,
+            system_prompt="You are an entity deduplication assistant. Decide if two entity mentions refer to the same real-world entity.",
+            response_model=EntityMatchResult,
+            max_tokens=256,
+            stage="integrator:dedup",
+        )
+        return result.is_same_entity, usage
 
 
 # ---------------------------------------------------------------------------

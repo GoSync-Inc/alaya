@@ -799,12 +799,12 @@ class IntegratorEngine:
                 entity_count=len(entities),
                 msg="falling back to shortlist dedup",
             )
-            dup_pairs = await self._shortlist_dedup(entities)
+            dup_pairs, fallback_usage = await self._shortlist_dedup(entities)
             merged = await self._merge_duplicates(
                 dup_pairs, workspace_id, session, run_id=effective_run_id, action_repo=action_repo
             )
             sigs = [f"merge:{p.entity_a_id}:{sorted([str(p.entity_b_id)])}" for p in dup_pairs]
-            return merged, sigs, _zero
+            return merged, sigs, fallback_usage
 
         if len(vectors) != len(entities):
             log.warning(
@@ -813,12 +813,12 @@ class IntegratorEngine:
                 vector_count=len(vectors),
                 msg="falling back to shortlist dedup",
             )
-            dup_pairs = await self._shortlist_dedup(entities)
+            dup_pairs, fallback_usage = await self._shortlist_dedup(entities)
             merged = await self._merge_duplicates(
                 dup_pairs, workspace_id, session, run_id=effective_run_id, action_repo=action_repo
             )
             sigs = [f"merge:{p.entity_a_id}:{sorted([str(p.entity_b_id)])}" for p in dup_pairs]
-            return merged, sigs, _zero
+            return merged, sigs, fallback_usage
 
         embeddings: dict[uuid.UUID, list[float]] = {e.id: v for e, v in zip(entities, vectors, strict=True)}
 
@@ -884,7 +884,7 @@ class IntegratorEngine:
     # Shortlist dedup (fallback when embedding fails)
     # ---------------------------------------------------------------------------
 
-    async def _shortlist_dedup(self, entities: list[EntityWithContext]) -> list[DuplicatePair]:
+    async def _shortlist_dedup(self, entities: list[EntityWithContext]) -> tuple[list[DuplicatePair], LLMUsage]:
         """Vector shortlist → LLM-verify dedup (replaces O(n²) rapidfuzz loop).
 
         1. Embed all entity names via embedding service (fast, CPU-only, no DB).
@@ -892,9 +892,14 @@ class IntegratorEngine:
         3. LLM-verify only the shortlisted pairs.
 
         This reduces LLM calls from O(n²) to at most n * K.
+
+        Returns (dup_pairs, aggregated_usage) where aggregated_usage accumulates
+        the LLM cost from all per-pair llm_check_pair() calls so the dedup phase's
+        IntegratorPhaseUsage correctly reflects fallback-path costs.
         """
+        _zero = LLMUsage(tokens_in=0, tokens_out=0, tokens_cached=0, cost_usd=0.0)
         if len(entities) < 2:
-            return []
+            return [], _zero
 
         # Skip entities with unresolvable entity_type — "same-type only" guarantee requires a
         # real type slug. Grouping unknowns together would pair unrelated entities.
@@ -905,7 +910,7 @@ class IntegratorEngine:
         entities = resolved
 
         if len(entities) < 2:
-            return []
+            return [], _zero
 
         # 1. Embed entity names
         embed_svc = self._get_embedding_service()
@@ -918,8 +923,8 @@ class IntegratorEngine:
                 entity_count=len(entities),
                 msg="falling back to rapidfuzz dedup",
             )
-            # Graceful fallback to the existing rapidfuzz-based deduplicator
-            return await self._deduplicator.find_duplicates(entities)
+            # Graceful fallback to the existing rapidfuzz-based deduplicator (no LLM usage)
+            return await self._deduplicator.find_duplicates(entities), _zero
 
         if len(vectors) != len(entities):
             log.warning(
@@ -928,7 +933,7 @@ class IntegratorEngine:
                 vector_count=len(vectors),
                 msg="falling back to rapidfuzz dedup",
             )
-            return await self._deduplicator.find_duplicates(entities)
+            return await self._deduplicator.find_duplicates(entities), _zero
         embeddings: dict[uuid.UUID, list[float]] = {e.id: v for e, v in zip(entities, vectors, strict=True)}
 
         # 2. Build shortlist of candidate pairs via cosine similarity
@@ -947,10 +952,22 @@ class IntegratorEngine:
             threshold=self._shortlist_threshold,
         )
 
-        # 3. LLM-verify each shortlisted pair
+        # 3. LLM-verify each shortlisted pair; accumulate usage
         dup_pairs: list[DuplicatePair] = []
+        agg_tokens_in = 0
+        agg_tokens_out = 0
+        agg_tokens_cached = 0
+        agg_cache_write_5m = 0
+        agg_cache_write_1h = 0
+        agg_cost_usd = 0.0
         for entity_a, entity_b in candidate_pairs:
-            is_same = await self._deduplicator.llm_check_pair(entity_a, entity_b)
+            is_same, pair_usage = await self._deduplicator.llm_check_pair(entity_a, entity_b)
+            agg_tokens_in += pair_usage.tokens_in
+            agg_tokens_out += pair_usage.tokens_out
+            agg_tokens_cached += pair_usage.tokens_cached
+            agg_cache_write_5m += pair_usage.cache_write_5m_tokens
+            agg_cache_write_1h += pair_usage.cache_write_1h_tokens
+            agg_cost_usd += pair_usage.cost_usd
             if is_same:
                 dup_pairs.append(
                     DuplicatePair(
@@ -962,7 +979,15 @@ class IntegratorEngine:
                         method="vector_shortlist",
                     )
                 )
-        return dup_pairs
+        aggregated_usage = LLMUsage(
+            tokens_in=agg_tokens_in,
+            tokens_out=agg_tokens_out,
+            tokens_cached=agg_tokens_cached,
+            cache_write_5m_tokens=agg_cache_write_5m,
+            cache_write_1h_tokens=agg_cache_write_1h,
+            cost_usd=agg_cost_usd,
+        )
+        return dup_pairs, aggregated_usage
 
     async def _merge_duplicates(
         self,

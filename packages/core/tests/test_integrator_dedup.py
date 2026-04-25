@@ -525,7 +525,7 @@ async def test_shortlist_skips_typeless_entities():
     )
     engine._embedding_service = fake_embed  # type: ignore[attr-defined]
 
-    pairs = await engine._shortlist_dedup([ewc_a, ewc_b])  # type: ignore[attr-defined]
+    pairs, _usage = await engine._shortlist_dedup([ewc_a, ewc_b])  # type: ignore[attr-defined]
     assert pairs == [], f"Expected no pairs for 'unknown' type entities, got {pairs}"
 
 
@@ -1398,3 +1398,107 @@ async def test_relation_dedup_after_merge_removes_duplicates():
         "Expected at least one relation dedup DELETE (ROW_NUMBER or ctid-based) after merge. "
         "SQL statements issued:\n" + "\n".join(sql_texts[:20])
     )
+
+
+# ---------------------------------------------------------------------------
+# G1: Fallback _llm_check — exception propagation, stage=, usage capture
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_llm_check_propagates_exception():
+    """EntityDeduplicator._llm_check must propagate LLM exceptions rather than swallowing them.
+
+    Previously the function caught all exceptions and returned False silently.
+    After the fix, exceptions must propagate to the caller.
+    """
+    from alayaos_core.extraction.integrator.dedup import EntityDeduplicator
+
+    class _RaisingLLM:
+        async def extract(self, text, system_prompt, response_model, **kwargs):
+            raise RuntimeError("LLM unavailable")
+
+    deduplicator = EntityDeduplicator(llm=_RaisingLLM(), threshold=0.85, ambiguous_low=0.70)
+    entity_a = _make_entity("Alice Johnson")
+    entity_b = _make_entity("Alice Jonson")
+
+    with pytest.raises(RuntimeError, match="LLM unavailable"):
+        await deduplicator._llm_check(entity_a, entity_b)
+
+
+@pytest.mark.asyncio
+async def test_llm_check_returns_usage():
+    """EntityDeduplicator._llm_check must return (bool, LLMUsage) not just bool."""
+    from alayaos_core.extraction.integrator.dedup import EntityDeduplicator
+    from alayaos_core.extraction.integrator.schemas import EntityMatchResult
+    from alayaos_core.llm.interface import LLMUsage
+
+    expected_usage = LLMUsage(tokens_in=10, tokens_out=5, tokens_cached=0, cost_usd=0.001)
+
+    class _FakeLLM:
+        async def extract(self, text, system_prompt, response_model, **kwargs):
+            return EntityMatchResult(is_same_entity=True, reasoning="same"), expected_usage
+
+    deduplicator = EntityDeduplicator(llm=_FakeLLM(), threshold=0.85, ambiguous_low=0.70)
+    entity_a = _make_entity("Alice Johnson")
+    entity_b = _make_entity("Alice Jonson")
+
+    result = await deduplicator._llm_check(entity_a, entity_b)
+    assert isinstance(result, tuple), f"Expected tuple, got {type(result)}"
+    assert len(result) == 2, f"Expected (bool, LLMUsage), got {result}"
+    is_same, usage = result
+    assert is_same is True
+    assert isinstance(usage, LLMUsage)
+    assert usage.tokens_in == 10
+
+
+@pytest.mark.asyncio
+async def test_llm_check_passes_stage():
+    """EntityDeduplicator._llm_check must pass stage='integrator:dedup' to llm.extract()."""
+    from alayaos_core.extraction.integrator.dedup import EntityDeduplicator
+    from alayaos_core.extraction.integrator.schemas import EntityMatchResult
+    from alayaos_core.llm.interface import LLMUsage
+
+    captured_stages: list[str] = []
+
+    class _CapturingLLM:
+        async def extract(self, text, system_prompt, response_model, *, stage="unknown", **kwargs):
+            captured_stages.append(stage)
+            return EntityMatchResult(is_same_entity=False, reasoning="different"), LLMUsage(
+                tokens_in=1, tokens_out=1, tokens_cached=0, cost_usd=0.0
+            )
+
+    deduplicator = EntityDeduplicator(llm=_CapturingLLM(), threshold=0.85, ambiguous_low=0.70)
+    entity_a = _make_entity("Alice Johnson")
+    entity_b = _make_entity("Alice Jonson")
+
+    await deduplicator._llm_check(entity_a, entity_b)
+
+    assert len(captured_stages) == 1, "Expected exactly one LLM call"
+    assert captured_stages[0] == "integrator:dedup", (
+        f"Expected stage='integrator:dedup', got stage={captured_stages[0]!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_llm_check_pair_returns_usage():
+    """EntityDeduplicator.llm_check_pair (public API) must return (bool, LLMUsage)."""
+    from alayaos_core.extraction.integrator.dedup import EntityDeduplicator
+    from alayaos_core.extraction.integrator.schemas import EntityMatchResult
+    from alayaos_core.llm.interface import LLMUsage
+
+    expected_usage = LLMUsage(tokens_in=7, tokens_out=3, tokens_cached=0, cost_usd=0.0005)
+
+    class _FakeLLM:
+        async def extract(self, text, system_prompt, response_model, **kwargs):
+            return EntityMatchResult(is_same_entity=False, reasoning="different"), expected_usage
+
+    deduplicator = EntityDeduplicator(llm=_FakeLLM(), threshold=0.85, ambiguous_low=0.70)
+    entity_a = _make_entity("Alice Johnson")
+    entity_b = _make_entity("Bob Smith")
+
+    result = await deduplicator.llm_check_pair(entity_a, entity_b)
+    assert isinstance(result, tuple), f"llm_check_pair must return tuple, got {type(result)}"
+    is_same, usage = result
+    assert is_same is False
+    assert usage.tokens_in == 7

@@ -81,6 +81,7 @@ EXIT_INGEST_ERROR = 3
 EXIT_DRAIN_TIMEOUT = 4
 EXIT_INTEGRATOR_TIMEOUT = 5
 EXIT_REPORT_FAILURE = 6
+EXIT_CACHE_WARM_FAIL = 7
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -609,6 +610,85 @@ def phase_teardown() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Cache warm check
+# ---------------------------------------------------------------------------
+
+_CACHE_WARM_THRESHOLD = 0.5
+
+
+def _get_cortex_cache_hit_ratio(workspace_id: str, ts_started: datetime) -> float | None:
+    """Query DB and return cortex stage cache_hit_ratio from the second bench run.
+
+    Returns None when no cortex traces exist for this workspace+window.
+    """
+    db_url = os.environ.get(
+        "ALAYA_DATABASE_URL",
+        "postgresql+asyncpg://alaya:alaya@localhost:5432/alaya",
+    )
+    try:
+        from sqlalchemy import create_engine
+        from sqlalchemy import text as _sql_text
+
+        from scripts.bench_report import format_summary
+
+        def _query_ratio() -> float | None:
+            sync_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+            engine = create_engine(sync_url, future=True)
+            ws_id = uuid_mod.UUID(workspace_id)
+            with engine.begin() as conn:
+                conn.execute(
+                    _sql_text("SELECT set_config('app.workspace_id', :wid, false)"),
+                    {"wid": str(ws_id)},
+                )
+                manifest_data, _ = format_summary(conn, ws_id, ts_started)
+            engine.dispose()
+            ratios = manifest_data.get("cache_hit_ratio_per_stage", {})
+            return ratios.get("cortex")
+
+        return _query_ratio()
+    except Exception as e:
+        _log(f"  cache-warm-check: DB query failed: {e}")
+        return None
+
+
+def phase_cache_warm_check(
+    args: argparse.Namespace,
+    ts_run1_started: datetime,
+    ts_run1_completed: datetime,
+    ts_run2_started: datetime,
+    ts_run2_completed: datetime,
+    workspace_id: str,
+) -> int:
+    """Assert that the second bench run has cortex cache_hit_ratio > 0.5.
+
+    Returns EXIT_SUCCESS (0) on pass, EXIT_CACHE_WARM_FAIL (7) on failure.
+    """
+    ratio = _get_cortex_cache_hit_ratio(workspace_id, ts_run2_started)
+
+    if ratio is None:
+        ratio = 0.0
+
+    if ratio > _CACHE_WARM_THRESHOLD:
+        _log(f"cache-warm-check PASS: cortex cache_hit_ratio={ratio:.4f} > {_CACHE_WARM_THRESHOLD}")
+        return EXIT_SUCCESS
+
+    gap_seconds = (ts_run2_started - ts_run1_completed).total_seconds()
+    _log(
+        f"FAIL: cache-warm-check: cortex cache_hit_ratio={ratio:.4f} does not exceed threshold={_CACHE_WARM_THRESHOLD}"
+    )
+    _log(f"  run1_started={ts_run1_started.isoformat()}")
+    _log(f"  run1_completed={ts_run1_completed.isoformat()}")
+    _log(f"  run2_started={ts_run2_started.isoformat()}")
+    _log(f"  run2_completed={ts_run2_completed.isoformat()}")
+    _log(f"  gap_seconds={gap_seconds:.1f}")
+    _log(
+        "  remediation: rerun with `--keep` within 5 minutes; "
+        "if persistent, check `llm.cache_miss_below_threshold` events for stage=cortex"
+    )
+    return EXIT_CACHE_WARM_FAIL
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -645,7 +725,119 @@ def build_parser() -> argparse.ArgumentParser:
         dest="timeout_seconds",
         help=f"Global wall-clock budget in seconds (default: {BENCH_TIMEOUT_SECONDS_DEFAULT})",
     )
+    parser.add_argument(
+        "--cache-warm-check",
+        action="store_true",
+        dest="cache_warm_check",
+        help=(
+            "Run the bench twice (first run warms cache; second run measures). "
+            "Asserts that the second-run cortex cache_hit_ratio > 0.5. "
+            "On failure, exits with code 7 (EXIT_CACHE_WARM_FAIL)."
+        ),
+    )
     return parser
+
+
+def _run_single_bench(
+    args: argparse.Namespace,
+    fixture_name: str,
+    fixture_path: Path,
+    git_sha: str,
+    out_dir: Path,
+    deadline: float,
+    reuse: bool,
+) -> tuple[int, str, datetime, datetime]:
+    """Execute a single bench run (phases 4-8).
+
+    Assumes preflight + up + wait have already been called (stack is live).
+    Returns (exit_code, workspace_id, ts_started, ts_completed).
+    """
+    ts_started = datetime.now(UTC)
+    key_path: str = ""
+    workspace_id: str = ""
+    ingest_results: list[dict[str, Any]] = []
+    integrator_run_id: str | None = None
+
+    try:
+        # Phase 4: bootstrap
+        rc, workspace_id, key_path = phase_bootstrap(deadline)
+        if rc != EXIT_SUCCESS:
+            return rc, "", ts_started, datetime.now(UTC)
+
+        # Phase 5: ingest
+        rc, ingest_results = phase_ingest(fixture_path, key_path, deadline)
+        if rc != EXIT_SUCCESS:
+            return rc, workspace_id, ts_started, datetime.now(UTC)
+
+        # Phase 6: drain — use 50% of remaining budget
+        drain_budget = _remaining(deadline) * 0.5
+        drain_deadline = time.monotonic() + drain_budget
+        run_ids = [r["run_id"] for r in ingest_results if "run_id" in r]
+        rc, _ = phase_drain(run_ids, key_path, drain_deadline)
+        if rc != EXIT_SUCCESS:
+            ts_completed = datetime.now(UTC)
+            phase_report(
+                out_dir,
+                workspace_id,
+                ts_started,
+                ts_completed,
+                fixture_path,
+                fixture_name,
+                git_sha,
+                rc,
+                "drain",
+                ingest_results,
+                None,
+                args,
+            )
+            return rc, workspace_id, ts_started, ts_completed
+
+        # Phase 7: integrator
+        rc, integrator_run_id = phase_integrator(key_path, workspace_id, deadline)
+        if rc != EXIT_SUCCESS:
+            ts_completed = datetime.now(UTC)
+            phase_report(
+                out_dir,
+                workspace_id,
+                ts_started,
+                ts_completed,
+                fixture_path,
+                fixture_name,
+                git_sha,
+                rc,
+                "integrator",
+                ingest_results,
+                integrator_run_id,
+                args,
+            )
+            return rc, workspace_id, ts_started, ts_completed
+
+        # Phase 8: report
+        ts_completed = datetime.now(UTC)
+        rc = phase_report(
+            out_dir,
+            workspace_id,
+            ts_started,
+            ts_completed,
+            fixture_path,
+            fixture_name,
+            git_sha,
+            EXIT_SUCCESS,
+            "complete",
+            ingest_results,
+            integrator_run_id,
+            args,
+        )
+        return rc, workspace_id, ts_started, ts_completed
+
+    finally:
+        # Clean up temp key file
+        if key_path and Path(key_path).exists():
+            try:
+                Path(key_path).unlink()
+                _log("Temp key file deleted")
+            except Exception:
+                pass
 
 
 def main() -> int:
@@ -670,12 +862,7 @@ def main() -> int:
     _log(f"Bench start: fixture={fixture_name} timeout={args.timeout_seconds}s")
     _log(f"Output dir: {out_dir}")
 
-    key_path: str = ""
-    workspace_id: str = ""
-    ingest_results: list[dict[str, Any]] = []
-    integrator_run_id: str | None = None
     # Track whether this bench invocation started the docker stack.
-    # Only run teardown if we own the stack (not --reuse, and phase_up succeeded).
     we_started_stack: bool = False
 
     try:
@@ -696,75 +883,36 @@ def main() -> int:
         if rc != EXIT_SUCCESS:
             return rc
 
-        # Phase 4: bootstrap
-        rc, workspace_id, key_path = phase_bootstrap(deadline)
-        if rc != EXIT_SUCCESS:
-            return rc
-
-        # Phase 5: ingest
-        rc, ingest_results = phase_ingest(fixture_path, key_path, deadline)
-        if rc != EXIT_SUCCESS:
-            return rc
-
-        # Phase 6: drain — use 50% of remaining budget
-        drain_budget = _remaining(deadline) * 0.5
-        drain_deadline = time.monotonic() + drain_budget
-        run_ids = [r["run_id"] for r in ingest_results if "run_id" in r]
-        rc, _ = phase_drain(run_ids, key_path, drain_deadline)
-        if rc != EXIT_SUCCESS:
-            # Write partial artifact and exit
-            ts_completed = datetime.now(UTC)
-            phase_report(
-                out_dir,
-                workspace_id,
-                ts_started,
-                ts_completed,
-                fixture_path,
-                fixture_name,
-                git_sha,
-                rc,
-                "drain",
-                ingest_results,
-                None,
-                args,
+        if args.cache_warm_check:
+            _log("cache-warm-check: starting run 1 (cache warm-up)")
+            run1_out = out_dir / "run1"
+            rc1, _ws1, ts1_start, ts1_end = _run_single_bench(
+                args, fixture_name, fixture_path, git_sha, run1_out, deadline, reuse=True
             )
-            return rc
+            if rc1 != EXIT_SUCCESS:
+                return rc1
 
-        # Phase 7: integrator
-        rc, integrator_run_id = phase_integrator(key_path, workspace_id, deadline)
-        if rc != EXIT_SUCCESS:
-            ts_completed = datetime.now(UTC)
-            phase_report(
-                out_dir,
-                workspace_id,
-                ts_started,
-                ts_completed,
-                fixture_path,
-                fixture_name,
-                git_sha,
-                rc,
-                "integrator",
-                ingest_results,
-                integrator_run_id,
-                args,
+            _log("cache-warm-check: starting run 2 (cache measurement)")
+            run2_out = out_dir / "run2"
+            rc2, ws2, ts2_start, ts2_end = _run_single_bench(
+                args, fixture_name, fixture_path, git_sha, run2_out, deadline, reuse=True
             )
-            return rc
+            if rc2 != EXIT_SUCCESS:
+                return rc2
 
-        # Phase 8: report
-        ts_completed = datetime.now(UTC)
-        rc = phase_report(
-            out_dir,
-            workspace_id,
-            ts_started,
-            ts_completed,
-            fixture_path,
-            fixture_name,
-            git_sha,
-            EXIT_SUCCESS,
-            "complete",
-            ingest_results,
-            integrator_run_id,
-            args,
+            # Assert cache hit ratio > threshold for cortex stage in run 2
+            return phase_cache_warm_check(
+                args,
+                ts_run1_started=ts1_start,
+                ts_run1_completed=ts1_end,
+                ts_run2_started=ts2_start,
+                ts_run2_completed=ts2_end,
+                workspace_id=ws2,
+            )
+
+        # Normal single-run path
+        rc, _ws, _ts_start, _ts_end = _run_single_bench(
+            args, fixture_name, fixture_path, git_sha, out_dir, deadline, reuse=args.reuse
         )
         return rc
 
@@ -773,14 +921,6 @@ def main() -> int:
         return EXIT_PREFLIGHT
 
     finally:
-        # Clean up temp key file
-        if key_path and Path(key_path).exists():
-            try:
-                Path(key_path).unlink()
-                _log("Temp key file deleted")
-            except Exception:
-                pass
-
         # Phase 9: teardown — only if we started the stack in this run.
         # With --reuse the stack is externally owned; with preflight failures
         # before phase_up, we_started_stack stays False and no teardown happens.

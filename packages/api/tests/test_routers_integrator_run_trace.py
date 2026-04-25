@@ -105,7 +105,7 @@ def make_trace(run_id: uuid.UUID, stage: str = "integrator:panoramic"):
 
 class TestIntegratorRunTraceRouter:
     def test_get_trace_returns_200_with_traces_list(self) -> None:
-        """GET /integrator-runs/{id}/trace returns 200 with data list."""
+        """GET /integrator-runs/{id}/trace returns 200 with data list and meta.count."""
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
         run = make_integrator_run()
@@ -141,9 +141,12 @@ class TestIntegratorRunTraceRouter:
         assert item["tokens_in"] == 15
         assert item["tokens_out"] == 5
         assert item["tokens_cached"] == 2
+        # Concern 4: meta.count must mirror the events/trace endpoint
+        assert "meta" in body, "Response missing 'meta' key"
+        assert body["meta"]["count"] == len(items), f"meta.count={body['meta'].get('count')} but len(data)={len(items)}"
 
     def test_get_trace_returns_empty_list_when_no_traces(self) -> None:
-        """GET /integrator-runs/{id}/trace returns empty data list when no traces."""
+        """GET /integrator-runs/{id}/trace returns empty data list and meta.count=0 when no traces."""
         api_key = make_api_key()
         app = make_app_with_mock_session(api_key)
         run = make_integrator_run()
@@ -169,6 +172,7 @@ class TestIntegratorRunTraceRouter:
         assert response.status_code == 200
         body = response.json()
         assert body["data"] == []
+        assert body["meta"]["count"] == 0
 
     def test_get_trace_returns_404_when_run_not_found(self) -> None:
         """GET /integrator-runs/{id}/trace returns 404 when run does not exist."""
@@ -242,9 +246,11 @@ class TestIntegratorRunTraceRouter:
             )
 
         assert response.status_code == 200
-        items = response.json()["data"]
+        body = response.json()
+        items = body["data"]
         assert len(items) == 3
         stages = [item["stage"] for item in items]
         assert "integrator:panoramic" in stages
         assert "integrator:dedup" in stages
         assert "integrator:enricher" in stages
+        assert body["meta"]["count"] == 3

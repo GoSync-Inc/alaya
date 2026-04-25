@@ -38,7 +38,7 @@ Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `
 4. **Job arg safety** — TaskIQ tasks accept only string IDs (`event_id`, `extraction_run_id`, `workspace_id`).
 5. **Run 6.2 access semantics** — `channel` events extract identically to public and are tier 1 at retrieval; `restricted` events now extract and rely on retrieval ACL via `vector_chunks.access_level` and `claim_effective_access`; `private` events remain workspace opt-in gated.
 
-## API Endpoints (45 total)
+## API Endpoints (46 total)
 
 ```
 GET  /health/live
@@ -87,8 +87,6 @@ POST /ask                 — LLM Q&A with citation validation
 GET  /tree                — knowledge tree root
 GET  /tree/{path}         — tree node (auto-rebuild if dirty)
 POST /tree/export         — export subtree as markdown
-GET  /admin/flags
-POST /admin/backfill-embeddings
 ```
 
 `/health/ready` checks database, migrations, seeds, and Redis. Redis readiness uses bounded async ping and is reported as `ok`, `down`, or `degraded` when verbose readiness output is enabled.

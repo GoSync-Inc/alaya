@@ -39,4 +39,6 @@ dev = [
     "aiosqlite>=0.22.1",
     "testcontainers[postgres]>=4.0",
     "psycopg2-binary>=2.9.12",
+    "faker>=37.0.0",
+    "spacy>=3.7.0",
 ]

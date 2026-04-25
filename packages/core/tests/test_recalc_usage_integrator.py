@@ -53,12 +53,16 @@ async def test_recalc_usage_integrator_sums_all_columns() -> None:
     # The update call
     update_result = MagicMock()
 
-    mock_session.execute.side_effect = [trace_exists_result, update_result]
+    # The get_by_id SELECT after update (for log_run_aggregated emission)
+    get_by_id_result = MagicMock()
+    get_by_id_result.scalar_one_or_none.return_value = None  # no run → emit skipped
+
+    mock_session.execute.side_effect = [trace_exists_result, update_result, get_by_id_result]
 
     await repo.recalc_usage(run_id)
 
-    # execute called twice: once for exists check, once for update
-    assert mock_session.execute.call_count == 2
+    # execute called 3x: exists check, update, get_by_id (for observability emit)
+    assert mock_session.execute.call_count == 3
 
 
 @pytest.mark.asyncio
@@ -102,19 +106,26 @@ async def test_recalc_usage_integrator_idempotent() -> None:
     trace_exists_result1 = MagicMock()
     trace_exists_result1.scalar_one_or_none.return_value = uuid.uuid4()
     update_result1 = MagicMock()
+    get_by_id_result1 = MagicMock()
+    get_by_id_result1.scalar_one_or_none.return_value = None  # no run → emit skipped
 
     trace_exists_result2 = MagicMock()
     trace_exists_result2.scalar_one_or_none.return_value = uuid.uuid4()
     update_result2 = MagicMock()
+    get_by_id_result2 = MagicMock()
+    get_by_id_result2.scalar_one_or_none.return_value = None  # no run → emit skipped
 
     mock_session.execute.side_effect = [
         trace_exists_result1,
         update_result1,
+        get_by_id_result1,
         trace_exists_result2,
         update_result2,
+        get_by_id_result2,
     ]
 
     await repo.recalc_usage(run_id)
     await repo.recalc_usage(run_id)
 
-    assert mock_session.execute.call_count == 4
+    # 3 calls per recalc_usage: exists check, update, get_by_id → 6 total
+    assert mock_session.execute.call_count == 6

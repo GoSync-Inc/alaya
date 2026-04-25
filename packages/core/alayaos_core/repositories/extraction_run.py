@@ -177,15 +177,6 @@ class ExtractionRunRepository(BaseRepository):
                 cache_write_5m_tokens=_sum(PipelineTrace.cache_write_5m_tokens),
                 cache_write_1h_tokens=_sum(PipelineTrace.cache_write_1h_tokens),
                 cost_usd=_sum(PipelineTrace.cost_usd),
-                # tokens_used = tokens_in + tokens_out (back-compat scalar)
-                tokens_used=(
-                    select(
-                        func.coalesce(func.sum(PipelineTrace.tokens_in), 0)
-                        + func.coalesce(func.sum(PipelineTrace.tokens_out), 0)
-                    )
-                    .where(PipelineTrace.extraction_run_id == run_id)
-                    .scalar_subquery()
-                ),
             )
         )
         await self.session.execute(stmt)

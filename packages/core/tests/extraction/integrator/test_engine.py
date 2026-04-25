@@ -42,11 +42,28 @@ def _make_session_mock(rows: list | None = None) -> AsyncMock:
     With a bare AsyncMock, fetchall() returns a coroutine instead of a list.
     This helper configures execute() to always return a MagicMock whose fetchall()
     gives an empty list (or the provided rows).
+
+    Also configures begin_nested() as a sync MagicMock returning an async CM, since
+    the engine wraps each phase in `async with session.begin_nested():` (SAVEPOINT).
     """
     mock_result = MagicMock()
     mock_result.fetchall.return_value = rows if rows is not None else []
     session = AsyncMock()
     session.execute.return_value = mock_result
+    nested_cm = MagicMock()
+    nested_cm.__aenter__ = AsyncMock(return_value=None)
+    nested_cm.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested = MagicMock(return_value=nested_cm)
+    return session
+
+
+def _make_engine_session() -> AsyncMock:
+    """Create a simple AsyncMock session with begin_nested properly configured for engine tests."""
+    session = AsyncMock()
+    nested_cm = MagicMock()
+    nested_cm.__aenter__ = AsyncMock(return_value=None)
+    nested_cm.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested = MagicMock(return_value=nested_cm)
     return session
 
 
@@ -166,7 +183,7 @@ async def test_engine_drains_dirty_set_via_rename():
         redis=redis_mock,
         settings=_make_settings(),
     )
-    session = AsyncMock()
+    session = _make_engine_session()
     await engine.run(ws_id, session)
 
     # RENAME was called to atomically drain dirty-set
@@ -209,7 +226,7 @@ async def test_engine_loads_48h_window():
         redis=redis_mock,
         settings=settings,
     )
-    session = AsyncMock()
+    session = _make_engine_session()
     await engine.run(ws_id, session)
 
     # list_recent is called at least twice: once for initial load and once for
@@ -248,7 +265,7 @@ async def test_engine_result_has_counters():
         redis=redis_mock,
         settings=_make_settings(),
     )
-    session = AsyncMock()
+    session = _make_engine_session()
     result = await engine.run(ws_id, session)
 
     assert isinstance(result, IntegratorRunResult)
@@ -304,7 +321,7 @@ async def test_engine_dedup_called():
     dedup_v2_mock = AsyncMock(return_value=(0, []))
     engine._dedup_v2 = dedup_v2_mock
 
-    session = AsyncMock()
+    session = _make_engine_session()
     await engine.run(ws_id, session)
 
     dedup_v2_mock.assert_called_once()
@@ -357,7 +374,7 @@ async def test_engine_enricher_called():
     )
     engine._enricher = enricher_mock
 
-    session = AsyncMock()
+    session = _make_engine_session()
     await engine.run(ws_id, session)
 
     enricher_mock.enrich_batch.assert_called_once()
@@ -394,7 +411,7 @@ async def test_engine_lock_released_on_completion():
         redis=redis_mock,
         settings=_make_settings(),
     )
-    session = AsyncMock()
+    session = _make_engine_session()
     await engine.run(ws_id, session)
 
     # eval was called (lock release Lua script)
@@ -430,7 +447,7 @@ async def test_engine_entity_cache_warmed():
         redis=redis_mock,
         settings=_make_settings(),
     )
-    session = AsyncMock()
+    session = _make_engine_session()
     await engine.run(ws_id, session)
 
     entity_cache.warm.assert_called_once()

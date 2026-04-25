@@ -22,6 +22,24 @@ from alayaos_core.extraction.integrator.schemas import IntegratorRunResult
 # ---------------------------------------------------------------------------
 
 
+def _make_session() -> AsyncMock:
+    """Create an AsyncMock session with begin_nested properly mocked.
+
+    The engine uses `async with session.begin_nested():` which requires
+    begin_nested() to return an object with __aenter__/__aexit__, not a
+    coroutine. AsyncMock auto-creates attributes as AsyncMocks, which
+    are coroutines and fail the async-CM protocol.
+    """
+    session = AsyncMock()
+    session.commit = AsyncMock()
+    session.flush = AsyncMock()
+    nested_cm = MagicMock()
+    nested_cm.__aenter__ = AsyncMock(return_value=None)
+    nested_cm.__aexit__ = AsyncMock(return_value=False)
+    session.begin_nested = MagicMock(return_value=nested_cm)
+    return session
+
+
 def _make_redis_mock(dirty_ids: list[str] | None = None):
     """Create a mock Redis with dirty-set behaviour."""
     redis_mock = AsyncMock()
@@ -106,8 +124,7 @@ async def test_stable_graph_single_pass():
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
-    session = AsyncMock()
-    session.commit = AsyncMock()
+    session = _make_session()
 
     # Patch PanoramicPass.run to return empty actions
     with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_panoramic_pass:
@@ -166,8 +183,7 @@ async def test_multi_pass_convergence():
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
-    session = AsyncMock()
-    session.commit = AsyncMock()
+    session = _make_session()
 
     async def apply_panoramic_actions_side_effect(actions, *args, **kwargs):
         # Return len(actions) so it mirrors the real panoramic result
@@ -215,8 +231,7 @@ async def test_cycle_detection():
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
-    session = AsyncMock()
-    session.commit = AsyncMock()
+    session = _make_session()
 
     with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_panoramic_pass:
         pano_instance = AsyncMock()
@@ -270,8 +285,7 @@ async def test_max_passes_cap():
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
-    session = AsyncMock()
-    session.commit = AsyncMock()
+    session = _make_session()
 
     with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_panoramic_pass:
         pano_instance = AsyncMock()
@@ -305,8 +319,7 @@ async def test_cost_aggregation():
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
-    session = AsyncMock()
-    session.commit = AsyncMock()
+    session = _make_session()
 
     with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_panoramic_pass:
         pano_instance = AsyncMock()
@@ -411,8 +424,7 @@ async def test_dedup_v2_receives_real_run_id():
 
     real_run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
-    session = AsyncMock()
-    session.commit = AsyncMock()
+    session = _make_session()
 
     captured_run_ids: list[uuid.UUID] = []
 
@@ -532,9 +544,7 @@ async def test_entities_reloaded_between_passes():
 
     ws_id = uuid.uuid4()
     run_id = uuid.uuid4()
-    session = AsyncMock()
-    session.commit = AsyncMock()
-    session.flush = AsyncMock()
+    session = _make_session()
 
     with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_pp:
         pano_instance = AsyncMock()
@@ -571,9 +581,7 @@ async def test_flush_not_commit_in_loop():
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
-    session = AsyncMock()
-    session.commit = AsyncMock()
-    session.flush = AsyncMock()
+    session = _make_session()
 
     with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_pp:
         pano_instance = AsyncMock()
@@ -650,8 +658,7 @@ async def test_cycle_detection_includes_dedup_count():
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
-    session = AsyncMock()
-    session.flush = AsyncMock()
+    session = _make_session()
 
     with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_pp:
         pano_instance = AsyncMock()
@@ -738,8 +745,7 @@ async def test_cycle_detection_uses_dedup_entity_ids():
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
-    session = AsyncMock()
-    session.flush = AsyncMock()
+    session = _make_session()
 
     with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_pp:
         pano_instance = AsyncMock()
@@ -801,8 +807,7 @@ async def test_noise_removed_counts_only_remove_noise_actions():
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
-    session = AsyncMock()
-    session.flush = AsyncMock()
+    session = _make_session()
 
     # _apply_panoramic_actions is patched to always return 2 (both applied successfully)
     # but the real noise counter should still count only 1 remove_noise action
@@ -975,8 +980,7 @@ async def test_enrichment_sees_post_convergence_entities():
 
     run_id = uuid.uuid4()
     ws_id = uuid.uuid4()
-    session = AsyncMock()
-    session.flush = AsyncMock()
+    session = _make_session()
 
     with patch("alayaos_core.extraction.integrator.engine.PanoramicPass") as mock_pp:
         pano_instance = AsyncMock()

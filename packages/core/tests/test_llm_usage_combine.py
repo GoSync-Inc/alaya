@@ -16,7 +16,6 @@ import pytest
 
 from alayaos_core.llm.interface import LLMUsage
 
-
 # ---------------------------------------------------------------------------
 # LLMUsage.zero()
 # ---------------------------------------------------------------------------
@@ -235,6 +234,6 @@ async def test_cortex_classifier_combine_propagates_cache_write_fields():
 
     # Both cache_write fields must be summed
     assert combined.cache_write_5m_tokens == 105  # 50 + 55
-    assert combined.cache_write_1h_tokens == 22   # 10 + 12
+    assert combined.cache_write_1h_tokens == 22  # 10 + 12
     assert combined.tokens_in == 210
     assert combined.tokens_cached == 810

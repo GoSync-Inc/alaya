@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+from alayaos_core.llm.interface import LLMUsage
 
 
 class MergeGroup(BaseModel):
@@ -73,11 +76,22 @@ class EntityMatchResult(BaseModel):
     reasoning: str = Field(default="", max_length=1000)
 
 
+class IntegratorPhaseUsage(BaseModel):
+    """Per-phase cost and timing captured during an integrator run."""
+
+    stage: Literal["integrator:panoramic", "integrator:dedup", "integrator:enricher"]
+    pass_number: int = 1
+    usage: LLMUsage
+    duration_ms: int
+    details: dict = Field(default_factory=dict)
+
+
 class IntegratorRunResult(BaseModel):
     """Summary of a completed integrator run."""
 
-    status: str  # "completed" | "skipped" | "failed"
+    status: Literal["completed", "failed", "skipped"] = "completed"
     reason: str | None = None
+    error_message: str | None = None
     entities_scanned: int = 0
     entities_deduplicated: int = 0
     entities_enriched: int = 0
@@ -89,3 +103,4 @@ class IntegratorRunResult(BaseModel):
     duration_ms: int = 0
     pass_count: int = 1
     convergence_reason: str | None = None
+    phase_usages: list[IntegratorPhaseUsage] = Field(default_factory=list)

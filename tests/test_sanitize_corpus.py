@@ -663,3 +663,108 @@ def test_mapping_out_written(tmp_path: Path) -> None:
     data = json.loads(mapping_file.read_text())
     assert isinstance(data, dict)
     assert len(data) > 0
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: Stale output invalidated on secret-abort
+# ---------------------------------------------------------------------------
+
+
+def test_stale_output_removed_on_secret_abort(tmp_path: Path) -> None:
+    """Stale output file must be removed even when run aborts due to secret detection."""
+    output_file = tmp_path / "output.jsonl"
+    # Write stale content from a hypothetical previous successful run
+    output_file.write_text('{"id": "stale"}\n', encoding="utf-8")
+
+    input_file = tmp_path / "input.jsonl"
+    input_file.write_text(
+        json.dumps(
+            {
+                "id": "ev-001",
+                "raw_text": "token sk-ABCDEFGHIJ1234567890 leaked",
+                "ts": "1714000000",
+                "channel_id": "C001",
+                "actor": "U001",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--input",
+            str(input_file),
+            "--output",
+            str(output_file),
+            "--company-name",
+            "Globex",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0, "Expected non-zero exit on secret detection"
+    assert not output_file.exists(), "Stale output file must be deleted before abort"
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: Loud spaCy-missing warning + summary line
+# ---------------------------------------------------------------------------
+
+
+def test_summary_line_shows_zero_models_warns_clearly(tmp_path: Path) -> None:
+    """When spaCy models are absent, stderr must contain the loud PERSON NAMES NOT REDACTED warning
+    and the summary line must report 0/2."""
+    lines = [
+        json.dumps(
+            {
+                "id": "ev-001",
+                "raw_text": "Hello world",
+                "ts": "1714000000",
+                "channel_id": "C001",
+                "actor": "U001",
+            }
+        )
+    ]
+    # Patch spacy to be unimportable by injecting a broken sys.path via env override.
+    # Easiest: pass PYTHONPATH pointing to a directory that shadows spacy with a broken module.
+    import os
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as fake_pkg_dir:
+        # Create a fake spacy package that raises ImportError on import
+        spacy_dir = Path(fake_pkg_dir) / "spacy"
+        spacy_dir.mkdir()
+        (spacy_dir / "__init__.py").write_text("raise ImportError('spacy not installed')\n")
+
+        input_file = tmp_path / "input.jsonl"
+        output_file = tmp_path / "output.jsonl"
+        input_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        env = os.environ.copy()
+        # Prepend fake package dir so it shadows real spacy
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = fake_pkg_dir + (":" + existing if existing else "")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT),
+                "--input",
+                str(input_file),
+                "--output",
+                str(output_file),
+                "--company-name",
+                "Globex",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    assert result.returncode == 0
+    assert "PERSON NAMES NOT REDACTED" in result.stderr
+    assert "spacy_models_loaded=0/2" in result.stderr

@@ -334,7 +334,15 @@ def _load_nlp_models(verbose: bool = True) -> list[Any]:
         import spacy
     except ImportError:
         if verbose:
-            print("warn: spacy not installed — PERSON NER replacement disabled", file=sys.stderr)
+            print(
+                "============================================================\n"
+                "WARNING: spaCy is not installed.\n"
+                "PERSON NAMES IN raw_text WILL NOT BE REDACTED.\n"
+                "Install with: uv pip install spacy\n"
+                "Then download models: python -m spacy download en_core_web_sm ru_core_news_sm\n"
+                "============================================================",
+                file=sys.stderr,
+            )
         return models
 
     for model_name in ("en_core_web_sm", "ru_core_news_sm"):
@@ -344,7 +352,11 @@ def _load_nlp_models(verbose: bool = True) -> list[Any]:
         except OSError:
             if verbose:
                 print(
-                    f"warn: spaCy model '{model_name}' not installed — run: python -m spacy download {model_name}",
+                    "============================================================\n"
+                    f"WARNING: spaCy model '{model_name}' is not installed.\n"
+                    "PERSON NAMES IN raw_text WILL NOT BE REDACTED.\n"
+                    f"Fix: python -m spacy download {model_name}\n"
+                    "============================================================",
                     file=sys.stderr,
                 )
     return models
@@ -385,6 +397,11 @@ def main(argv: list[str] | None = None) -> int:
     input_path = Path(args.input)
     output_path = Path(args.output)
     time_shift_seconds = args.time_shift_days * 86400
+
+    # Invalidate any stale output from a previous run before doing any work.
+    output_path.unlink(missing_ok=True)
+    if args.mapping_out:
+        Path(args.mapping_out).unlink(missing_ok=True)
 
     # Initialize faker with seed for determinism
     try:
@@ -487,6 +504,16 @@ def main(argv: list[str] | None = None) -> int:
 
     total_records = len(records)
     print(f"sanitized {total_records} records -> {output_path}", file=sys.stderr)
+
+    # Final summary: spaCy model count
+    loaded = len(nlp_models)
+    total_expected = 2
+    if loaded == 0:
+        spacy_note = f"={loaded}/{total_expected} — PERSON NAMES NOT REDACTED IN raw_text"
+    else:
+        spacy_note = f"={loaded}/{total_expected}"
+    print(f"summary: spacy_models_loaded{spacy_note}", file=sys.stderr)
+
     return 0
 
 

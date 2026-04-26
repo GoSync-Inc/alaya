@@ -62,28 +62,78 @@ ssh -L 5433:<PROD_DB_HOST>:5432 <BASTION_HOST> -N &
 
 **Step 2: Export events via psql**
 
+> **Why not `COPY … TO STDOUT`?**
+> PostgreSQL's TEXT-format COPY escapes backslashes, turning JSON's `\"` into `\\"` and
+> breaking downstream JSON parsing. Using `psql -A -t` (unaligned, tuples-only) outputs
+> each row's text directly with no extra escaping.
+> The `::text` cast on `json_build_object(…)::text` is required so psql renders the value
+> without additional quoting.
+> `BEGIN READ ONLY; … ROLLBACK;` provides defence-in-depth: even with a writable role,
+> the transaction cannot mutate data.
+
+**Pattern A — SSH tunnel + local psql**
+
+Open the tunnel first (Step 1), then run locally:
+
 ```bash
-psql "postgresql://<DB_USER>:<DB_PASS>@localhost:5433/<DB_NAME>" \
-  -c "COPY (
-    SELECT json_build_object(
-      'id', id::text,
-      'raw_text', raw_text,
-      'ts', extract(epoch from source_timestamp)::bigint::text,
-      'channel_id', channel_id,
-      'actor', actor_user_id,
-      'thread_ts', thread_ts,
-      'source_type', source_type,
-      'source_id', source_id
-    ) FROM l0_events
-    WHERE workspace_id = '<WORKSPACE_UUID>'
-      AND source_timestamp >= NOW() - INTERVAL '<N> days'
-      AND raw_text IS NOT NULL AND is_deleted = false
-    ORDER BY source_timestamp
-  ) TO STDOUT;" > /tmp/raw_events.jsonl
+psql "postgresql://<DB_USER>:<DB_PASS>@localhost:5433/<DB_NAME>" -A -t -q <<'SQL' > /tmp/raw_events.jsonl
+BEGIN READ ONLY;
+
+SELECT json_build_object(
+  'id', id::text,
+  'raw_text', raw_text,
+  'ts', extract(epoch from source_timestamp)::bigint::text,
+  'channel_id', channel_id,
+  'actor', actor_user_id,
+  'thread_ts', thread_ts,
+  'source_type', source_type,
+  'source_id', source_id
+)::text
+FROM l0_events
+WHERE workspace_id = '<WORKSPACE_UUID>'
+  AND source_timestamp >= NOW() - INTERVAL '<N> days'
+  AND raw_text IS NOT NULL
+  AND is_deleted = false
+ORDER BY source_timestamp;
+
+ROLLBACK;
+SQL
+```
+
+**Pattern B — SSH + docker exec to remote container (no local psql needed)**
+
+```bash
+ssh user@<BASTION_OR_DB_HOST> \
+  'docker exec -i <POSTGRES_CONTAINER> psql -U <DB_USER> -d <DB_NAME> -A -t -q' \
+  <<'SQL' > /tmp/raw_events.jsonl
+BEGIN READ ONLY;
+
+SELECT json_build_object(
+  'id', id::text,
+  'raw_text', raw_text,
+  'ts', extract(epoch from source_timestamp)::bigint::text,
+  'channel_id', channel_id,
+  'actor', actor_user_id,
+  'thread_ts', thread_ts,
+  'source_type', source_type,
+  'source_id', source_id
+)::text
+FROM l0_events
+WHERE workspace_id = '<WORKSPACE_UUID>'
+  AND source_timestamp >= NOW() - INTERVAL '<N> days'
+  AND raw_text IS NOT NULL
+  AND is_deleted = false
+ORDER BY source_timestamp;
+
+ROLLBACK;
+SQL
 ```
 
 Replace placeholders:
-- `<DB_USER>`, `<DB_PASS>`, `<DB_NAME>`: database credentials (from 1Password / secrets manager)
+- `<DB_USER>`, `<DB_NAME>`: database credentials (from 1Password / secrets manager; no password flag needed when the container trusts the role)
+- `<DB_PASS>`: only used in Pattern A's connection string
+- `<BASTION_OR_DB_HOST>`: SSH target
+- `<POSTGRES_CONTAINER>`: Docker container name (e.g. `postgres`)
 - `<WORKSPACE_UUID>`: target workspace UUID
 - `<N>`: number of days to pull (e.g. `14` for 2 weeks)
 
@@ -148,6 +198,14 @@ grep -E '<@U[A-Z0-9]+>' tests/fixtures/bench/realistic_14d.jsonl \
 # 3. No raw email addresses at company domain (adjust domain)
 grep -E '[a-zA-Z0-9._%+-]+@company\.internal' tests/fixtures/bench/realistic_14d.jsonl \
   && echo "FAIL: company emails present" || echo "OK: no company emails"
+
+# 3b. Broad email scan across all lines (requires a dot in the domain to avoid
+#     false positives from Slack @here / @nickname mention patterns).
+#     Review any hits — @example.com addresses are synthetic and safe to ignore.
+grep -E '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}' \
+  tests/fixtures/bench/realistic_14d.jsonl \
+  | grep -v '@example\.com' \
+  && echo "REVIEW: possible real emails found above" || echo "OK: no suspicious emails"
 
 # 4. No secret patterns
 grep -E 'sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16}|aws_secret_access_key' \

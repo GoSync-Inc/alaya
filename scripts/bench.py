@@ -69,6 +69,9 @@ FIXTURE_EVENT_COUNTS = {"small": 5, "medium": 20, "large": 50}
 # provides defense-in-depth for --reuse mode where the stack limit may differ.
 INGEST_THROTTLE_THRESHOLD = 50
 INGEST_THROTTLE_RPS = 20.0
+# In --reuse mode the target is a dev stack with default ALAYA_INGEST_RATE_LIMIT_PER_MINUTE=30.
+# Cap at 0.4 RPS (24/min) to stay safely under the 30/min default and avoid 429 cascades.
+INGEST_THROTTLE_RPS_REUSE = 0.4
 
 # Env vars allowed in env_summary (values masked to set/unset, never raw values)
 ENV_SUMMARY_ALLOWLIST = (
@@ -102,16 +105,18 @@ EXIT_CACHE_WARM_FAIL = 7
 # ---------------------------------------------------------------------------
 
 
-def _ingest_rps(event_count: int) -> float | None:
+def _ingest_rps(event_count: int, reuse: bool = False) -> float | None:
     """Return the requests-per-second rate to pass to ingest_fixture.
 
-    Returns INGEST_THROTTLE_RPS (20 RPS) for large fixtures (> INGEST_THROTTLE_THRESHOLD
-    events) to prevent connection exhaustion and stay within bench stack limits.
-    Returns None for small/medium/large fixtures (≤ 50 events) that don't need throttling.
+    In --reuse mode the target is a dev stack with the default 30/min rate limit, so
+    we cap at INGEST_THROTTLE_RPS_REUSE (0.4 RPS = 24/min) regardless of fixture size.
 
-    The bench compose stack sets INGEST_RATE_LIMIT_PER_MINUTE=10000 so the 20 RPS cap
-    here won't cause 429s — it's purely a connection-safety and --reuse guard.
+    For the bench-managed stack (reuse=False) INGEST_RATE_LIMIT_PER_MINUTE is set to 10000,
+    so we apply INGEST_THROTTLE_RPS (20 RPS) only for large fixtures (> threshold) to
+    prevent connection exhaustion — small/medium fixtures get no throttle (None).
     """
+    if reuse:
+        return INGEST_THROTTLE_RPS_REUSE
     if event_count > INGEST_THROTTLE_THRESHOLD:
         return INGEST_THROTTLE_RPS
     return None
@@ -382,6 +387,7 @@ def phase_ingest(
     fixture_path: Path,
     key_path: str,
     deadline: float,
+    reuse: bool = False,
 ) -> tuple[int, list[dict[str, Any]]]:
     """Ingest events from fixture. Returns (exit_code, results)."""
     from scripts.bench_ingest import ingest_fixture
@@ -391,9 +397,9 @@ def phase_ingest(
 
     # Count non-empty lines to decide whether to throttle.
     event_count = sum(1 for line in fixture_path.read_text().splitlines() if line.strip())
-    rps = _ingest_rps(event_count)
+    rps = _ingest_rps(event_count, reuse=reuse)
     if rps is not None:
-        _log(f"  throttling ingest to {rps} RPS ({event_count} events > threshold {INGEST_THROTTLE_THRESHOLD})")
+        _log(f"  throttling ingest to {rps} RPS ({event_count} events, reuse={reuse})")
 
     try:
         results = ingest_fixture(api_url=API_URL, key=api_key, fixture_path=fixture_path, rps=rps)
@@ -823,7 +829,7 @@ def _run_single_bench(
             return rc, "", ts_started, datetime.now(UTC)
 
         # Phase 5: ingest
-        rc, ingest_results = phase_ingest(fixture_path, key_path, deadline)
+        rc, ingest_results = phase_ingest(fixture_path, key_path, deadline, reuse=reuse)
         if rc != EXIT_SUCCESS:
             return rc, workspace_id, ts_started, datetime.now(UTC)
 

@@ -18,7 +18,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.bench import _drain_budget, _scrub_host_db_redis_urls  # noqa: E402
+from scripts.bench import _cache_warm_run_deadline, _drain_budget, _scrub_host_db_redis_urls  # noqa: E402
 
 
 def test_drain_budget_takes_most_of_remaining_wall_clock() -> None:
@@ -64,6 +64,43 @@ def test_drain_budget_not_greater_than_remaining() -> None:
 # ---------------------------------------------------------------------------
 # _scrub_host_db_redis_urls
 # ---------------------------------------------------------------------------
+
+
+def test_cache_warm_two_runs_get_split_deadline() -> None:
+    """Each run in --cache-warm-check mode must get half the total timeout.
+
+    With total_timeout=1800s split into 2 runs, each run should have ~900s of
+    wall-clock budget. The drain budget (90%) then applies per-run, giving 810s
+    to drain per run — bounded and not starving run 2.
+    """
+    import time
+
+    total_timeout_seconds = 1800
+    global_start = time.monotonic()
+
+    # Per-run deadline for run index 0 and 1 (0-based)
+    deadline_run1 = _cache_warm_run_deadline(global_start, total_timeout_seconds, run_index=0)
+    deadline_run2 = _cache_warm_run_deadline(global_start, total_timeout_seconds, run_index=1)
+
+    per_run_seconds = total_timeout_seconds / 2  # 900
+
+    # Each run deadline should be approximately (global_start + (run_index+1) * per_run_seconds)
+    assert abs(deadline_run1 - (global_start + per_run_seconds)) < 1.0, (
+        f"run 1 deadline offset {deadline_run1 - global_start}s is not ~{per_run_seconds}s"
+    )
+    assert abs(deadline_run2 - (global_start + 2 * per_run_seconds)) < 1.0, (
+        f"run 2 deadline offset {deadline_run2 - global_start}s is not ~{2 * per_run_seconds}s"
+    )
+
+    # Run 1 must expire before run 2
+    assert deadline_run1 < deadline_run2, "run 1 deadline must precede run 2 deadline"
+
+    # Each run's wall-clock budget must be ~half the total
+    run1_budget = deadline_run1 - global_start
+    run2_budget = deadline_run2 - deadline_run1
+    assert abs(run1_budget - run2_budget) < 1.0, (
+        f"run budgets are not equal: run1={run1_budget}s run2={run2_budget}s; both runs should get the same slice"
+    )
 
 
 def test_scrub_removes_all_host_db_redis_keys() -> None:

@@ -131,6 +131,24 @@ def _remaining(deadline: float) -> float:
     return max(0.0, deadline - time.monotonic())
 
 
+def _cache_warm_run_deadline(global_start: float, total_seconds: int, run_index: int) -> float:
+    """Return the monotonic deadline for a single run within --cache-warm-check mode.
+
+    The total budget is split equally across 2 runs so that run 2 (the measurement
+    run) is not starved by run 1 consuming most of the global deadline.
+
+    Args:
+        global_start: ``time.monotonic()`` captured at bench start.
+        total_seconds: Total wall-clock budget (``args.timeout_seconds``).
+        run_index: 0-based run index (0 = warm-up, 1 = measurement).
+
+    Returns:
+        Monotonic deadline for this run.
+    """
+    per_run = total_seconds / 2
+    return global_start + per_run * (run_index + 1)
+
+
 def _drain_budget(remaining: float) -> float:
     """Return the wall-clock budget to allocate to phase_drain.
 
@@ -994,16 +1012,18 @@ def main() -> int:
         if args.cache_warm_check:
             _log("cache-warm-check: starting run 1 (cache warm-up)")
             run1_out = out_dir / "run1"
+            run1_deadline = _cache_warm_run_deadline(global_start, args.timeout_seconds, run_index=0)
             rc1, _ws1, ts1_start, ts1_end = _run_single_bench(
-                args, fixture_name, fixture_path, git_sha, run1_out, deadline, reuse=True
+                args, fixture_name, fixture_path, git_sha, run1_out, run1_deadline, reuse=True
             )
             if rc1 != EXIT_SUCCESS:
                 return rc1
 
             _log("cache-warm-check: starting run 2 (cache measurement)")
             run2_out = out_dir / "run2"
+            run2_deadline = _cache_warm_run_deadline(global_start, args.timeout_seconds, run_index=1)
             rc2, ws2, ts2_start, ts2_end = _run_single_bench(
-                args, fixture_name, fixture_path, git_sha, run2_out, deadline, reuse=True
+                args, fixture_name, fixture_path, git_sha, run2_out, run2_deadline, reuse=True
             )
             if rc2 != EXIT_SUCCESS:
                 return rc2

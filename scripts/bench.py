@@ -240,12 +240,45 @@ def phase_preflight_reuse() -> int:
     return EXIT_SUCCESS
 
 
+def _scrub_host_db_redis_urls(env: dict[str, str]) -> None:
+    """Remove host-side DB/Redis URL overrides from a compose environment dict.
+
+    When a developer has sourced their host .env (which points to localhost), those
+    variables leak into docker-compose via env interpolation and cause the migrations
+    container to try connecting to localhost:5432 — unreachable from inside the
+    docker network (OSError 111). Removing them lets compose fall back to its
+    in-network defaults defined in docker-compose.yml.
+
+    Called before the explicit in-network assignments in phase_up(), so that
+    ALAYA_DATABASE_URL and ALAYA_REDIS_URL are re-added with the correct values
+    immediately after this call returns.
+    """
+    for key in (
+        "ALAYA_DATABASE_URL",
+        "ALAYA_REDIS_URL",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "REDIS_HOST",
+        "REDIS_PORT",
+    ):
+        env.pop(key, None)
+
+
 def phase_up() -> int:
     """Start required docker compose services."""
     _log("Phase 2: docker compose up")
     # Override compose-host env vars to compose-internal hostnames; .env's localhost
     # values would otherwise leak into containers via compose variable interpolation.
     compose_env = os.environ.copy()
+    # Scrub host-side DB/Redis URLs so compose uses its in-network defaults
+    # (otherwise a developer who sourced the host .env will accidentally point
+    # the bench-internal containers at localhost — which is unreachable from
+    # inside the docker network and makes migrations fail with OSError 111).
+    # Must run before the explicit assignments below so that the in-network
+    # values are not accidentally removed by the scrub.
+    _scrub_host_db_redis_urls(compose_env)
     compose_env["ALAYA_DATABASE_URL"] = "postgresql+asyncpg://alaya:alaya@postgres:5432/alaya"
     compose_env["ALAYA_REDIS_URL"] = "redis://redis:6379/0"
     compose_env["ALAYA_ENV"] = "dev"

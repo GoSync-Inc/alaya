@@ -719,7 +719,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--fixture",
-        choices=["small", "medium", "large"],
+        choices=["small", "medium", "large", "realistic_3d", "realistic_14d"],
         required=True,
         help="Fixture size to use for the bench run",
     )

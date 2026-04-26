@@ -136,3 +136,23 @@ def test_ingest_rps_small_fixture_returns_none(tmp_path: Path) -> None:
     assert _ingest_rps(INGEST_THROTTLE_THRESHOLD) is None
     assert _ingest_rps(1) is None
     assert _ingest_rps(0) is None
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: --reuse mode must cap below the default 30/min rate limit
+# ---------------------------------------------------------------------------
+
+
+def test_ingest_rps_reuse_mode_caps_below_default(tmp_path: Path) -> None:
+    """In --reuse mode, _ingest_rps must return <= 0.5 RPS for any fixture size
+    so we stay safely under the default ALAYA_INGEST_RATE_LIMIT_PER_MINUTE=30 (0.5 req/s)."""
+    from scripts.bench import _ingest_rps
+
+    rps = _ingest_rps(1000, reuse=True)
+    assert rps is not None, "_ingest_rps must return a rate limit in --reuse mode"
+    assert rps <= 0.5, f"--reuse mode rps must be <= 0.5 (got {rps})"
+
+    # Also verify small fixture is capped in reuse mode
+    rps_small = _ingest_rps(5, reuse=True)
+    assert rps_small is not None, "_ingest_rps must always return a cap in --reuse mode"
+    assert rps_small <= 0.5, f"--reuse mode rps must be <= 0.5 for small fixture (got {rps_small})"

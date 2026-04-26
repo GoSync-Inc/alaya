@@ -34,7 +34,8 @@ from typing import Any, cast
 # ---------------------------------------------------------------------------
 
 _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
-    ("openai_key", re.compile(r"sk-[A-Za-z0-9]{20,}")),
+    ("anthropic_key", re.compile(r"sk-ant-[A-Za-z0-9_-]{40,}")),  # Anthropic sk-ant-* format
+    ("openai_key", re.compile(r"sk-[A-Za-z0-9_-]{20,}")),  # OpenAI-style (also catches short sk-ant if first misses)
     ("github_pat", re.compile(r"ghp_[A-Za-z0-9]{20,}")),
     ("aws_access_key", re.compile(r"AKIA[A-Z0-9]{16}")),
     ("jwt", re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.")),
@@ -280,11 +281,21 @@ class CorpusSanitizer:
         return text
 
     def sanitize_record(self, record: dict[str, Any]) -> dict[str, Any]:
-        """Sanitize a single event record, returning a new dict."""
-        out: dict[str, Any] = dict(record)
+        """Sanitize a single event record, returning a new dict.
+
+        Output is built from an explicit allowlist to prevent production identifiers
+        (e.g. source_id encodes real channel ID + timestamp) from passing through.
+        Allowed fields: id, raw_text, ts, channel_id, actor, thread_ts.
+        """
+        # id is an opaque UUID — safe to keep as-is
+        out: dict[str, Any] = {"id": record["id"]}
 
         # Sanitize raw_text
         out["raw_text"] = self.sanitize_text(record["raw_text"])
+
+        # Shift timestamps
+        ts_val = int(record["ts"]) - self._time_shift_seconds
+        out["ts"] = str(ts_val)
 
         # Replace channel_id field
         real_channel = str(record["channel_id"])
@@ -296,10 +307,7 @@ class CorpusSanitizer:
         nn_actor = self._registry.get_user_nn(real_actor)
         out["actor"] = f"U_FAKE_{nn_actor:02d}"
 
-        # Shift timestamps
-        ts_val = int(record["ts"]) - self._time_shift_seconds
-        out["ts"] = str(ts_val)
-
+        # thread_ts is optional — shift if present
         if "thread_ts" in record and record["thread_ts"] is not None:
             thread_ts_val = int(record["thread_ts"]) - self._time_shift_seconds
             out["thread_ts"] = str(thread_ts_val)
@@ -498,6 +506,12 @@ def main(argv: list[str] | None = None) -> int:
             Path(args.mapping_out).write_text(
                 json.dumps(mapping, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
+            )
+            print(
+                f"WARNING: mapping file {args.mapping_out} contains the real -> fake bridge for this corpus.\n"
+                "Anyone with raw + mapping can de-anonymize the data.\n"
+                "Delete it after audit. Never commit.",
+                file=sys.stderr,
             )
         except OSError as exc:
             print(f"warn: could not write mapping file: {exc}", file=sys.stderr)

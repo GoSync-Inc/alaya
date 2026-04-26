@@ -23,6 +23,8 @@ Tasks executed by TaskIQ workers (`alayaos_core.worker.tasks`): `job_extract`, `
 
 `just bench` runs the end-to-end bench harness (`scripts/bench.py`) against a live stack; outputs JSON results to `bench_results/`. The `--cache-warm-check` flag runs bench twice (warm-up + measurement) and asserts cortex `cache_hit_ratio > 0.5`; exits 7 (`EXIT_CACHE_WARM_FAIL`) on failure. `just logs-llm` streams structured LLM call events from worker logs. `just bench-clean` removes result directories.
 
+Bench fixtures live in `tests/fixtures/bench/`: synthetic (`small`/`medium`/`large`, committed) and realistic (`realistic_3d`/`realistic_14d`, gitignored). Realistic fixtures are produced by `scripts/sanitize_corpus.py` from production Slack JSONL exports; the tool replaces Slack IDs, person names (spaCy NER en+ru), emails, phones, URLs, and a configurable company name, shifts timestamps preserving relative intervals, and halts non-zero on any leaked secret pattern (Anthropic/OpenAI/GitHub/AWS/JWT). Operator procedure: `docs/operations/sanitize-corpus.md`. Bench env passthrough sets `ALAYA_INGEST_RATE_LIMIT_PER_MINUTE=10000` for its ephemeral compose stack so realistic fixtures (1000+ events) are not rate-limited.
+
 ### Packages
 
 - **`packages/core/`** — Domain logic: models (19), schemas (17), repositories (17), extraction pipeline (cortex/crystallizer/integrator sub-packages), LLM adapters, worker tasks. Zero framework dependencies.

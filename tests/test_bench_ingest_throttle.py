@@ -11,19 +11,16 @@ Verifies that:
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 _REPO_ROOT = Path(__file__).parent.parent
-import sys
 
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.bench_ingest import ingest_fixture
-
+from scripts.bench_ingest import ingest_fixture  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -123,7 +120,7 @@ def test_ingest_fixture_rps_not_called_after_last_event(tmp_path: Path) -> None:
 
 def test_ingest_rps_large_fixture_returns_throttle_rps(tmp_path: Path) -> None:
     """_ingest_rps returns INGEST_THROTTLE_RPS when event_count > INGEST_THROTTLE_THRESHOLD."""
-    from scripts.bench import INGEST_THROTTLE_THRESHOLD, INGEST_THROTTLE_RPS, _ingest_rps
+    from scripts.bench import INGEST_THROTTLE_RPS, INGEST_THROTTLE_THRESHOLD, _ingest_rps
 
     assert _ingest_rps(INGEST_THROTTLE_THRESHOLD + 1) == INGEST_THROTTLE_RPS
     assert _ingest_rps(1000) == INGEST_THROTTLE_RPS

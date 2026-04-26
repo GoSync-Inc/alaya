@@ -134,7 +134,13 @@ Replace placeholders:
 - `<DB_PASS>`: only used in Pattern A's connection string
 - `<BASTION_OR_DB_HOST>`: SSH target
 - `<POSTGRES_CONTAINER>`: Docker container name (e.g. `postgres`)
-- `<WORKSPACE_UUID>`: target workspace UUID
+- `<WORKSPACE_UUID>`: target workspace UUID — find it with:
+  ```bash
+  # Find the right workspace UUID (look at the workspace_name column):
+  #   psql -c "SELECT id, workspace_name FROM slack_workspaces ORDER BY installed_at;"
+  # If the schema uses the generic workspaces table instead:
+  #   psql -c "SELECT id, name FROM workspaces ORDER BY created_at;"
+  ```
 - `<N>`: number of days to pull (e.g. `14` for 2 weeks)
 
 **Step 3: Verify the pull**
@@ -225,6 +231,21 @@ print(f'OK: all lines valid JSON')
 # 6. Spot-check a few records manually
 head -5 tests/fixtures/bench/realistic_14d.jsonl | python3 -m json.tool
 ```
+
+## Next: run the bench
+
+Once the fixture is in place and verified, run the bench harness against it:
+
+```bash
+set -a; source <repo-root>/.env; set +a
+export ANTHROPIC_API_KEY="$ALAYA_ANTHROPIC_API_KEY"
+
+just bench --fixture realistic_14d --timeout-seconds 1800
+# or for fast iteration:
+just bench --fixture realistic_3d --timeout-seconds 1800
+```
+
+Output lands in `bench_results/<DATE>-<SHA>/`. Read `summary.md` for the headline numbers.
 
 ## Storage Policy
 

@@ -63,6 +63,13 @@ BENCH_RESULTS_DIR = Path(__file__).parent.parent / "bench_results"
 
 FIXTURE_EVENT_COUNTS = {"small": 5, "medium": 20, "large": 50}
 
+# Ingest throttle for large fixtures. phase_up() sets INGEST_RATE_LIMIT_PER_MINUTE=10000
+# in the bench compose stack (via docker-compose.yml env passthrough), so the 20 RPS
+# cap here doesn't cause 429s. The cap also prevents accidental connection exhaustion and
+# provides defense-in-depth for --reuse mode where the stack limit may differ.
+INGEST_THROTTLE_THRESHOLD = 50
+INGEST_THROTTLE_RPS = 20.0
+
 # Env vars allowed in env_summary (values masked to set/unset, never raw values)
 ENV_SUMMARY_ALLOWLIST = (
     "ANTHROPIC_API_KEY",
@@ -93,6 +100,21 @@ EXIT_CACHE_WARM_FAIL = 7
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _ingest_rps(event_count: int) -> float | None:
+    """Return the requests-per-second rate to pass to ingest_fixture.
+
+    Returns INGEST_THROTTLE_RPS (20 RPS) for large fixtures (> INGEST_THROTTLE_THRESHOLD
+    events) to prevent connection exhaustion and stay within bench stack limits.
+    Returns None for small/medium/large fixtures (≤ 50 events) that don't need throttling.
+
+    The bench compose stack sets INGEST_RATE_LIMIT_PER_MINUTE=10000 so the 20 RPS cap
+    here won't cause 429s — it's purely a connection-safety and --reuse guard.
+    """
+    if event_count > INGEST_THROTTLE_THRESHOLD:
+        return INGEST_THROTTLE_RPS
+    return None
 
 
 def _log(msg: str) -> None:
@@ -212,6 +234,9 @@ def phase_up() -> int:
     compose_env["ALAYA_DATABASE_URL"] = "postgresql+asyncpg://alaya:alaya@postgres:5432/alaya"
     compose_env["ALAYA_REDIS_URL"] = "redis://redis:6379/0"
     compose_env["ALAYA_ENV"] = "dev"
+    # Raise ingest rate limit so large realistic fixtures (~400-2000 events) don't hit
+    # the default 30/min cap. This only affects the ephemeral bench stack, never production.
+    compose_env["ALAYA_INGEST_RATE_LIMIT_PER_MINUTE"] = "10000"
     result = _docker_compose(
         ["up", "-d", "postgres", "redis", "migrations", "api", "worker"],
         timeout=120,
@@ -356,8 +381,14 @@ def phase_ingest(
     _log(f"Phase 5: ingest {fixture_path.name}")
     api_key = Path(key_path).read_text().strip()
 
+    # Count non-empty lines to decide whether to throttle.
+    event_count = sum(1 for line in fixture_path.read_text().splitlines() if line.strip())
+    rps = _ingest_rps(event_count)
+    if rps is not None:
+        _log(f"  throttling ingest to {rps} RPS ({event_count} events > threshold {INGEST_THROTTLE_THRESHOLD})")
+
     try:
-        results = ingest_fixture(api_url=API_URL, key=api_key, fixture_path=fixture_path)
+        results = ingest_fixture(api_url=API_URL, key=api_key, fixture_path=fixture_path, rps=rps)
     except Exception as e:
         _log(f"FAIL: ingest error: {e}")
         return EXIT_INGEST_ERROR, []
@@ -424,9 +455,9 @@ def phase_integrator(key_path: str, workspace_id: str, deadline: float) -> tuple
     with httpx.Client(timeout=30.0) as client:
         headers = {"X-Api-Key": api_key}
 
-        # Trigger
+        # Trigger — endpoint returns 202 Accepted
         r = client.post(f"{API_URL}/integrator-runs/trigger", headers=headers)
-        if r.status_code not in (200, 201):
+        if r.status_code not in (200, 201, 202):
             _log(f"FAIL: integrator trigger returned {r.status_code}")
             return EXIT_INTEGRATOR_TIMEOUT, None
 

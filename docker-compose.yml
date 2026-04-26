@@ -54,6 +54,7 @@ services:
       ALAYA_ENV: ${ALAYA_ENV:-dev}
       # bench.py sets this to 10000 in its compose_env so large fixtures aren't rate-limited
       ALAYA_INGEST_RATE_LIMIT_PER_MINUTE: ${ALAYA_INGEST_RATE_LIMIT_PER_MINUTE:-30}
+      ALAYA_ANTHROPIC_API_KEY: ${ALAYA_ANTHROPIC_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,6 +73,7 @@ services:
       ALAYA_DATABASE_URL: ${ALAYA_DATABASE_URL:-postgresql+asyncpg://alaya:alaya@postgres:5432/alaya}
       ALAYA_REDIS_URL: ${ALAYA_REDIS_URL:-redis://redis:6379/0}
       ALAYA_ENV: ${ALAYA_ENV:-dev}
+      ALAYA_ANTHROPIC_API_KEY: ${ALAYA_ANTHROPIC_API_KEY}
     depends_on:
       postgres:
         condition: service_healthy

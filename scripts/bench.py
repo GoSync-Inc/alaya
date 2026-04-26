@@ -262,7 +262,7 @@ def phase_up() -> int:
             compose_env["ALAYA_ANTHROPIC_API_KEY"] = bare_key
     result = _docker_compose(
         ["up", "-d", "postgres", "redis", "migrations", "api", "worker"],
-        timeout=120,
+        timeout=300,
         env=compose_env,
     )
     if result.returncode != 0:

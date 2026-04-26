@@ -131,6 +131,16 @@ def _remaining(deadline: float) -> float:
     return max(0.0, deadline - time.monotonic())
 
 
+def _drain_budget(remaining: float) -> float:
+    """Return the wall-clock budget to allocate to phase_drain.
+
+    Drain is the long pole for large fixtures (352-1936 events). Previous value of 50%
+    caused drain timeouts before the integrator phase could run. 90% gives drain ample
+    time while leaving ~10% for the (fast) integrator + report + teardown phases.
+    """
+    return remaining * 0.9
+
+
 def _git_sha() -> str:
     try:
         result = subprocess.run(
@@ -833,8 +843,9 @@ def _run_single_bench(
         if rc != EXIT_SUCCESS:
             return rc, workspace_id, ts_started, datetime.now(UTC)
 
-        # Phase 6: drain — use 50% of remaining budget
-        drain_budget = _remaining(deadline) * 0.5
+        # Phase 6: drain — use 90% of remaining budget (drain is the long pole;
+        # integrator + report + teardown are fast and fit in the remaining 10%)
+        drain_budget = _drain_budget(_remaining(deadline))
         drain_deadline = time.monotonic() + drain_budget
         run_ids = [r["run_id"] for r in ingest_results if "run_id" in r]
         rc, _ = phase_drain(run_ids, key_path, drain_deadline)

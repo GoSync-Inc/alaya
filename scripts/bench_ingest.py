@@ -19,6 +19,7 @@ Library usage:
 import argparse
 import json
 import re
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,7 @@ def ingest_fixture(
     api_url: str,
     key: str,
     fixture_path: Path,
+    rps: float | None = None,
 ) -> list[dict[str, Any]]:
     """Ingest a JSONL fixture file into Alaya via the /ingest/text endpoint.
 
@@ -55,6 +57,10 @@ def ingest_fixture(
         key: API key (ak_… format).
         fixture_path: Path to a JSONL file; each line is a JSON event object
             with at minimum: id, raw_text. Optional: ts, channel_id, actor.
+        rps: Maximum requests per second. When set, a sleep of 1/rps seconds is
+            inserted between each request (not after the last). Use for large
+            fixtures to avoid hitting INGEST_RATE_LIMIT_PER_MINUTE (default 30).
+            None (default) sends requests as fast as possible.
 
     Returns:
         List of result dicts. Each dict has either:
@@ -108,6 +114,9 @@ def ingest_fixture(
             except Exception as e:
                 print(f"  [{i + 1:2d}/{len(events)}] ERR: {e}")
                 results.append({"src_id": ev["id"], "error": str(e)})
+
+            if rps is not None and i < len(events) - 1:
+                time.sleep(1.0 / rps)
 
     return results
 

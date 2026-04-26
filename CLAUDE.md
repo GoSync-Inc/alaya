@@ -94,6 +94,7 @@ Run before every commit:
 - `ALAYA_PART_OF_STRICT` (default `strict`, values `strict|warn|off`) — controls `part_of` tier-rank validation only; non-default values emit `feature_flag_active` at API startup and in `job_feature_flag_digest`. Self-reference remains always rejected.
 - `SECRET_KEY` — must be set to a strong random value in production; defaults to `"change-me-in-production"` which is insecure.
 - `BENCH_TIMEOUT_SECONDS` (default `600`) — global wall-clock budget for `just bench`; bench-only, no effect on the production stack.
+- `ALAYA_INGEST_RATE_LIMIT_PER_MINUTE` (default `30`) — rate limit for `/ingest/text` per API key per minute. `bench.py` sets this to `10000` in the bench compose stack (via `docker-compose.yml` `ALAYA_INGEST_RATE_LIMIT_PER_MINUTE` passthrough) so large realistic fixtures (396-1936 events) are not rate-limited; `bench_ingest.py` also applies a 20 RPS soft cap for defense-in-depth in `--reuse` mode.
 - pgvector `>= 0.8.0` is required. Migration 008, API lifespan startup, Docker init, and CI all fail fast if the installed extension is older.
 - Run 6.2 restricted/private-event backfill command: `uv run python -m alayaos_core.scripts.backfill_restricted_extraction --workspace-id <uuid> --dry-run`, then rerun with `--apply` after reviewing the count.
 

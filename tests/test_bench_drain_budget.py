@@ -18,7 +18,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.bench import _drain_budget  # noqa: E402
+from scripts.bench import _drain_budget, _scrub_host_db_redis_urls  # noqa: E402
 
 
 def test_drain_budget_takes_most_of_remaining_wall_clock() -> None:
@@ -59,3 +59,58 @@ def test_drain_budget_not_greater_than_remaining() -> None:
     remaining = 300.0
     budget = _drain_budget(remaining)
     assert budget <= remaining
+
+
+# ---------------------------------------------------------------------------
+# _scrub_host_db_redis_urls
+# ---------------------------------------------------------------------------
+
+
+def test_scrub_removes_all_host_db_redis_keys() -> None:
+    """All host-side DB/Redis keys must be absent after scrubbing."""
+    env: dict[str, str] = {
+        "ALAYA_DATABASE_URL": "postgresql+asyncpg://localhost:5432/alaya",
+        "ALAYA_REDIS_URL": "redis://localhost:6379/0",
+        "DATABASE_URL": "postgresql://localhost:5432/alaya",
+        "REDIS_URL": "redis://localhost:6379/0",
+        "POSTGRES_HOST": "localhost",
+        "POSTGRES_PORT": "5432",
+        "REDIS_HOST": "localhost",
+        "REDIS_PORT": "6379",
+        "OTHER_KEY": "should-remain",
+    }
+    _scrub_host_db_redis_urls(env)
+    for key in (
+        "ALAYA_DATABASE_URL",
+        "ALAYA_REDIS_URL",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+        "REDIS_HOST",
+        "REDIS_PORT",
+    ):
+        assert key not in env, f"{key} should have been scrubbed but is still present"
+    assert env.get("OTHER_KEY") == "should-remain"
+
+
+def test_scrub_is_idempotent_on_empty_dict() -> None:
+    """Scrubbing an empty dict must not raise."""
+    env: dict[str, str] = {}
+    _scrub_host_db_redis_urls(env)  # must not raise
+    assert env == {}
+
+
+def test_scrub_does_not_remove_unrelated_keys() -> None:
+    """Keys unrelated to DB/Redis must survive the scrub."""
+    env: dict[str, str] = {
+        "ALAYA_ANTHROPIC_API_KEY": "sk-test",
+        "ALAYA_ENV": "dev",
+        "PATH": "/usr/bin",
+    }
+    _scrub_host_db_redis_urls(env)
+    assert env == {
+        "ALAYA_ANTHROPIC_API_KEY": "sk-test",
+        "ALAYA_ENV": "dev",
+        "PATH": "/usr/bin",
+    }

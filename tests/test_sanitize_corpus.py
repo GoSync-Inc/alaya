@@ -413,6 +413,8 @@ def test_thread_ts_shifted(tmp_path: Path) -> None:
         "AKIAIOSFODNN7EXAMPLE1234",  # AWS access key
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.TJVA95OrM7",  # JWT
         "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",  # AWS config
+        # Anthropic key format (sk-ant-*) — Fix 2: must be detected
+        "sk-ant-api03-FAKE_FAKE_FAKE_FAKE_FAKE_FAKE_FAKE_FAKE_FAKE_FAKE_FAKE_FAKE_FAKE_FAKE",
     ],
 )
 def test_secret_detection_exits_nonzero(tmp_path: Path, secret_text: str) -> None:
@@ -666,7 +668,39 @@ def test_mapping_out_written(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fix 1: Stale output invalidated on secret-abort
+# Fix 1 (source_id passthrough): output must use allowlist, not dict copy
+# ---------------------------------------------------------------------------
+
+
+def test_source_id_not_in_output(tmp_path: Path) -> None:
+    """source_id must NOT appear in sanitized output — it encodes real channel+timestamp."""
+    lines = [
+        json.dumps(
+            {
+                "id": "ev-001",
+                "raw_text": "Hello world",
+                "ts": "1714000000",
+                "channel_id": "CREAL999",
+                "actor": "UREAL888",
+                "source_id": "C03555GVB_1745608238.000123",  # real production identifier
+                "source_type": "slack",
+            }
+        )
+    ]
+    rc, _, records = _run(lines, tmp_path=tmp_path)
+    assert rc == 0
+    assert len(records) == 1
+    rec = records[0]
+    assert "source_id" not in rec, "source_id must be dropped from sanitized output"
+    assert "source_type" not in rec, "source_type must be dropped from sanitized output"
+    # The opaque UUID id is kept, channel and actor are sanitized
+    assert rec["id"] == "ev-001"
+    assert rec["channel_id"].startswith("C_FAKE_")
+    assert rec["actor"].startswith("U_FAKE_")
+
+
+# ---------------------------------------------------------------------------
+# Fix 1b: Stale output invalidated on secret-abort
 # ---------------------------------------------------------------------------
 
 

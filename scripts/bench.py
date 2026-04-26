@@ -237,6 +237,14 @@ def phase_up() -> int:
     # Raise ingest rate limit so large realistic fixtures (~400-2000 events) don't hit
     # the default 30/min cap. This only affects the ephemeral bench stack, never production.
     compose_env["ALAYA_INGEST_RATE_LIMIT_PER_MINUTE"] = "10000"
+    # Forward ALAYA_ANTHROPIC_API_KEY into the compose environment so containers (api, worker)
+    # can reach the real Anthropic API. Settings uses env_prefix="ALAYA_", so the app reads
+    # ALAYA_ANTHROPIC_API_KEY. The host may also export it as ANTHROPIC_API_KEY (bare form);
+    # accept both. This is required when running bench from a worktree with no .env file.
+    if not compose_env.get("ALAYA_ANTHROPIC_API_KEY"):
+        bare_key = compose_env.get("ANTHROPIC_API_KEY", "")
+        if bare_key:
+            compose_env["ALAYA_ANTHROPIC_API_KEY"] = bare_key
     result = _docker_compose(
         ["up", "-d", "postgres", "redis", "migrations", "api", "worker"],
         timeout=120,
